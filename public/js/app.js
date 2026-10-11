@@ -5,7 +5,7 @@ import { icon } from './core/icons.js';
 import { api } from './core/api.js';
 import {
   showMenu, closeMenus, menusOpen, contextMenu, modal, modalOpen, alertDialog, confirmDialog, promptDialog,
-  choiceDialog, toast, errorToast,
+  choiceDialog, toast, errorToast, hoverKeys,
 } from './core/ui.js';
 import { detectMode, extForLang, LANGUAGES, MODE_ICON, MODE_LABEL, iconForName, OPEN_FILTERS, VIDEO_FILTERS } from './core/filetypes.js';
 import { pickOpen, pickSave, configureFiles, setLastDir, getLastDir } from './core/files.js';
@@ -28,6 +28,8 @@ const EDITORS = {
   storage: () => import('./editors/storage.js').then((m) => m.StorageEditor),
   mail: () => import('./editors/mail.js').then((m) => m.MailEditor),
   tape: () => import('./editors/tape.js').then((m) => m.TapeEditor),
+  scribe: () => import('./editors/scribe.js').then((m) => m.ScribeEditor),
+  paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
 
 const DEFAULT_SETTINGS = {
@@ -300,6 +302,7 @@ class App {
       { label: 'StoragePeek', icon: 'layers', action: () => this.newDocument('storage') },
       { label: 'BoxMail', icon: 'mail', action: () => this.newDocument('mail') },
       { label: 'BoxTape — playlist to MP3s', icon: 'music', action: () => this.newDocument('tape') },
+      { label: 'BoxScribe — image to text (OCR)', icon: 'scan-text', action: () => this.newDocument('scribe') },
       { label: 'Music player', icon: 'music', action: () => this.music.open() },
     ];
   }
@@ -555,7 +558,7 @@ class App {
     const t = this.active;
     document.title = t ? `${t.dirty ? '● ' : ''}${t.title} — Box-DocSpitter` : 'Box-DocSpitter';
     const el = clear($('#doc-title'));
-    const tool = ['klep', 'storage', 'mail', 'tape'].includes(t?.mode) && !t.path;
+    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe'].includes(t?.mode) && !t.path;
     if (t) el.append(...[h('b', {}, t.title), t.path ? h('span', {}, '  ·  ' + dirname(t.path)) : tool ? null : h('span', {}, '  ·  not saved yet')].filter(Boolean));
   }
 
@@ -693,6 +696,8 @@ class App {
       storage: { mode: 'storage', ext: '', base: 'StoragePeek' },
       mail: { mode: 'mail', ext: '', base: 'BoxMail' },
       tape: { mode: 'tape', ext: '', base: 'BoxTape' },
+      scribe: { mode: 'scribe', ext: '', base: 'BoxScribe' },
+      paint: { mode: 'paint', ext: 'png', base: 'Untitled image' },
     }[kind];
     if (!spec) return;
     let images = opts.images || null;
@@ -700,7 +705,7 @@ class App {
       images = await pickOpen({ multi: true, title: 'Choose images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
       if (!images) return;
     }
-    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape') && !opts.another) {
+    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe') && !opts.another) {
       const existing = this.tabs.find((t) => t.mode === spec.mode);
       if (existing) { this.activate(existing); return existing; }
     }
@@ -936,6 +941,7 @@ class App {
       ['html', 'globe', 'HTML page', 'live preview'],
       ['md', 'markdown', 'Markdown', 'live preview'],
       ['sheet', 'sheet', 'Spreadsheet', '.xlsx · .csv'],
+      ['paint', 'brush', 'Image', 'paint · layers · .png'],
     ];
     const inner = h('div', { class: 'home-inner' });
     el.append(h('div', { class: 'home-grid' }), inner);
@@ -971,6 +977,7 @@ class App {
       ['layers', 'StoragePeek', 'what’s eating your drives', () => this.newDocument('storage')],
       ['mail', 'BoxMail', 'gmail + the dumps + claude', () => this.newDocument('mail')],
       ['music', 'BoxTape', 'youtube playlist → mp3s', () => this.newDocument('tape')],
+      ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
     ]) {
       const card = h('button', { class: 'new-card' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), h('span', { class: 'nc-title' }, title), h('span', { class: 'nc-sub' }, sub));
       card.addEventListener('click', fn);
@@ -1113,6 +1120,7 @@ class App {
           h('span', { class: 'fr-icon' }, icon(iconForName(e.name, e.isDir), 'sm')),
           h('span', { class: 'fr-name' }, e.name),
           e.isDir ? null : h('span', { class: 'fr-meta' }, formatBytes(e.size)));
+        if (!e.denied) hoverKeys(row, { nameEl: row.querySelector('.fr-name'), value: () => e.name, selectBase: !e.isDir, commit: (n) => this.explorerRename(e, n), remove: () => this.explorerTrash(e) });
         row.addEventListener('click', () => {
           if (e.isDir) return this.renderExplorer(e.path);
           ex.selected = e.path;
@@ -1146,7 +1154,7 @@ class App {
         { label: 'Open folder', icon: 'folder-open', action: () => this.renderExplorer(e.path) },
         { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
         { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
-        { label: 'Rename…', action: () => this.explorerRename(e) },
+        { label: 'Rename…', shortcut: 'F2', action: () => this.explorerRename(e) },
       ];
     }
     return [
@@ -1155,12 +1163,24 @@ class App {
       { sep: true },
       { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
       { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
-      { label: 'Rename…', action: () => this.explorerRename(e) },
+      { label: 'Rename…', shortcut: 'F2', action: () => this.explorerRename(e) },
+      { label: 'Delete (Recycle Bin)', icon: 'trash', shortcut: 'Del', action: () => this.explorerTrash(e) },
     ];
   }
 
-  async explorerRename(e) {
-    const name = await promptDialog('Rename', 'New name', e.name, { selectBase: !e.isDir });
+  async explorerTrash(e) {
+    if (!(await confirmDialog('Move to Recycle Bin?', `“${e.name}” will be moved to the Recycle Bin. You can restore it from there.`, { okLabel: 'Move to Recycle Bin', danger: true }))) return;
+    try {
+      await api.trash(e.path);
+      const tab = this.tabs.find((t) => t.path && t.path.toLowerCase().startsWith(e.path.toLowerCase()));
+      if (tab) this.closeTab(tab, { force: !tab.dirty });
+      toast(`Moved ${e.name} to the Recycle Bin`, { type: 'ok' });
+      this.renderExplorer(this.explorer.dir);
+    } catch (err) { errorToast(err, 'Delete failed'); }
+  }
+
+  async explorerRename(e, given) {
+    const name = given ?? await promptDialog('Rename', 'New name', e.name, { selectBase: !e.isDir });
     if (!name || name === e.name) return;
     try {
       const to = joinPath(dirname(e.path), name);

@@ -148,6 +148,27 @@ per-track progress. A track that fails is skipped and listed. BoxVidKlep also ha
 video, and a bulk **→ MP3** button, for the same thing. Needs yt-dlp and ffmpeg. Only download music you
 have the right to keep.
 
+**Image (BoxPaint)** Start something → Image. A lightweight Paint.NET-style editor.
+- **Tools:** layers (add, duplicate, delete, reorder, hide, opacity, merge down), brush, eraser,
+  line/rectangle/ellipse (outline, fill or both), paint bucket with tolerance, text, colour picker, rectangle
+  selection, and move layer.
+- **Image menu:** crop to selection, resize, canvas size, flip, rotate. Adjustments: invert, black and white,
+  sepia, brightness, contrast, blur, sharpen.
+- **Mouse and keys:** the left button paints with the primary colour and the right button with the secondary.
+  Shortcuts follow Paint.NET (B, E, L, R, O, F, T, K, S, M, X, D, [ and ]).
+- **Bringing images in:** paste or drop images to add them as layers, or pull them in from the image dump.
+- **Saving:** PNG, JPG or WebP (layers are flattened), or **To dump** to drop it into the image dump.
+
+**BoxScribe** Offline OCR (image to text). Open, drop or paste images, pick them from the image dump, or
+open a scanned PDF (each page is read).
+- **Area select:** drag a box to read just part of an image.
+- **Clean up:** enlarges small images and boosts contrast, and dark-mode screenshots get inverted.
+- **Word boxes:** show what was found, with unsure words in pink.
+- **Output:** Copy, Save as .txt, Open as document, or **To clip**, which saves the text as a ✂ clip snippet
+  named after the file.
+- **Where else:** image dump pictures have **Read text (BoxScribe)** in their Shift+right-click menu.
+- **Privacy:** uses tesseract.js with English data shipped in `node_modules`. Nothing is uploaded.
+
 **Binary files** A fast hex viewer that identifies the file type.
 
 ## Side tabs (right edge)

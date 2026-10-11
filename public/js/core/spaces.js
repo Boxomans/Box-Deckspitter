@@ -3,7 +3,7 @@
 import { h, clear, basename, dirname, joinPath, extOf, debounce, formatBytes } from './dom.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
-import { contextMenu, promptDialog, confirmDialog, toast, errorToast } from './ui.js';
+import { contextMenu, promptDialog, confirmDialog, toast, errorToast, hoverKeys } from './ui.js';
 import { iconForName, MODE_ICON } from './filetypes.js';
 
 const GIT_CLASS = { M: 'mod', ' M': 'mod', MM: 'mod', AM: 'add', A: 'add', '??': 'new', D: 'del', R: 'mod', U: 'conflict', UU: 'conflict' };
@@ -120,13 +120,14 @@ export class Spaces {
       const open = e.isDir && this.expanded.has(e.path);
       const g = this.gitClass(e.path);
       const isActive = this.app.active?.path && this.app.active.path.toLowerCase() === e.path.toLowerCase();
+      const nameEl = h('span', { class: 'fr-name' }, e.name);
       const row = h('button', {
         class: `tree-row ${e.isDir ? 'dir' : ''} ${g ? 'git-' + g : ''} ${isActive ? 'active' : ''} ${e.dot ? 'dot' : ''}`,
         style: { paddingLeft: 8 + depth * 14 + 'px' }, title: e.path,
       },
       h('span', { class: 'tree-chev' }, e.isDir ? icon(open ? 'chevron-down' : 'chevron-right', 'sm') : null),
       h('span', { class: 'fr-icon' }, icon(e.isDir ? (open ? 'folder-open' : 'folder') : iconForName(e.name), 'sm')),
-      h('span', { class: 'fr-name' }, e.name),
+      nameEl,
       g && g !== 'dirty' ? h('span', { class: 'tree-git' }, { mod: 'M', add: 'A', new: 'U', del: 'D', conflict: '!' }[g] || '') : null);
       row.addEventListener('click', async () => {
         if (e.isDir) {
@@ -136,6 +137,7 @@ export class Spaces {
         } else this.app.openPath(e.path);
       });
       row.addEventListener('contextmenu', (ev) => contextMenu(ev, e.isDir ? this.dirMenu(e.path) : this.fileMenu(e)));
+      hoverKeys(row, { nameEl, value: () => e.name, selectBase: !e.isDir, commit: (n) => this.rename(e.path, n), remove: () => this.trash(e.path) });
       container.append(row);
       if (open) await this.renderDir(e.path, container, depth + 1);
     }
@@ -147,9 +149,9 @@ export class Spaces {
       { label: 'Open', icon: 'file', action: () => this.app.openPath(e.path) },
       { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document'], ['text', 'Text'], ['code', 'Code'], ['pdf', 'PDF'], ['sheet', 'Spreadsheet'], ['image', 'Image'], ['video', 'Video'], ['hex', 'Hex']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.app.openPath(e.path, { mode: m }) })) },
       { sep: true },
-      { label: 'Rename…', action: () => this.rename(e.path) },
+      { label: 'Rename…', shortcut: 'F2', action: () => this.rename(e.path) },
       { label: 'Duplicate', icon: 'copy', action: () => this.duplicate(e.path) },
-      { label: 'Delete (Recycle Bin)', icon: 'trash', action: () => this.trash(e.path) },
+      { label: 'Delete (Recycle Bin)', icon: 'trash', shortcut: 'Del', action: () => this.trash(e.path) },
       { sep: true },
       { label: 'Copy path', action: () => navigator.clipboard.writeText(e.path) },
       { label: 'Copy relative path', action: () => navigator.clipboard.writeText(e.path.slice(this.root.length + 1)) },
@@ -196,8 +198,8 @@ export class Spaces {
     try { await api.mkdir(joinPath(dir, name)); this.expanded.add(dir); this.refresh(); } catch (e) { errorToast(e); }
   }
 
-  async rename(p) {
-    const name = await promptDialog('Rename', 'New name', basename(p), { selectBase: true });
+  async rename(p, given) {
+    const name = given ?? await promptDialog('Rename', 'New name', basename(p), { selectBase: true });
     if (!name || name === basename(p)) return;
     const to = joinPath(dirname(p), name);
     try {

@@ -1076,3 +1076,6 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .music-track-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .music-empty { padding: 14px 6px; font-size: 12px; color: var(--text-3); text-align: center; line-height: 1.6; }
 .music-empty a { color: var(--accent); }
+
+/* F2 rename box (floats over the name being renamed) */
+.inline-rename { position: fixed; z-index: 1200; transform: translateY(-50%); height: 24px; padding: 0 6px; font: inherit; font-size: 12px; color: var(--text); background: var(--bg-0); border: 1px solid var(--accent); border-radius: 5px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent), 0 8px 20px rgba(0, 0, 0, 0.4); outline: none; }

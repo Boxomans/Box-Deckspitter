@@ -2,9 +2,9 @@
 // mixer (EQ) running through Web Audio. Keeps playing while the panel is closed; media keys work too.
 
 import { api } from './api.js';
-import { h, clear, formatBytes, stripExt } from './dom.js';
+import { h, clear, formatBytes, stripExt, extOf } from './dom.js';
 import { icon } from './icons.js';
-import { toast, errorToast, contextMenu } from './ui.js';
+import { toast, errorToast, contextMenu, hoverKeys, renameInline } from './ui.js';
 import { pickOpen } from './files.js';
 
 // 10-band graphic EQ (±18 dB) between a low cut (high-pass) and a high cut (low-pass).
@@ -360,21 +360,44 @@ export function createMusic(app) {
       ui.list.append(h('div', { class: 'music-empty' }, 'Drop music files here, use ', h('b', {}, '+'), ', or put files in the ', h('span', { class: 'mono' }, 'audio-dump'), ' folder (', h('a', { href: '#', onclick: (e) => { e.preventDefault(); api.dumpReveal('audio'); } }, 'open it'), ').'));
     }
     state.tracks.forEach((tr, i) => {
-      const row = h('button', { class: `music-track ${i === state.idx ? 'on' : ''}`, title: `${tr.name} · ${formatBytes(tr.size)}` },
+      const nameEl = h('span', { class: 'music-track-name' }, stripExt(tr.name));
+      const row = h('button', { class: `music-track ${i === state.idx ? 'on' : ''}`, title: `${tr.name} · ${formatBytes(tr.size)}\nF2: rename · Del: remove` },
         h('span', { class: 'music-track-n mono' }, i === state.idx && !audio.paused ? '♪' : String(i + 1)),
-        h('span', { class: 'music-track-name' }, stripExt(tr.name)));
+        nameEl);
+      const remove = async () => {
+        if (i === state.idx) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
+        try { await api.dumpRemove(tr.name, 'audio'); toast(`Moved ${tr.name} to audio-dump\\.removed`, { timeout: 3000 }); refresh(); } catch (err) { errorToast(err); }
+      };
+      hoverKeys(row, { nameEl, value: () => stripExt(tr.name), commit: (n) => renameTrack(i, n), remove });
       row.addEventListener('click', () => (i === state.idx ? toggle() : play(i)));
       row.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Play', icon: 'play', action: () => play(i) },
+        { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => renameInline(row) },
         { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('audio', tr.name) },
-        { label: 'Remove from audio dump', icon: 'trash', action: async () => {
-          if (i === state.idx) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
-          try { await api.dumpRemove(tr.name, 'audio'); toast(`Moved ${tr.name} to audio-dump\\.removed`, { timeout: 3000 }); refresh(); } catch (err) { errorToast(err); }
-        } },
+        { label: 'Remove from audio dump', icon: 'trash', shortcut: 'Del', action: remove },
       ]));
       ui.list.append(row);
     });
     updateTime();
+  }
+
+  async function renameTrack(i, name) {
+    const tr = state.tracks[i];
+    const ext = extOf(tr.name);
+    const to = ext && !name.toLowerCase().endsWith('.' + ext.toLowerCase()) ? `${name}.${ext}` : name;
+    const current = i === state.idx && audio.src;
+    const at = audio.currentTime;
+    const wasPlaying = !audio.paused;
+    await api.dumpRename(tr.name, to, 'audio');
+    tr.name = to; // so refresh() keeps this song selected
+    await refresh();
+    const t = state.tracks[state.idx];
+    if (current && t) {
+      // the old stream URL points at the old file name, so pick up from the same spot under the new one
+      audio.src = `/api/stream?token=${encodeURIComponent(api.token)}&path=${encodeURIComponent(t.path)}`;
+      audio.addEventListener('loadedmetadata', () => { audio.currentTime = at; if (wasPlaying) audio.play().catch(() => {}); }, { once: true });
+      app.saveSettings({ musicLast: t.name });
+    }
   }
 
   function position() {

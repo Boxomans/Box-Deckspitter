@@ -19,6 +19,7 @@
     "@fontsource/ibm-plex-mono": "5.2.5",
     "@fontsource/inter": "5.2.5",
     "@pdf-lib/fontkit": "1.1.1",
+    "@tesseract.js-data/eng": "1.0.0",
     "docx": "9.5.0",
     "electron": "44.4.5",
     "imapflow": "2.1.0",
@@ -29,6 +30,7 @@
     "nodemailer": "10.0.11",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "4.10.38",
+    "tesseract.js": "7.0.0",
     "xlsx": "0.18.5"
   }
 }

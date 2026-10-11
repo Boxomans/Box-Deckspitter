@@ -476,3 +476,79 @@ export function buildRegex(query, { caseSensitive, wholeWord, regex } = {}) {
 }
 
 export { clear };
+
+// ===================================================================== hover keys
+// Hover a name and press F2 to rename it in place, or Delete to remove it (dump items, layers, songs, files…).
+
+const hoverTargets = new WeakMap();
+const pointer = { x: -1, y: -1 };
+let inlineEditing = false;
+
+/** el: the hover area. o.nameEl + o.value() + o.commit(newName) enable F2; o.remove() enables Delete. */
+export function hoverKeys(el, o) {
+  hoverTargets.set(el, o);
+  return el;
+}
+
+/** Start the F2 rename for a registered element (also used by "Rename…" menu items). */
+export function renameInline(el) {
+  const o = hoverTargets.get(el);
+  if (!o?.nameEl || inlineEditing) return false;
+  const value = o.value();
+  editInline(o.nameEl, value, { selectBase: o.selectBase }).then(async (v) => {
+    if (v != null && v !== value) { try { await o.commit(v); } catch (e) { errorToast(e, 'Rename failed'); } }
+  });
+  return true;
+}
+
+/** Floating text box over nameEl; resolves to the new text, or null when cancelled. */
+export function editInline(nameEl, value, { selectBase = false } = {}) {
+  return new Promise((resolve) => {
+    const r = nameEl.getBoundingClientRect();
+    const input = h('input', { class: 'inline-rename', value, spellcheck: 'false' });
+    Object.assign(input.style, { left: r.left - 3 + 'px', top: r.top + r.height / 2 + 'px', width: Math.max(r.width + 6, 140) + 'px' });
+    document.body.append(input);
+    inlineEditing = true;
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      inlineEditing = false;
+      input.remove();
+      window.removeEventListener('resize', cancel);
+      resolve(v == null ? null : v.trim() || null);
+    };
+    const cancel = () => finish(null);
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(input.value); } else if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+    });
+    input.addEventListener('blur', () => finish(input.value));
+    window.addEventListener('resize', cancel);
+    input.focus();
+    const dot = value.lastIndexOf('.');
+    if (selectBase && dot > 0) input.setSelectionRange(0, dot); else input.select();
+  });
+}
+
+document.addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; }, { capture: true, passive: true });
+document.documentElement.addEventListener('mouseleave', () => { pointer.x = -1; pointer.y = -1; });
+document.addEventListener('keydown', (e) => {
+  if ((e.key !== 'F2' && e.key !== 'Delete') || e.repeat || inlineEditing || e.ctrlKey || e.altKey || e.metaKey || pointer.x < 0) return;
+  if (menusOpen() || document.querySelector('.modal-backdrop')) return;
+  let el = document.elementFromPoint(pointer.x, pointer.y);
+  while (el && !hoverTargets.has(el)) el = el.parentElement;
+  if (!el) return;
+  const o = hoverTargets.get(el);
+  if (e.key === 'F2') {
+    if (!o.nameEl) return;
+    e.preventDefault(); e.stopPropagation();
+    renameInline(el);
+  } else {
+    // don't let Delete meant for a text box remove whatever the mouse happens to rest on
+    const t = document.activeElement;
+    if (!o.remove || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.closest?.('.cm-editor')))) return;
+    e.preventDefault(); e.stopPropagation();
+    o.remove();
+  }
+}, true);

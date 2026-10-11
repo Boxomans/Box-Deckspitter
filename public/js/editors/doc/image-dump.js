@@ -6,7 +6,7 @@
 import { h, clear, formatBytes, timeAgo, blobToDataURL, basename, extOf, vendor } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
 import { api } from '../../core/api.js';
-import { contextMenu, toast, errorToast, promptDialog } from '../../core/ui.js';
+import { contextMenu, toast, errorToast, promptDialog, hoverKeys, renameInline } from '../../core/ui.js';
 import { pickOpen } from '../../core/files.js';
 
 export const DUMP_MIME = 'text/bds-dump';
@@ -177,7 +177,9 @@ export class ImageDump {
       const tip = isDoc
         ? `${it.name}\n${formatBytes(it.size)} · added ${timeAgo(it.mtime)}\nClick: open in a new tab · Right-click: copy file · Shift+right-click: more`
         : `${it.name}\n${formatBytes(it.size)} · added ${timeAgo(it.mtime)}\nClick: insert · Right-click: copy · Shift+right-click: more · Drag: into the page or out of the app`;
-      const card = h('div', { class: 'dump-item', draggable: 'true', title: tip }, thumb, h('div', { class: 'dump-name' }, it.name));
+      const nameEl = h('div', { class: 'dump-name' }, it.name);
+      const card = h('div', { class: 'dump-item', draggable: 'true', title: tip + '\nF2: rename · Del: remove' }, thumb, nameEl);
+      hoverKeys(card, { nameEl, value: () => it.name, selectBase: true, commit: (n) => this.rename(it, n), remove: () => this.remove(it) });
       card.addEventListener('click', () => (isDoc ? this.openPdf(it) : this.insert(it)));
       card.addEventListener('dragstart', (e) => this.dragOut(e, it, img));
       card.addEventListener('contextmenu', (e) => {
@@ -195,10 +197,10 @@ export class ImageDump {
     const common = [
       { label: 'Copy as file', icon: 'copy', action: () => this.copyFile(it) },
       { label: 'Copy path', icon: 'link', action: () => { navigator.clipboard.writeText(it.path); toast('Path copied', { timeout: 1200 }); } },
-      { label: 'Rename…', icon: 'edit', action: () => this.rename(it) },
+      { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { const c = [...this.grid.children].find((x) => x.querySelector('.dump-name')?.textContent === it.name); if (!c || !renameInline(c)) this.rename(it); } },
       { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(this.kind, it.name) },
       { sep: true },
-      { label: 'Remove from dump', icon: 'trash', action: () => this.remove(it) },
+      { label: 'Remove from dump', icon: 'trash', shortcut: 'Del', action: () => this.remove(it) },
     ];
     if (this.kind === 'doc') {
       const pdf = /\.pdf$/i.test(it.name);
@@ -214,6 +216,8 @@ export class ImageDump {
       { label: 'Insert at cursor', icon: 'image-plus', action: () => this.insert(it) },
       { label: 'Copy image', icon: 'copy', action: () => this.copy(it) },
       { label: 'Open in image editor', icon: 'image', action: () => this.openInEditor(it) },
+      { label: 'Edit in BoxPaint', icon: 'brush', action: async () => this.app.openBytes(it.name, new Uint8Array(await (await fetch(it.url)).arrayBuffer()), { mode: 'paint' }) },
+      { label: 'Read text (BoxScribe)', icon: 'scan-text', action: async () => { const { scribeBytes } = await import('../scribe.js'); scribeBytes(this.app, it.name, new Uint8Array(await (await fetch(it.url)).arrayBuffer())); } },
       { sep: true },
       ...common,
     ];
@@ -295,8 +299,8 @@ export class ImageDump {
     } catch (e) { errorToast(e, 'Copy failed'); }
   }
 
-  async rename(it) {
-    const name = await promptDialog(`Rename ${this.cfg.noun}`, 'New name', it.name, { selectBase: true });
+  async rename(it, given) {
+    const name = given ?? await promptDialog(`Rename ${this.cfg.noun}`, 'New name', it.name, { selectBase: true });
     if (!name || name === it.name) return;
     const to = extOf(name) ? name : `${name}.${extOf(it.name)}`;
     try { await api.dumpRename(it.name, to, this.kind); this.refresh(true); } catch (e) { errorToast(e); }

@@ -61,6 +61,7 @@ let PORT = BASE_PORT;
 const VENDOR = new Set([
   'pdfjs-dist', 'pdf-lib', '@pdf-lib/fontkit', 'monaco-editor', 'docx', 'jszip',
   'marked', 'xlsx', '@fontsource/inter', '@fontsource/ibm-plex-mono', '@ffmpeg/ffmpeg', '@ffmpeg/util', '@ffmpeg/core',
+  'tesseract.js', 'tesseract.js-core', '@tesseract.js-data/eng',
 ]);
 
 const MIME = {
