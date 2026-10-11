@@ -32,6 +32,14 @@ shows up in "Open with". Windows doesn't let apps make themselves the default, s
 Settings → Default apps on Box-DocSpitter's page, where you click **Set default**. **Remove** undoes all of
 it. If you move the folder, choose the file types again to update the paths.
 
+## Credits
+
+- UI sound effects are from [Pixabay](https://pixabay.com), used under the Pixabay Content License. They
+  aren't covered by the code's license. See `public/assets/sounds/SOUNDS-LICENSE.txt`.
+- Built on pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, Electron, nodemailer,
+  ImapFlow, mailparser and the Anthropic SDK (installed by npm under their own licenses). It also uses
+  yt-dlp and ffmpeg if you install them.
+
 ## Getting it from GitHub
 
 The repo holds only the source (about 2 MB). The libraries and the Electron runtime come from npm:
