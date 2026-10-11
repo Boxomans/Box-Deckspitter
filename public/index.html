@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Box-DocSpitter</title>
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/vendor/@fontsource/inter/400.css">
+  <link rel="stylesheet" href="/vendor/@fontsource/inter/500.css">
+  <link rel="stylesheet" href="/vendor/@fontsource/inter/600.css">
+  <link rel="stylesheet" href="/vendor/@fontsource/ibm-plex-mono/400.css">
+  <link rel="stylesheet" href="/vendor/@fontsource/ibm-plex-mono/500.css">
+  <link rel="stylesheet" href="/vendor/@fontsource/ibm-plex-mono/600.css">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/editors.css">
+  <style id="print-page-style"></style>
+  <script>
+    window.BDS = { token: '%%TOKEN%%', version: '%%VERSION%%' };
+    try { var t = localStorage.getItem('bds-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    if (window.bdsShell) document.documentElement.classList.add('in-shell');
+  </script>
+</head>
+<body>
+  <div id="app">
+    <header id="titlebar">
+      <div class="brand" title="Box-DocSpitter">
+        <img src="/assets/icon.svg" alt="" class="brand-icon">
+        <span class="brand-name">BOX<span class="brand-slash">//</span>DOCSPITTER</span>
+      </div>
+      <nav id="menubar" aria-label="Main menu"></nav>
+      <div id="doc-title" class="titlebar-doc"></div>
+      <div class="titlebar-actions">
+        <button class="icon-btn" id="btn-music" title="Music player (audio-dump)"></button>
+        <button class="icon-btn" id="btn-sound" title="Sounds on / off"></button>
+        <button class="icon-btn" id="btn-theme" title="Toggle light / dark"></button>
+        <button class="icon-btn" id="btn-shortcuts" title="Keyboard shortcuts"></button>
+      </div>
+    </header>
+    <div id="tabbar">
+      <button class="icon-btn tab-home" id="btn-home" title="Home"></button>
+      <div id="tabs" role="tablist"></div>
+      <button class="icon-btn" id="btn-new-tab" title="New document (Alt+N)"></button>
+    </div>
+    <div id="toolbar-host"></div>
+    <main id="main">
+      <aside id="rail">
+        <button class="rail-btn" data-panel="explorer" title="Files"></button>
+        <button class="rail-btn" data-panel="spaces" title="BoxSpaces — folder workspace"></button>
+        <button class="rail-btn" data-panel="recent" title="Recent"></button>
+        <div class="rail-spacer"></div>
+        <button class="rail-btn" data-panel="settings" title="Settings"></button>
+      </aside>
+      <section id="sidepanel" hidden></section>
+      <section id="workspace"></section>
+      <section id="rightpanel" hidden></section>
+      <aside id="rightrail">
+        <button class="rrail-tab" data-rpanel="chars" title="Special characters &amp; Alt codes"><span class="rrail-glyph">Ω</span><span class="rrail-label">chars</span></button>
+        <button class="rrail-tab" data-rpanel="ai" title="Ask Claude (uses your Anthropic API key)"><span class="rrail-glyph">✦</span><span class="rrail-label">claude</span></button>
+        <button class="rrail-tab" data-rpanel="clip" title="Clipboard history &amp; saved snippets"><span class="rrail-glyph">✂</span><span class="rrail-label">clip</span></button>
+      </aside>
+    </main>
+    <footer id="statusbar">
+      <div id="status-left"></div>
+      <div id="status-right"></div>
+    </footer>
+  </div>
+  <div id="overlay-root"></div>
+  <input type="file" id="hidden-file-input" hidden>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

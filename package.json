@@ -1,0 +1,34 @@
+{
+  "name": "box-docspitter",
+  "version": "1.0.0",
+  "description": "Box-DocSpitter — a self-hosted document, PDF, text and code editor that runs entirely on your PC.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "app": "electron electron/main.js",
+    "browser": "node server.js --open"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
+    "@cantoo/pdf-lib": "2.11.1",
+    "@ffmpeg/core": "0.12.10",
+    "@ffmpeg/ffmpeg": "0.12.15",
+    "@ffmpeg/util": "0.12.2",
+    "@fontsource/ibm-plex-mono": "5.2.5",
+    "@fontsource/inter": "5.2.5",
+    "@pdf-lib/fontkit": "1.1.1",
+    "docx": "9.5.0",
+    "electron": "44.4.5",
+    "imapflow": "2.1.0",
+    "jszip": "3.10.1",
+    "mailparser": "3.9.29",
+    "marked": "15.0.12",
+    "monaco-editor": "0.52.2",
+    "nodemailer": "10.0.11",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "4.10.38",
+    "xlsx": "0.18.5"
+  }
+}

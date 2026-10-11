@@ -1,0 +1,22 @@
+# Downloaded libraries + the Electron runtime (~670 MB). `npm install` brings them back.
+node_modules/
+
+# Personal data: settings, recent files, drafts, version history, API key, Gmail app passwords,
+# clipboard history, window cache. Never commit this folder.
+data/
+
+# Your files in the dumps (the app recreates the empty folders on start).
+image-dump/
+doc-dump/
+audio-dump/
+
+# Machine-specific shortcuts and tools
+*.lnk
+Box-DocSpitter.exe
+.claude/
+
+# OS / editor clutter
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.log
