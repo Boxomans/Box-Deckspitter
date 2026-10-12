@@ -953,7 +953,7 @@ class App {
         h('img', { src: '/assets/icon.svg', alt: '' }),
         h('div', {},
           h('h1', { class: 'home-title' }, h('span', { class: 'g' }, 'BOX//DOCSPITTER'), h('span', { class: 'cursor' })),
-          h('p', { class: 'home-sub' }, `> local docs, pdfs, text & code — nothing leaves this machine  ·  ${this.info?.user || ''}@127.0.0.1`))),
+          h('p', { class: 'home-sub' }, `> local docs, pdfs, video, text & code — (almost) nothing leaves this machine  ·  ${this.info?.user || ''}@127.0.0.1`))),
     );
 
     const draftsHost = h('div');
