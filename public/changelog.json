@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.4",
+    "date": "2026-10-11",
+    "notes": [
+      "BoxTape queues downloads: start another playlist while one is downloading and it waits its turn instead of replacing the first. Every download keeps its own progress card, and queued ones can be removed before they start."
+    ]
+  },
+  {
     "version": "1.0.3",
     "date": "2026-10-11",
     "notes": [

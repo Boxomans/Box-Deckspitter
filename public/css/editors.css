@@ -739,3 +739,9 @@ audio.vid-media { display: none; }
 @media (max-width: 760px) { .diff-slots { grid-template-columns: 1fr; } .diff-swap { justify-self: center; } .diff-images { grid-template-columns: 1fr; } }
 
 .tape-have { margin-left: 8px; font: 600 9.5px var(--mono, monospace); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); border-radius: 4px; padding: 1px 5px; vertical-align: 1px; }
+
+/* BoxTape queue: each download is its own card; queued ones are dimmed until their turn */
+.tape-progress { display: flex; flex-direction: column; gap: 10px; }
+.tape-prog.queued { opacity: 0.7; border-style: dashed; }
+.tape-prog.queued .tape-prog-rows { max-height: 92px; }
+.tape-prog.queued .vid-progress { display: none; }

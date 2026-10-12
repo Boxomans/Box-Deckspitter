@@ -143,18 +143,63 @@ export class TapeEditor extends BaseEditor {
     update();
   }
 
-  async download() {
+  /** Queue the ticked tracks as one batch. Batches run one after another; each keeps its own progress card. */
+  download() {
     const picked = this.boxes.filter((b) => b.checked).map((b) => b._item);
     if (!picked.length) return;
-    const bar = h('div', { class: 'vid-progress' }, h('div', { class: 'vid-progress-bar' }));
-    const head = h('div', { class: 'tape-prog-head' }, h('b', {}, `Saving ${picked.length} track${picked.length > 1 ? 's' : ''} to the audio dump`), h('div', { class: 'grow' }));
-    const counter = h('span', { class: 'mono faint', style: { fontSize: '11px' } });
-    head.append(counter);
+    const name = this.title ? `“${this.title}”` : `${picked.length} track${picked.length > 1 ? 's' : ''}`;
+    const batch = { picked, name, state: 'queued', jobId: null };
+    batch.titleEl = h('b', {});
+    batch.counter = h('span', { class: 'mono faint', style: { fontSize: '11px' } });
+    batch.actions = h('span', { class: 'row', style: { gap: '6px' } });
+    batch.bar = h('div', { class: 'vid-progress' }, h('div', { class: 'vid-progress-bar' }));
+    batch.rows = h('div', { class: 'tape-prog-rows' });
+    batch.card = h('div', { class: 'tape-prog queued' }, h('div', { class: 'tape-prog-head' }, batch.titleEl, h('div', { class: 'grow' }), batch.counter, batch.actions), batch.bar, batch.rows);
+    this.queue = this.queue || [];
+    this.queue.push(batch);
+    this.progress.append(batch.card);
+    this.paintQueued(batch);
+    batch.card.scrollIntoView({ block: 'nearest' });
+    if (this.running) toast(`Queued ${name} — it starts when the current download finishes`, { timeout: 2600 });
+    // untick what was just queued, so the next playlist (or the rest of this one) can be picked straight away
+    for (const b of this.boxes) if (b.checked) { b.checked = false; b.dispatchEvent(new Event('change')); }
+    this.pump();
+  }
+
+  paintQueued(batch) {
+    const ahead = this.queue.filter((x) => x.state === 'queued').indexOf(batch);
+    batch.titleEl.textContent = `Queued: ${batch.name} · ${batch.picked.length} track${batch.picked.length > 1 ? 's' : ''}`;
+    batch.counter.textContent = this.running ? (ahead > 0 ? `${ahead} ahead of it` : 'next up') : '';
+    clear(batch.actions).append(h('button', { class: 'btn sm ghost', onclick: () => {
+      batch.state = 'removed';
+      this.queue = this.queue.filter((x) => x !== batch);
+      batch.card.remove();
+      this.queue.filter((x) => x.state === 'queued').forEach((x) => this.paintQueued(x));
+    } }, 'Remove'));
+    clear(batch.rows).append(...batch.picked.slice(0, 200).map((it) => h('div', { class: 'tape-prog-row waiting' },
+      h('span', { class: 'tape-state' }, '·'), h('span', { class: 'tape-title' }, it.label || it.title || it.url), h('span', { class: 'mono faint' }, 'queued'))));
+  }
+
+  async pump() {
+    if (this.running) return;
+    const next = (this.queue || []).find((x) => x.state === 'queued');
+    if (!next) return;
+    this.running = next;
+    try { await this.runBatch(next); } finally {
+      this.running = null;
+      this.queue = this.queue.filter((x) => x !== next);
+      this.queue.filter((x) => x.state === 'queued').forEach((x) => this.paintQueued(x));
+      this.pump();
+    }
+  }
+
+  async runBatch(batch) {
+    const { picked, bar, rows, counter } = batch;
+    batch.state = 'running';
+    batch.card.classList.remove('queued');
+    batch.titleEl.textContent = `Saving ${batch.name} to the audio dump`;
     const cancel = h('button', { class: 'btn sm ghost' }, 'Cancel');
-    head.append(cancel);
-    const rows = h('div', { class: 'tape-prog-rows' });
-    clear(this.progress).append(h('div', { class: 'tape-prog' }, head, bar, rows));
-    this.progress.scrollIntoView({ block: 'nearest' });
+    clear(batch.actions).append(cancel);
     try {
       const parallel = Number(this.lanes?.value) || this.app.settings.tapeParallel || 3;
       const { id } = await post('/api/audio/grab', {
@@ -163,6 +208,7 @@ export class TapeEditor extends BaseEditor {
           : { url: it.url, type: 'ytdlp', title: it.title })),
         parallel,
       });
+      batch.jobId = id;
       cancel.onclick = () => post('/api/job/cancel', { id });
       let refreshed = 0;
       for (;;) {
@@ -178,15 +224,24 @@ export class TapeEditor extends BaseEditor {
         // songs appear in the player as they finish
         if ((j.done || 0) > refreshed) { refreshed = j.done; this.app.music?.refresh(); }
         if (j.status !== 'running') {
-          cancel.remove();
           const first = (j.tracks || []).find((t) => t.status === 'done');
-          head.firstChild.textContent = j.status === 'done' ? `Done — ${j.done} saved${j.failed ? `, ${j.failed} failed` : ''}` : j.status === 'cancelled' ? `Stopped — ${j.done || 0} saved` : `Failed — ${j.error || ''}`;
-          if (first) head.append(h('button', { class: 'btn sm primary', onclick: () => this.app.music?.playByName(first.name) }, icon('play', 'sm'), 'Play'), h('button', { class: 'btn sm', onclick: () => this.app.music?.open() }, icon('music', 'sm'), 'Open player'));
-          if (j.status === 'done') toast(`BoxTape: ${j.done} song${j.done === 1 ? '' : 's'} in the audio dump`, { type: j.failed ? 'warn' : 'ok' });
+          batch.titleEl.textContent = j.status === 'done' ? `Done: ${batch.name} — ${j.done} saved${j.failed ? `, ${j.failed} failed` : ''}`
+            : j.status === 'cancelled' ? `Stopped: ${batch.name} — ${j.done || 0} saved` : `Failed: ${batch.name} — ${j.error || ''}`;
+          clear(batch.actions).append(
+            first ? h('button', { class: 'btn sm primary', onclick: () => this.app.music?.playByName(first.name) }, icon('play', 'sm'), 'Play') : null,
+            first ? h('button', { class: 'btn sm', onclick: () => this.app.music?.open() }, icon('music', 'sm'), 'Open player') : null,
+            h('button', { class: 'icon-btn', 'data-tip': 'Clear this from the list', onclick: () => batch.card.remove() }, icon('x', 'sm')));
+          batch.card.classList.add('finished');
+          if (j.status === 'done') toast(`BoxTape: ${j.done} song${j.done === 1 ? '' : 's'} from ${batch.name} in the audio dump`, { type: j.failed ? 'warn' : 'ok' });
           break;
         }
       }
-    } catch (e) { errorToast(e, 'BoxTape'); }
+    } catch (e) {
+      batch.titleEl.textContent = `Failed: ${batch.name}`;
+      clear(batch.actions).append(h('button', { class: 'icon-btn', onclick: () => batch.card.remove() }, icon('x', 'sm')));
+      errorToast(e, 'BoxTape');
+    }
+    batch.state = 'finished';
   }
 
   status() { return { left: [{ text: 'BoxTape', icon: 'music' }, { text: 'saves to audio-dump' }], right: [{ text: this.tools?.ytdlp && this.tools?.ffmpeg ? 'yt-dlp + ffmpeg ready' : 'needs yt-dlp + ffmpeg' }] }; }
