@@ -9,6 +9,9 @@ import { api } from '../core/api.js';
 
 let monacoPromise = null;
 
+/** The Monaco colour theme that goes with the app theme. */
+export const monacoTheme = (t) => (t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : 'bds-dark');
+
 export function loadMonaco() {
   if (monacoPromise) return monacoPromise;
   monacoPromise = new Promise((resolve, reject) => {
@@ -34,7 +37,7 @@ function defineThemes(monaco) {
   const shared = [
     { token: 'comment', fontStyle: 'italic' },
   ];
-  monaco.editor.defineTheme('bds-dark', {
+  const darkDef = {
     base: 'vs-dark', inherit: true,
     rules: [
       ...shared,
@@ -89,6 +92,17 @@ function defineThemes(monaco) {
       'scrollbarSlider.hoverBackground': '#3d3358aa',
       'editorGutter.background': '#0d0a13',
       'editorOverviewRuler.border': '#00000000',
+    },
+  };
+  monaco.editor.defineTheme('bds-dark', darkDef);
+  // PB&J: the dark syntax colours on a plum background
+  monaco.editor.defineTheme('bds-pbj', {
+    ...darkDef,
+    colors: {
+      ...darkDef.colors,
+      'editor.background': '#2a1a2b', 'editorGutter.background': '#2a1a2b', 'minimap.background': '#2a1a2b',
+      'editor.lineHighlightBackground': '#ffffff07', 'editorLineNumber.foreground': '#6e4f6b', 'editorLineNumber.activeForeground': '#f0b232',
+      'editorCursor.foreground': '#f0b232', 'editor.selectionBackground': '#5865f255', 'editorWidget.background': '#391f38', 'editorWidget.border': '#5f3a59',
     },
   });
   monaco.editor.defineTheme('bds-light', {
@@ -146,7 +160,7 @@ export class CodeEditor extends BaseEditor {
     this.model.setEOL(this.eol === '\r\n' ? monaco.editor.EndOfLineSequence.CRLF : monaco.editor.EndOfLineSequence.LF);
     this.ed = monaco.editor.create(this.editorHost, {
       model: this.model,
-      theme: this.app.settings.theme === 'light' ? 'bds-light' : 'bds-dark',
+      theme: monacoTheme(this.app.settings.theme),
       automaticLayout: true,
       fontFamily: "'IBM Plex Mono', 'Cascadia Code', Consolas, monospace",
       fontSize: this.fontSize,
@@ -516,7 +530,7 @@ export class CodeEditor extends BaseEditor {
   onShow() { setTimeout(() => this.ed?.layout(), 0); }
 
   onThemeChange(theme) {
-    this.monaco.editor.setTheme(this.app.settings.theme === 'light' ? 'bds-light' : 'bds-dark');
+    this.monaco.editor.setTheme(monacoTheme(this.app.settings.theme));
     if (this.frame?.dataset.kind === 'md') { this.frame = null; this.updatePreview(); }
   }
 

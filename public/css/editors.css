@@ -15,7 +15,7 @@ body.focus-mode #titlebar, body.focus-mode #tabbar, body.focus-mode #statusbar, 
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
-[data-theme="dark"] .checker {
+[data-theme="dark"] .checker, [data-theme="pbj"] .checker {
   background-color: #1a1622;
   background-image:
     linear-gradient(45deg, #221d2c 25%, transparent 25%), linear-gradient(-45deg, #221d2c 25%, transparent 25%),

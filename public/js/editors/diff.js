@@ -9,7 +9,7 @@ import { toast, errorToast, showMenu, modal } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { pickOpen } from '../core/files.js';
 import { langForName } from '../core/filetypes.js';
-import { loadMonaco } from './code.js';
+import { loadMonaco, monacoTheme } from './code.js';
 import { DUMP_MIME } from './doc/image-dump.js';
 
 const IMG_RE = /\.(png|jpe?g|jfif|webp|bmp|gif)$/i;
@@ -311,7 +311,7 @@ export class DiffEditor extends BaseEditor {
     const right = monaco.editor.createModel(txt(b), lang);
     if (!this.diff) {
       this.diff = monaco.editor.createDiffEditor(this.host, {
-        theme: this.app.settings.theme === 'light' ? 'bds-light' : 'bds-dark',
+        theme: monacoTheme(this.app.settings.theme),
         automaticLayout: true,
         readOnly: true,
         originalEditable: false,
@@ -398,7 +398,7 @@ export class DiffEditor extends BaseEditor {
 
   handlesKey(e) { return !!this.diff && this.root.contains(document.activeElement); }
 
-  onThemeChange() { this.monaco?.editor.setTheme(this.app.settings.theme === 'light' ? 'bds-light' : 'bds-dark'); }
+  onThemeChange() { this.monaco?.editor.setTheme(monacoTheme(this.app.settings.theme)); }
 
   destroy() {
     const m = this.diff?.getModel();

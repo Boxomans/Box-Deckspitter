@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.7",
+    "date": "2026-10-11",
+    "notes": [
+      "New PB&J theme (after Discord's PB&J gradient): grape jelly fading into warm peanut butter, with the gradient showing through the whole window. Pick it in Settings → Appearance, View, or click the theme button in the top bar to cycle Dark → Light → PB&J.",
+      "Copies of the app in different folders or drives no longer get mixed up by Windows: pinning one to the taskbar now always opens that copy. (Re-pin it once after updating.)"
+    ]
+  },
+  {
     "version": "1.0.6",
     "date": "2026-10-11",
     "notes": [
@@ -38,7 +46,9 @@
   {
     "version": "1.0.2",
     "date": "2026-10-11",
-    "notes": ["New home screen tagline."]
+    "notes": [
+      "New home screen tagline."
+    ]
   },
   {
     "version": "1.0.1",

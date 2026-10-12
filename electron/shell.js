@@ -9,7 +9,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const ICON = path.join(ROOT, 'public', 'assets', 'icon.ico');
-const BG = { dark: '#0b0910', light: '#f6f3fb' };
+const BG = { dark: '#0b0910', light: '#f6f3fb', pbj: '#3a1e3e' };
 
 app.setName('Box-DocSpitter');
 // Keep Electron's own cache and window state inside the app folder (portable: nothing left in %APPDATA%).
@@ -21,7 +21,10 @@ if (fs.existsSync(RESET_FLAG)) {
   try { if (!fs.existsSync(USER_DATA)) fs.unlinkSync(RESET_FLAG); } catch { /* ignore */ }
 }
 app.setPath('userData', USER_DATA);
-app.setAppUserModelId('BoxDocSpitter.App');
+// Each copy of the app (another folder, a USB stick…) gets its own Windows app id. With one shared id,
+// Windows treated every copy as the same app, so pinning one to the taskbar could launch another.
+const APP_ID = 'BoxDocSpitter.App.' + require('crypto').createHash('sha1').update(path.resolve(ROOT).toLowerCase()).digest('hex').slice(0, 10);
+app.setAppUserModelId(APP_ID);
 Menu.setApplicationMenu(null);
 // UI sounds (hover etc.) should work before the first click; this is our own app window, not a website.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -144,7 +147,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     if (process.platform === 'win32') {
       try {
         win.setAppDetails({
-          appId: 'BoxDocSpitter.App',
+          appId: APP_ID,
           appIconPath: ICON,
           appIconIndex: 0,
           relaunchCommand: `"${process.execPath}" "${path.join(__dirname, 'main.js')}"`,
@@ -228,7 +231,16 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   // Desktop + Start menu shortcuts carrying the app id, so a pinned shortcut and the open window are one icon.
   ipcMain.handle('bds:shortcuts', () => {
     const made = [];
-    const targets = [path.join(app.getPath('desktop'), 'Box-DocSpitter.lnk'), path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Box-DocSpitter.lnk')];
+    const dirs = [app.getPath('desktop'), path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')];
+    // a shortcut that already belongs to another copy of the app is left alone: this copy gets its own name
+    const mine = (lnk) => { try { const l = shell.readShortcutLink(lnk); return path.resolve(l.cwd || path.dirname(l.target)).toLowerCase() === path.resolve(ROOT).toLowerCase() || (l.args || '').toLowerCase().includes(path.resolve(ROOT).toLowerCase()); } catch { return true; } };
+    // "Box-DocSpitter (E drive)" for a copy on another drive, else "Box-DocSpitter (<parent folder>)"
+    const drive = path.parse(path.resolve(ROOT)).root.slice(0, 2).toUpperCase();
+    const where = drive !== 'C:' && /^[A-Z]:$/.test(drive) ? `${drive[0]} drive` : path.basename(path.dirname(path.resolve(ROOT))) || drive;
+    const targets = dirs.map((d) => {
+      const plain = path.join(d, 'Box-DocSpitter.lnk');
+      return !fs.existsSync(plain) || mine(plain) ? plain : path.join(d, `Box-DocSpitter (${where.replace(/[\\/:*?"<>|]/g, '')}).lnk`);
+    });
     for (const lnk of targets) {
       const ok = shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', {
         target: process.execPath,
@@ -236,7 +248,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
         cwd: ROOT,
         icon: ICON,
         iconIndex: 0,
-        appUserModelId: 'BoxDocSpitter.App',
+        appUserModelId: APP_ID,
         description: 'Box-DocSpitter - local docs, PDFs, forms, text and code',
       });
       if (ok) made.push(lnk);

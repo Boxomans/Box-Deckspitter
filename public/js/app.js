@@ -141,6 +141,8 @@ function flingable(el, zone, onMove) {
   });
 }
 
+const THEME_NEXT = { dark: 'light', light: 'pbj', pbj: 'dark' };
+const THEME_NAME = { dark: 'Dark', light: 'Light', pbj: 'PB&J' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, text & code — (almost) nothing leaves this machine';
 
@@ -211,7 +213,8 @@ class App {
     $('#btn-home').addEventListener('click', () => this.activate(null));
     $('#btn-new-tab').append(icon('plus'));
     $('#btn-new-tab').addEventListener('click', (e) => showMenu(this.newMenuItems(), { anchor: e.currentTarget }));
-    $('#btn-theme').addEventListener('click', () => this.applyTheme(this.settings.theme === 'dark' ? 'light' : 'dark'));
+    // the top-bar button cycles Dark → Light → PB&J
+    $('#btn-theme').addEventListener('click', () => this.applyTheme(THEME_NEXT[this.settings.theme] || 'dark'));
     $('#btn-sound').addEventListener('click', () => { this.sounds.toggle(); this.syncSoundButton(); });
     this.syncSoundButton();
     this.wireSoundVolume();
@@ -351,12 +354,13 @@ class App {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem('bds-theme', theme); } catch { /* ignore */ }
     const b = $('#btn-theme');
-    clear(b).append(icon(theme === 'dark' ? 'sun' : 'moon'));
+    clear(b).append(icon(theme === 'dark' ? 'sun' : theme === 'light' ? 'star' : 'moon'));
+    b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[THEME_NEXT[theme] || 'dark']}`;
     if (persist) this.saveSettings({ theme });
     for (const t of this.tabs) t.editor?.onThemeChange?.(theme);
     if (window.bdsShell) {
       const cs = getComputedStyle(document.documentElement);
-      window.bdsShell.setTitlebar(cs.getPropertyValue('--bg-1').trim(), cs.getPropertyValue('--text-2').trim(), theme).catch(() => {});
+      window.bdsShell.setTitlebar((cs.getPropertyValue('--titlebar-solid') || cs.getPropertyValue('--bg-1')).trim(), cs.getPropertyValue('--text-2').trim(), theme).catch(() => {});
     }
   }
 
@@ -520,6 +524,7 @@ class App {
       { sep: true },
       { label: 'Dark theme', icon: 'moon', checked: this.settings.theme === 'dark', action: () => this.applyTheme('dark') },
       { label: 'Light theme', icon: 'sun', checked: this.settings.theme === 'light', action: () => this.applyTheme('light') },
+      { label: 'PB&J theme', icon: 'star', checked: this.settings.theme === 'pbj', action: () => this.applyTheme('pbj') },
       { label: 'Sounds', icon: 'volume', checked: this.settings.sounds !== false, action: () => { this.sounds.toggle(); this.syncSoundButton(); } },
       ...(extra.length ? [{ sep: true }, ...extra] : []),
     ];
@@ -1469,7 +1474,7 @@ class App {
       h('div', { class: 'panel-head' }, 'Settings', h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
       h('div', { class: 'panel-body' }, h('div', { class: 'settings-panel' },
         h('div', { class: 'settings-group' }, h('h4', {}, 'Appearance'),
-          sel('theme', [['dark', 'Dark — neon dusk'], ['light', 'Light — lavender']], (v) => this.applyTheme(v)),
+          sel('theme', [['dark', 'Dark — neon dusk'], ['light', 'Light — lavender'], ['pbj', 'PB&J — grape & peanut butter']], (v) => this.applyTheme(v)),
           check('sounds', 'Sounds', () => this.syncSoundButton()),
           check('soundTyping', 'Typing sounds'),
           check('soundHover', 'Hover sounds'),

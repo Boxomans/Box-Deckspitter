@@ -70,6 +70,46 @@
   color-scheme: light;
 }
 
+/* PB&J: grape jelly up top fading into warm peanut butter, after Discord's PB&J gradient theme.
+   Solid colours for menus and dialogs; the window chrome is tinted glass over the gradient (below). */
+[data-theme="pbj"] {
+  --bg-0: #2a1a2b;
+  --bg-1: #391f38;
+  --bg-2: #432541;
+  --bg-3: #4d2b4a;
+  --bg-4: #583254;
+  --bg-5: #663b60;
+  --line: #4a2b46;
+  --line-2: #5f3a59;
+  --text: #f2f3f5;
+  --text-2: #d9cdd8;
+  --text-3: #a993a7;
+  --accent: #5865f2;
+  --accent-strong: #949cf7;
+  --accent-2: #f0b232;
+  --accent-3: #00a8fc;
+  --accent-soft: rgba(88, 101, 242, 0.18);
+  --accent-soft-2: rgba(88, 101, 242, 0.3);
+  --accent-line: rgba(140, 150, 255, 0.5);
+  --gloss: linear-gradient(135deg, #949cf7 0%, #c77dd8 50%, #f0b232 100%);
+  --focus: 0 0 0 1px rgba(140, 150, 255, 0.6), 0 0 14px rgba(88, 101, 242, 0.25);
+  --danger: #f23f43;
+  --warn: #f0b232;
+  --ok: #23a55a;
+  --shadow: 0 14px 40px rgba(10, 0, 12, 0.55), 0 2px 8px rgba(10, 0, 12, 0.4);
+  --shadow-sm: 0 4px 14px rgba(10, 0, 12, 0.4);
+  --desk: #241625;
+  --desk-grid: rgba(255, 220, 180, 0.035);
+  --scroll: #5a3456;
+  --scroll-hover: #744670;
+  --titlebar-solid: #4e224e; /* what the tinted title bar looks like, for the window buttons */
+  --pbj: radial-gradient(1100px 700px at 0% 0%, rgba(150, 70, 175, 0.55), transparent 62%),
+         radial-gradient(1000px 700px at 100% 100%, rgba(160, 105, 60, 0.38), transparent 62%),
+         radial-gradient(800px 500px at 15% 100%, rgba(190, 80, 140, 0.25), transparent 60%),
+         linear-gradient(135deg, #47234f 0%, #3a1e3e 32%, #321d2f 62%, #3b2827 100%);
+  color-scheme: dark;
+}
+
 :root {
   --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
@@ -1154,3 +1194,25 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .fling-source { opacity: 0.35; }
 .fling-target { outline: 1px dashed var(--accent-line); outline-offset: 2px; border-radius: 8px; }
 .fling-target.fling-hot { outline: 2px solid var(--accent); box-shadow: 0 0 18px rgba(180, 140, 255, 0.35); }
+
+/* ---------------------------------------------------------------- PB&J: the gradient shows through the window chrome */
+[data-theme="pbj"] body, [data-theme="pbj"] #app { background: var(--pbj); background-attachment: fixed; }
+[data-theme="pbj"] #titlebar { background: rgba(95, 38, 92, 0.55); border-bottom-color: rgba(255, 255, 255, 0.06); }
+[data-theme="pbj"] #titlebar::after { background: linear-gradient(90deg, transparent, rgba(148, 156, 247, 0.5) 30%, rgba(240, 178, 50, 0.4) 65%, transparent); }
+[data-theme="pbj"] #tabbar { background: rgba(70, 28, 70, 0.45); border-bottom-color: rgba(255, 255, 255, 0.06); }
+[data-theme="pbj"] .tab:hover { background: rgba(255, 255, 255, 0.06); }
+[data-theme="pbj"] .tab.active, [data-theme="pbj"] .tab.active::after { background: rgba(38, 20, 40, 0.92); }
+[data-theme="pbj"] #toolbar-host { background: rgba(38, 20, 40, 0.88); border-bottom-color: rgba(255, 255, 255, 0.06); }
+[data-theme="pbj"] #rail { background: rgba(24, 10, 26, 0.5); border-right-color: rgba(255, 255, 255, 0.05); }
+[data-theme="pbj"] #sidepanel { background: rgba(92, 44, 82, 0.38); border-right-color: rgba(255, 255, 255, 0.06); }
+[data-theme="pbj"] #workspace { background: rgba(26, 12, 28, 0.32); }
+[data-theme="pbj"] .home { background: radial-gradient(1000px 420px at 50% 115%, rgba(240, 178, 50, 0.08), transparent 60%), transparent; }
+[data-theme="pbj"] #rightpanel { background: rgba(28, 12, 26, 0.42); border-left-color: rgba(255, 255, 255, 0.06); }
+[data-theme="pbj"] #rightrail { background: rgba(24, 10, 24, 0.5); border-left-color: rgba(255, 255, 255, 0.05); }
+[data-theme="pbj"] #statusbar { background: rgba(60, 26, 56, 0.6); border-top-color: rgba(255, 255, 255, 0.06); }
+[data-theme="pbj"] .new-card { background: rgba(60, 28, 56, 0.55); border-color: rgba(255, 255, 255, 0.07); }
+[data-theme="pbj"] .new-card:hover { background: rgba(78, 38, 72, 0.7); }
+[data-theme="pbj"] .rail-btn.active, [data-theme="pbj"] .rrail-tab.active { color: #fff; background: rgba(88, 101, 242, 0.35); }
+[data-theme="pbj"] .btn.primary { color: #fff; }
+[data-theme="pbj"] a { color: #00a8fc; }
+[data-theme="pbj"] .home-hero img { filter: drop-shadow(0 0 18px rgba(240, 178, 50, 0.2)); }
