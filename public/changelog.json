@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.0.15",
+    "date": "2026-10-11",
+    "notes": [
+      "Folders in the media dump and the doc dump: make them with the new-folder button, click one to open it, and use the path at the top (or Mouse 4) to go back up. Drop or Shift+drag files onto a folder to put them in it; things already in the dump are moved, not copied. Works in the sidebar panels, the video editor's dump tab and the dump drawers.",
+      "Video editor: clips snap to each other's edges, the playhead and the start, with a guide line where they meet. Press Shift while dragging a clip to place it freely. Files dropped onto the timeline snap too.",
+      "Video editor: Shift+click anywhere on the timeline (over clips too) jumps the playhead there, and Shift+drag scrubs. Shift+drag across the preview scrubs through the whole video.",
+      "Video editor: 2560 × 1440 (1440p) is now one of the video sizes.",
+      "Fixed: a clip's end edge didn't snap when dragging it up to the clip after it."
+    ]
+  },
+  {
     "version": "1.0.14",
     "date": "2026-10-11",
     "notes": [

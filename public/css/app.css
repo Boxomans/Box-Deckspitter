@@ -1273,3 +1273,13 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .panel-body.drop { background: var(--accent-soft); outline: 1px dashed var(--accent-line); outline-offset: -4px; }
 .dump-row .fr-icon { width: 22px; height: 22px; display: grid; place-items: center; }
 .fr-thumb { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; }
+
+/* dump folders: the clickable path, and things you can drop into */
+.dump-crumbs { display: inline-flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.dump-crumb { border: 0; background: none; color: var(--text-3); font: inherit; padding: 2px 4px; border-radius: 5px; cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.dump-crumb:hover { color: var(--text); background: var(--bg-3); }
+.dump-crumb.here { color: var(--text-2); }
+.explorer-path .dump-crumbs { flex: 1; font: 11px var(--font-mono); }
+.drop-into { background: var(--accent-soft-2) !important; outline: 1px dashed var(--accent); outline-offset: -2px; }
+.dump-folder .dump-thumb { color: var(--accent); }
+.dump-folder { cursor: pointer; }

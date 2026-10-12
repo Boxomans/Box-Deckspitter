@@ -845,3 +845,13 @@ audio.vid-media { display: none; }
 .cut-dump-name { font-size: 10.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cut-clip.to-dump { opacity: 0.45; outline: 2px dashed var(--accent); }
 .cut-bin-list[hidden] { display: none; }
+.cut-dump-crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; padding: 0 2px 6px; font: 10.5px var(--font-mono); color: var(--text-3); }
+.cut-dump-crumb { border: 0; background: none; color: var(--text-3); font: inherit; padding: 2px 4px; border-radius: 5px; cursor: pointer; }
+.cut-dump-crumb:hover { color: var(--text); background: var(--bg-3); }
+.cut-dump-crumb.here { color: var(--text-2); }
+.cut-dump-item.folder { cursor: pointer; }
+.cut-dump-item.folder .cut-dump-thumb { color: var(--accent); background: var(--bg-2); }
+.cut-dump-item.folder .cut-dump-badge { width: auto; padding: 0 5px; font-size: 10px; }
+.cut-snap-guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--accent-2); pointer-events: none; z-index: 6; }
+/* Shift held / scrubbing: the timeline and preview seek */
+.cut-root.shift-seek .cut-lanes, .cut-root.shift-seek .cut-clip, .cut-root.shift-seek .cut-ruler, .cut-root.shift-seek .cut-canvas, .cut-root.scrubbing, .cut-root.scrubbing * { cursor: col-resize !important; }

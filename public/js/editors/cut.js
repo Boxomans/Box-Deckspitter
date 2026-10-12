@@ -8,7 +8,7 @@
 import { BaseEditor } from './base.js';
 import { h, clear, clamp, basename, extOf, stripExt, uid, dirname, formatBytes } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { tbButton, tbSep, toast, errorToast, contextMenu, modal, hoverKeys, PATHS_MIME, draggedPaths, setDraggedPaths } from '../core/ui.js';
+import { tbButton, tbSep, toast, errorToast, contextMenu, modal, promptDialog, hoverKeys, PATHS_MIME, draggedPaths, setDraggedPaths } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { pickOpen, pickSave } from '../core/files.js';
 import { fmtTime } from './video.js';
@@ -36,7 +36,7 @@ const VISUAL = ['x', 'y', 'scale', 'rotation', 'opacity'];
 const IMAGE_LEN = 5;
 const MIN_LEN = 0.1;
 const SNAP_PX = 8;
-const PRESETS = [['1920 × 1080 (HD)', 1920, 1080], ['1280 × 720', 1280, 720], ['3840 × 2160 (4K)', 3840, 2160], ['1080 × 1920 (vertical)', 1080, 1920], ['1080 × 1080 (square)', 1080, 1080]];
+const PRESETS = [['1920 × 1080 (HD)', 1920, 1080], ['1280 × 720', 1280, 720], ['2560 × 1440 (1440p)', 2560, 1440], ['3840 × 2160 (4K)', 3840, 2160], ['1080 × 1920 (vertical)', 1080, 1920], ['1080 × 1080 (square)', 1080, 1080]];
 
 const smooth = (u) => u * u * (3 - 2 * u);
 
@@ -345,18 +345,49 @@ export class CutEditor extends BaseEditor {
     if (dump) this.refreshDump();
   }
 
-  async refreshDump() {
-    let items;
-    try { items = (await api.dump('media')).items; } catch { return; }
-    this.dumpCount.textContent = items.length ? String(items.length) : '';
-    const sig = items.map((i) => i.name + i.mtime).join('|');
-    if (sig === this.dumpSig) return;
+  /** The media dump tab: the folder that's open (dumpDir, '' = the top), its folders, then its files. */
+  async refreshDump(force = false) {
+    let res;
+    try { res = await api.dump('media', this.dumpDir || ''); } catch {
+      if (this.dumpDir) { this.dumpDir = ''; return this.refreshDump(true); } // the folder went away
+      return;
+    }
+    const { folders = [], items = [] } = res;
+    this.dumpCount.textContent = folders.length + items.length ? String(folders.length + items.length) : '';
+    const sig = this.dumpDir + '#' + folders.map((f) => f.name + f.count).join('|') + '#' + items.map((i) => i.name + i.mtime).join('|');
+    if (!force && sig === this.dumpSig) return;
     this.dumpSig = sig;
     this.dumpItems = items;
+    const sub = this.dumpDir || '';
+    const parts = sub ? sub.split('/') : [];
+    // the path: click a part to go there, drop on it to move things there
+    const crumbs = clear(this.dumpCrumbs);
+    const crumb = (text, to) => {
+      const b = h('button', { class: `cut-dump-crumb cut-dump-target ${to === sub ? 'here' : ''}`, dataset: { folder: to }, onclick: () => this.openDumpFolder(to) }, text);
+      this.dumpDropTarget(b, to);
+      return b;
+    };
+    crumbs.append(crumb('media-dump', ''));
+    parts.forEach((part, i) => crumbs.append(h('span', { class: 'faint' }, '/'), crumb(part, parts.slice(0, i + 1).join('/'))));
     const G = clear(this.dumpGrid);
-    if (!items.length) {
-      G.append(h('div', { class: 'cut-empty' }, 'The media dump is empty. Drop videos, sounds and pictures here — from Explorer, the media list, the timeline, or Shift+drag from Files — or export straight into it.'));
+    if (!folders.length && !items.length) {
+      G.append(h('div', { class: 'cut-empty' }, sub ? 'Empty folder. Drop videos, sounds and pictures here.' : 'The media dump is empty. Drop videos, sounds and pictures here — from Explorer, the media list, the timeline, or Shift+drag from Files — or export straight into it.'));
       return;
+    }
+    for (const f of folders) {
+      const card = h('div', { class: 'cut-dump-item folder cut-dump-target', dataset: { folder: f.name }, title: `${f.base}\n${f.count} item${f.count === 1 ? '' : 's'}\nClick to open · drop things on it to put them inside` },
+        h('div', { class: 'cut-dump-thumb' }, icon('folder', 'lg'), h('span', { class: 'cut-dump-badge mono' }, String(f.count))),
+        h('div', { class: 'cut-dump-name' }, f.base));
+      card.addEventListener('click', () => this.openDumpFolder(f.name));
+      card.addEventListener('contextmenu', (e) => contextMenu(e, [
+        { label: 'Open', icon: 'folder-open', action: () => this.openDumpFolder(f.name) },
+        { label: 'Rename…', icon: 'edit', action: async () => { const n = await promptDialog('Rename folder', 'New name', f.base); if (n && n !== f.base) { try { await api.dumpRename(f.name, n, 'media'); this.refreshDump(true); } catch (err) { errorToast(err); } } } },
+        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('media', f.name) },
+        { sep: true },
+        { label: 'Remove folder', icon: 'trash', action: async () => { try { await api.dumpRemove(f.name, 'media'); toast(`Moved ${f.base} to media-dump\\.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
+      ]));
+      this.dumpDropTarget(card, f.name);
+      G.append(card);
     }
     this.thumbIO?.disconnect();
     // video thumbnails load only when they scroll into view
@@ -373,35 +404,68 @@ export class CutEditor extends BaseEditor {
         thumb.addEventListener('error', () => thumb.replaceWith(icon('video', 'lg')));
         this.thumbIO.observe(thumb);
       } else thumb = icon('music', 'lg');
-      const card = h('div', { class: `cut-dump-item ${kind}`, draggable: 'true', title: `${it.name}\n${formatBytes(it.size)}\nDrag onto the timeline or the media list · double-click to add at the playhead` },
+      const card = h('div', { class: `cut-dump-item ${kind}`, draggable: 'true', title: `${it.base}\n${formatBytes(it.size)}\nDrag onto the timeline, the media list or a folder · double-click to add at the playhead` },
         h('div', { class: 'cut-dump-thumb' }, thumb, kind !== 'image' ? h('span', { class: 'cut-dump-badge' }, icon(kind === 'video' ? 'video' : 'music', 'sm')) : null),
-        h('div', { class: 'cut-dump-name' }, it.name));
+        h('div', { class: 'cut-dump-name' }, it.base));
       card.addEventListener('dragstart', (e) => { setDraggedPaths(e, [it.path]); e.dataTransfer.setData('text/bds-from-dump', '1'); });
       card.addEventListener('dblclick', async () => { const m = await this.importPath(it.path); if (m) this.placeMedia(m); });
       card.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Add to the media list', icon: 'plus', action: () => this.importPath(it.path) },
         { label: 'Add at the playhead', icon: 'video', action: async () => { const m = await this.importPath(it.path); if (m) this.placeMedia(m); } },
         { sep: true },
-        { label: 'Copy as file', icon: 'copy', action: () => api.dumpClip(it.name, 'media').then(() => toast(`Copied ${it.name}`, { type: 'ok', timeout: 1500 }), errorToast) },
+        { label: 'Copy as file', icon: 'copy', action: () => api.dumpClip(it.name, 'media').then(() => toast(`Copied ${it.base}`, { type: 'ok', timeout: 1500 }), errorToast) },
+        { label: 'Rename…', icon: 'edit', action: async () => { const n = await promptDialog('Rename', 'New name', it.base, { selectBase: true }); if (n && n !== it.base) { try { await api.dumpRename(it.name, extOf(n) ? n : `${n}.${extOf(it.base)}`, 'media'); this.refreshDump(true); } catch (err) { errorToast(err); } } } },
         { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('media', it.name) },
+        ...(sub ? [{ label: 'Move up a folder', icon: 'arrow-up', action: () => api.dumpMove([it.name], parts.slice(0, -1).join('/'), 'media').then(() => this.refreshDump(true), errorToast) }] : []),
         { sep: true },
-        { label: 'Remove from the dump', icon: 'trash', action: async () => { try { await api.dumpRemove(it.name, 'media'); toast(`Moved ${it.name} to media-dump\\.removed`, { timeout: 2500 }); this.refreshDump(); } catch (err) { errorToast(err); } } },
+        { label: 'Remove from the dump', icon: 'trash', action: async () => { try { await api.dumpRemove(it.name, 'media'); toast(`Moved ${it.base} to media-dump\\.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
       ]));
       G.append(card);
     }
   }
 
-  /** Copy files on disk into the media dump. */
-  async toDump(paths) {
+  openDumpFolder(rel) {
+    this.dumpDir = rel || '';
+    this.refreshDump(true);
+  }
+
+  async newDumpFolder() {
+    const name = await promptDialog('New folder', 'Folder name', 'New folder');
+    if (!name) return;
+    try { await api.dumpFolder(this.dumpDir ? `${this.dumpDir}/${name}` : name, 'media'); this.refreshDump(true); } catch (e) { errorToast(e, 'Could not make the folder'); }
+  }
+
+  /** A folder card or a part of the path: drops go into that folder (things already in the dump are moved). */
+  dumpDropTarget(el, folder) {
+    el.addEventListener('dragover', (e) => {
+      if (![PATHS_MIME, 'Files', 'text/bds-media'].some((t) => e.dataTransfer.types.includes(t))) return;
+      e.preventDefault(); e.stopPropagation();
+      e.dataTransfer.dropEffect = e.dataTransfer.types.includes('text/bds-from-dump') ? 'move' : 'copy';
+      el.classList.add('drop-into');
+    });
+    el.addEventListener('dragleave', (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove('drop-into'); });
+    el.addEventListener('drop', async (e) => {
+      el.classList.remove('drop-into');
+      this.dumpView.classList.remove('drop');
+      e.preventDefault(); e.stopPropagation();
+      const paths = await this.dropPaths(e);
+      if (paths.length) await this.toDump(paths, folder);
+    });
+  }
+
+  /** Files on disk into the media dump (into `folder`, default the open one). From elsewhere: copied; already in the dump: moved. */
+  async toDump(paths, folder = this.dumpDir || '') {
     let n = 0;
+    let moved = 0;
     for (const p of paths) {
       if (!kindOf(p)) continue;
-      try { const r = await api.dumpImport(p, 'media'); if (!r.already) n++; } catch (e) { errorToast(e, basename(p)); }
+      try { const r = await api.dumpImport(p, 'media', undefined, folder); if (r.moved) moved++; else if (!r.already) n++; } catch (e) { errorToast(e, basename(p)); }
     }
-    if (n) toast(`Added ${n} file${n === 1 ? '' : 's'} to the media dump`, { type: 'ok', timeout: 1800 });
-    else if (paths.length) toast('Already in the media dump.', { timeout: 1500 });
-    if (this.binView === 'dump') this.refreshDump();
-    return n;
+    const where = `the media dump${folder ? ` (${folder})` : ''}`;
+    if (n || moved) toast([n ? `Added ${n} file${n === 1 ? '' : 's'} to ${where}` : '', moved ? `${n ? 'moved' : 'Moved'} ${moved} into ${folder || 'the top folder'}` : ''].filter(Boolean).join(', '), { type: 'ok', timeout: 1800 });
+    else if (paths.length) toast('Already there.', { timeout: 1500 });
+    if (this.binView === 'dump') this.refreshDump(true);
+    return n + moved;
   }
 
   async addToDumpDialog() {
@@ -534,20 +598,24 @@ export class CutEditor extends BaseEditor {
     this.ruler = h('div', { class: 'cut-ruler' });
     this.lanes = h('div', { class: 'cut-lanes' });
     this.playhead = h('div', { class: 'cut-playhead' });
-    this.tlInner = h('div', { class: 'cut-tl-inner' }, this.ruler, this.lanes, this.playhead);
+    this.snapGuide = h('div', { class: 'cut-snap-guide', hidden: true });
+    this.tlInner = h('div', { class: 'cut-tl-inner' }, this.ruler, this.lanes, this.playhead, this.snapGuide);
     this.tlScroll = h('div', { class: 'cut-tl-scroll' }, this.tlInner);
 
     this.dumpGrid = h('div', { class: 'cut-dump-grid' });
-    this.dumpView = h('div', { class: 'cut-dump cut-dump-target', hidden: true }, this.dumpGrid);
+    this.dumpCrumbs = h('div', { class: 'cut-dump-crumbs' });
+    this.dumpView = h('div', { class: 'cut-dump cut-dump-target', hidden: true }, this.dumpCrumbs, this.dumpGrid);
+    this.dumpDir = '';
     this.dumpCount = h('span', { class: 'cut-dump-count' });
     this.tabProject = h('button', { class: 'cut-bin-tab on', onclick: () => this.showBin('project') }, 'Media');
     this.tabDump = h('button', { class: 'cut-bin-tab cut-dump-target', title: 'The media dump (Box-DocSpitter\\media-dump) — drop things here to keep them', onclick: () => this.showBin('dump') }, 'Media dump', this.dumpCount);
     this.projActions = h('span', { class: 'cut-bin-actions' },
       h('button', { class: 'icon-btn', 'data-tip': 'Add video, audio or images', onclick: () => this.importDialog() }, icon('plus', 'sm')));
     this.dumpActions = h('span', { class: 'cut-bin-actions', hidden: true },
+      h('button', { class: 'icon-btn', 'data-tip': 'New folder', onclick: () => this.newDumpFolder() }, icon('folder-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Export the video into the media dump', onclick: () => this.exportVideo(null, { toDump: true }) }, icon('download', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Add files to the media dump', onclick: () => this.addToDumpDialog() }, icon('plus', 'sm')),
-      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('media') }, icon('external', 'sm')));
+      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('media', null, this.dumpDir || null) }, icon('external', 'sm')));
     const binEl = h('div', { class: 'cut-bin' },
       h('div', { class: 'cut-pane-head cut-bin-head' }, this.tabProject, this.tabDump, h('div', { class: 'grow' }), this.projActions, this.dumpActions),
       this.bin, this.dumpView);
@@ -568,7 +636,7 @@ export class CutEditor extends BaseEditor {
         h('button', { class: 'btn sm', onclick: () => this.addTrack('video') }, icon('plus', 'sm'), 'Video track'),
         h('button', { class: 'btn sm', onclick: () => this.addTrack('audio') }, icon('plus', 'sm'), 'Audio track'),
         h('div', { class: 'grow' }),
-        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'drag clips · drag edges to trim · S split · Del delete · Ctrl+wheel zoom'),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Shift+click or Shift+drag to seek · drag clips (they snap; press Shift mid-drag to place freely) · drag edges to trim · S split · Del delete · Ctrl+wheel zoom'),
         h('button', { class: 'icon-btn', 'data-tip': 'Zoom out', onclick: () => this.zoom(-1) }, icon('zoom-out', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': 'Zoom in', onclick: () => this.zoom(1) }, icon('zoom-in', 'sm'))),
       h('div', { class: 'cut-tl-body' }, this.tlHead, this.tlScroll));
@@ -591,7 +659,8 @@ export class CutEditor extends BaseEditor {
     this.lanes.addEventListener('drop', async (e) => {
       this.lanes.classList.remove('drop');
       e.preventDefault();
-      const at = Math.max(0, this.xToT(e.clientX));
+      const raw = Math.max(0, this.xToT(e.clientX));
+      const at = e.shiftKey ? raw : this.snapPoint(raw) ?? raw;
       const lane = e.target.closest('.cut-lane');
       const id = e.dataTransfer.getData('text/bds-media');
       if (id) { const m = this.media(id); if (m) this.placeMedia(m, this.fits(lane?.dataset.track, m), at); return; }
@@ -622,11 +691,18 @@ export class CutEditor extends BaseEditor {
         if (paths.length) return this.toDump(paths);
         // a browser window (no file paths): send the bytes
         let n = 0;
-        for (const f of e.dataTransfer.files) { if (kindOf(f.name)) { try { await api.dumpAdd(f.name, new Uint8Array(await f.arrayBuffer()), 'media'); n++; } catch (err) { errorToast(err, f.name); } } }
+        for (const f of e.dataTransfer.files) { if (kindOf(f.name)) { try { await api.dumpAdd(this.dumpDir ? `${this.dumpDir}/${f.name}` : f.name, new Uint8Array(await f.arrayBuffer()), 'media'); n++; } catch (err) { errorToast(err, f.name); } } }
         if (n) { toast(`Added ${n} to the media dump`, { type: 'ok', timeout: 1500 }); this.refreshDump(); }
       });
     }
     // chroma key eyedropper: click the preview
+    this.canvas.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.shiftKey && !this.picking) this.scrubPreview(e); });
+    // holding Shift shows the seek cursor over the timeline and preview
+    this.shiftHandler = (e) => { if (e.key === 'Shift') this.root.classList.toggle('shift-seek', e.type === 'keydown'); };
+    document.addEventListener('keydown', this.shiftHandler);
+    document.addEventListener('keyup', this.shiftHandler);
+    this.blurHandler = () => this.root.classList.remove('shift-seek');
+    window.addEventListener('blur', this.blurHandler);
     this.canvas.addEventListener('click', (e) => {
       if (!this.picking) return;
       const r = this.canvas.getBoundingClientRect();
@@ -775,19 +851,26 @@ export class CutEditor extends BaseEditor {
     return el;
   }
 
-  /** Snap time t to clip edges / the playhead / 0 when it's within a few pixels. */
-  snap(t, skip) {
+  /** The clip edge / playhead / 0 that time t is within a few pixels of, or null. */
+  snapPoint(t, skip) {
     const pts = [0, this.t];
     for (const { c } of this.allClips()) if (c.id !== skip) pts.push(c.start, c.start + c.len);
-    let best = t;
+    let best = null;
     let bd = SNAP_PX / this.pps;
     for (const p of pts) { const d = Math.abs(p - t); if (d < bd) { bd = d; best = p; } }
     return best;
   }
 
+  /** The line showing where a clip snapped (null hides it). */
+  showSnap(t) {
+    this.snapGuide.hidden = t == null;
+    if (t != null) this.snapGuide.style.left = `${this.tToX(t)}px`;
+  }
+
   dragClip(e, c, tr, el) {
     if (e.button !== 0) return;
     e.stopPropagation();
+    if (e.shiftKey) return this.scrub(e); // Shift+click / Shift+drag seeks, even over a clip
     const m = this.media(c.media);
     const mode = e.target.classList.contains('cut-trim') ? (e.target.classList.contains('l') ? 'left' : 'right') : 'move';
     const sx = e.clientX;
@@ -803,19 +886,25 @@ export class CutEditor extends BaseEditor {
       if (!moved) { moved = true; this.remember(); }
       // dragged over the media dump (its tab or the open dump): drop there to keep a copy of the file
       const dumpHit = mode === 'move' && m && !m.missing && document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.cut-dump-target');
-      if (!!dumpHit !== overDump) {
-        overDump = !!dumpHit;
-        this.dumpView.classList.toggle('drop', overDump);
-        this.tabDump.classList.toggle('drop', overDump);
-        el.classList.toggle('to-dump', overDump);
+      if ((dumpHit || false) !== overDump) {
+        if (overDump?.classList) overDump.classList.remove('drop-into');
+        overDump = dumpHit || false;
+        if (overDump?.dataset?.folder != null) overDump.classList.add('drop-into');
+        this.dumpView.classList.toggle('drop', !!overDump);
+        this.tabDump.classList.toggle('drop', !!overDump);
+        el.classList.toggle('to-dump', !!overDump);
         if (overDump && this.binView !== 'dump') this.showBin('dump');
       }
-      if (overDump) return;
+      if (overDump) { this.showSnap(null); return; }
+      // clips snap to each other's edges, the playhead and the start; hold Shift to place them freely
+      const free = ev.shiftKey;
+      let guide = null;
       if (mode === 'move') {
         let start = Math.max(0, orig.start + dt);
-        const sEnd = this.snap(start + c.len, c.id) - c.len;
-        const sStart = this.snap(start, c.id);
-        start = Math.abs(sStart - start) <= Math.abs(sEnd - start) ? sStart : sEnd;
+        const a = free ? null : this.snapPoint(start, c.id);
+        const b = free ? null : this.snapPoint(start + c.len, c.id);
+        if (a != null && (b == null || Math.abs(a - start) <= Math.abs(b - (start + c.len)))) { start = a; guide = a; }
+        else if (b != null && b - c.len >= 0) { start = b - c.len; guide = b; }
         c.start = Math.max(0, start);
         // move to another track of the same kind under the pointer
         const lane = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.cut-lane');
@@ -827,7 +916,9 @@ export class CutEditor extends BaseEditor {
           lane.append(el);
         }
       } else if (mode === 'left') {
-        let start = this.snap(orig.start + dt, c.id);
+        let start = orig.start + dt;
+        const sp = free ? null : this.snapPoint(start, c.id);
+        if (sp != null) { start = sp; guide = sp; }
         start = clamp(start, Math.max(0, orig.start - (m?.kind === 'image' ? Infinity : orig.in)), orig.start + orig.len - MIN_LEN);
         const d = start - orig.start;
         c.start = start;
@@ -836,9 +927,12 @@ export class CutEditor extends BaseEditor {
         // keep keyframes where they were on screen
         if (d) for (const keys of Object.values(c.keys || {})) for (const k of keys) k.t = (k._t0 ?? (k._t0 = k.t)) - d;
       } else {
-        const end = this.snap(orig.start + orig.len + dt, c.id);
+        let end = orig.start + orig.len + dt;
+        const sp = free ? null : this.snapPoint(end, c.id);
+        if (sp != null) { end = sp; guide = sp; }
         c.len = clamp(end - orig.start, MIN_LEN, maxLen - (m?.kind === 'image' ? 0 : orig.in));
       }
+      this.showSnap(guide);
       el.style.left = `${this.tToX(c.start)}px`;
       el.style.width = `${Math.max(4, this.tToX(c.len))}px`;
       this.requestUpdate();
@@ -846,14 +940,16 @@ export class CutEditor extends BaseEditor {
     const up = () => {
       removeEventListener('pointermove', move);
       removeEventListener('pointerup', up);
+      this.showSnap(null);
       if (overDump) {
-        // the clip stays where it was; its file goes into the dump
+        // the clip stays where it was; its file goes into the dump (into the folder it was dropped on)
+        overDump.classList?.remove('drop-into');
         this.dumpView.classList.remove('drop');
         this.tabDump.classList.remove('drop');
         this.p = JSON.parse(this.undoStack.pop());
         this.redoStack = [];
         this.renderAll();
-        this.toDump([m.path]);
+        this.toDump([m.path], overDump.dataset?.folder ?? this.dumpDir ?? '');
         return;
       }
       for (const keys of Object.values(c.keys || {})) for (const k of keys) delete k._t0;
@@ -871,6 +967,7 @@ export class CutEditor extends BaseEditor {
   }
 
   dragKey(e, c, kt, clipEl) {
+    if (e.shiftKey) return this.scrub(e);
     const sx = e.clientX;
     let moved = false;
     const all = Object.values(c.keys || {}).flatMap((keys) => keys.filter((k) => Math.abs(k.t - kt) < 0.0006));
@@ -897,11 +994,33 @@ export class CutEditor extends BaseEditor {
     void clipEl;
   }
 
+  /** Move the playhead to the pointer and follow it until the button comes up (the ruler, empty lanes, Shift anywhere). */
   scrub(e) {
     if (e.button !== 0) return;
-    const go = (ev) => this.seek(Math.max(0, this.xToT(ev.clientX)));
+    e.preventDefault();
+    const go = (ev) => {
+      this.seek(Math.max(0, this.xToT(ev.clientX)));
+      // keep the playhead in view while scrubbing near the edges
+      const r = this.tlScroll.getBoundingClientRect();
+      if (r.width < 120) return;
+      if (ev.clientX > r.right - 30) this.tlScroll.scrollLeft += 20;
+      else if (ev.clientX < r.left + 30) this.tlScroll.scrollLeft -= 20;
+    };
     go(e);
-    const up = () => { removeEventListener('pointermove', go); removeEventListener('pointerup', up); };
+    this.root.classList.add('scrubbing');
+    const up = () => { removeEventListener('pointermove', go); removeEventListener('pointerup', up); this.root.classList.remove('scrubbing'); };
+    addEventListener('pointermove', go);
+    addEventListener('pointerup', up);
+  }
+
+  /** Shift+click / Shift+drag across the preview: its width is the whole project, start to end. */
+  scrubPreview(e) {
+    const r = this.canvas.getBoundingClientRect();
+    const go = (ev) => this.seek(clamp((ev.clientX - r.left) / r.width, 0, 1) * this.duration);
+    e.preventDefault();
+    go(e);
+    this.root.classList.add('scrubbing');
+    const up = () => { removeEventListener('pointermove', go); removeEventListener('pointerup', up); this.root.classList.remove('scrubbing'); };
     addEventListener('pointermove', go);
     addEventListener('pointerup', up);
   }
@@ -1407,6 +1526,9 @@ export class CutEditor extends BaseEditor {
   destroy() {
     this.pause();
     document.removeEventListener('keydown', this.keyHandler);
+    document.removeEventListener('keydown', this.shiftHandler);
+    document.removeEventListener('keyup', this.shiftHandler);
+    window.removeEventListener('blur', this.blurHandler);
     this.ro?.disconnect();
     this.thumbIO?.disconnect();
     clearInterval(this.dumpTimer);
