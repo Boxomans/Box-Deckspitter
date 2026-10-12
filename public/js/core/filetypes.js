@@ -60,6 +60,7 @@ export function detectMode(name, bytes) {
   const ext = extOf(name);
   const base = basename(name).toLowerCase();
   if (PDF_EXT.includes(ext)) return { mode: 'pdf' };
+  if (ext === 'boxcut') return { mode: 'cut' };
   if (ext === 'eml') return { mode: 'mail' };
   if (DOC_EXT.includes(ext)) return { mode: 'doc' };
   if (SHEET_EXT.includes(ext)) return { mode: 'sheet' };
@@ -94,10 +95,10 @@ export function extForLang(lang) {
 
 export const MODE_ICON = {
   doc: 'file-doc', pdf: 'file-pdf', text: 'file-text', code: 'file-code', sheet: 'sheet', image: 'image', hex: 'binary',
-  video: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot',
+  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot',
 };
 
-export const MODE_LABEL = {
+export const MODE_LABEL = { cut: 'Video editor',
   doc: 'Document', pdf: 'PDF', text: 'Text', code: 'Code', sheet: 'Sheet', image: 'Image', hex: 'Binary',
   video: 'Video', form: 'Form', klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', paint: 'BoxPaint', diff: 'BoxDiff',
 };

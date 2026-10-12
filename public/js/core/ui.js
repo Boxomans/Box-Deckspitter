@@ -277,15 +277,17 @@ export function choiceDialog(title, message, choices) {
 // ===================================================================== toasts
 
 let toastHost = null;
-export function toast(message, { type = 'info', timeout = 3400, action } = {}) {
+/** closable: an × to dismiss it (handy with timeout: 0, which keeps the toast until it's closed). */
+export function toast(message, { type = 'info', timeout = 3400, action, closable = false } = {}) {
   if (!toastHost) { toastHost = h('div', { class: 'toasts' }); root().append(toastHost); }
   const ico = { error: 'alert', ok: 'check', warn: 'alert', info: 'info' }[type] || 'info';
   const el = h('div', { class: `toast ${type}` }, icon(ico, 'sm'), h('span', {}, message));
   if (action) {
     el.append(h('button', { class: 'btn sm toast-action', onclick: () => { action.fn(); el.remove(); } }, action.label));
   }
-  toastHost.append(el);
   const kill = () => { el.style.transition = 'opacity .2s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 220); };
+  if (closable) el.append(h('button', { class: 'icon-btn toast-x', title: 'Dismiss', onclick: kill }, icon('x', 'sm')));
+  toastHost.append(el);
   if (timeout) setTimeout(kill, timeout);
   return kill;
 }

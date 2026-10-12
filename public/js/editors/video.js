@@ -462,6 +462,7 @@ export class VideoEditor extends BaseEditor {
       tbButton('download', 'Export the selected clip', () => this.exportClip(), { text: 'Export clip' }),
       tbSep(),
       tbButton('external', 'Show in folder', () => this.tab.path && api.reveal(this.tab.path)),
+      this.tab.path ? tbButton('video', 'Open this in the video editor (tracks, keyframes, chroma key)', () => this.app.newDocument('cut', { media: [this.tab.path] }), { text: 'Open in video editor' }) : null,
       h('span', { class: 'tb-label' }, this.isAudio ? 'audio trimmer' : 'video trimmer'));
   }
 

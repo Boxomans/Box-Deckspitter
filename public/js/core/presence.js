@@ -17,6 +17,7 @@ const LINES = {
   image: { plain: ['Editing an image'], silly: ['looking at a picture', 'cropping something', 'editing a .{ext}', 'rotating an image 90°'] },
   hex: { plain: ['Viewing a binary file'], silly: ['staring at raw bytes', 'reading hex like the matrix', 'poking at a binary'] },
   mail: { plain: ['Doing email'], silly: ['doing email', 'inbox zero speedrun', 'replying "per my last email"', 'attaching the wrong file', 'sorting promotions into oblivion'] },
+  cut: { plain: ['Editing a video'], silly: ['editing a video', 'cutting a montage', 'keyframing things', 'chroma keying something'] },
   video: { plain: ['Trimming a video'], silly: ['trimming a video', 'cutting a clip', 'making a gif', 'finding the perfect frame'] },
   form: { plain: ['Filling out a form'], silly: ['filling out a form', 'doing paperwork', 'fighting a government pdf', 'checking boxes'] },
   klep: { plain: ['Grabbing a video'], silly: ['klepping a video', 'grepping videos off a page', 'saving a clip for later'] },

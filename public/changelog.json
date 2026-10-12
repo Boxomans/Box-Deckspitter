@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.0.11",
+    "date": "2026-10-11",
+    "notes": [
+      "New video editor (Tools → Video editor): video and audio tracks, pictures on the timeline (drag the edge to change how long they show), keyframes for position, size, rotation, opacity and volume, chroma key (green screen) with an eyedropper, a properties panel for the selected clip, split, undo, and MP4 export. Projects save as .boxcut.",
+      "It's quick: chroma key runs on the graphics card and export overlaps drawing, encoding and saving frames.",
+      "Videos the app can't play directly (AVI, WMV, MKV, some MOV) are converted to an editing copy automatically; missing files can be found again from the media list.",
+      "The quick trimmer is still there (Tools → Quick trim a video, or open any video file), now with an “Open in video editor” button.",
+      "Box-DocSpitter checks for updates when it starts and shows a note in the bottom right if one is out (dismiss it with ×; you can turn the check off in Settings → Updates).",
+      "The status bar shows which folder this copy is running from (click it to open the folder).",
+      "Fixed: choosing many file types in Settings → Windows failed with “spawn ENAMETOOLONG”."
+    ]
+  },
+  {
     "version": "1.0.10",
     "date": "2026-10-11",
     "notes": [

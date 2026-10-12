@@ -23,6 +23,7 @@ const EDITORS = {
   image: () => import('./editors/image.js').then((m) => m.ImageEditor),
   hex: () => import('./editors/hex.js').then((m) => m.HexEditor),
   video: () => import('./editors/video.js').then((m) => m.VideoEditor),
+  cut: () => import('./editors/cut.js').then((m) => m.CutEditor),
   form: () => import('./editors/form.js').then((m) => m.FormEditor),
   klep: () => import('./editors/klep.js').then((m) => m.KlepEditor),
   storage: () => import('./editors/storage.js').then((m) => m.StorageEditor),
@@ -149,7 +150,7 @@ const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clip
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
 const TOP_TOOLS = ['btn-music', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
 // tool modes and the home-card name they're renamed by
-const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff' };
+const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', cut: 'Video editor' };
 const TOOL_LABEL = { 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, text & code — (almost) nothing leaves this machine';
@@ -564,7 +565,8 @@ class App {
   toolItems() {
     return [
       { label: `${this.toolName('Fill a form')}…`, icon: 'form-fill', action: () => this.fillForm() },
-      { label: `${this.toolName('Video trimmer')}…`, icon: 'video', action: () => this.openVideoTrimmer() },
+      { label: this.toolName('Video editor'), icon: 'video', action: () => this.newDocument('cut') },
+      { label: 'Quick trim a video…', icon: 'scissors', action: () => this.openVideoTrimmer() },
       { label: this.toolName('BoxVidKlep'), icon: 'magnet', action: () => this.newDocument('klep') },
       { label: `${this.toolName('BoxSpaces')} — open folder…`, icon: 'folder-open', action: () => this.openSpace() },
       { label: this.toolName('StoragePeek'), icon: 'layers', action: () => this.newDocument('storage') },
@@ -841,7 +843,12 @@ class App {
     const R = clear(this.statusRight);
     if (!tab) {
       L.append(h('span', { class: 'sb-item mode' }, 'home'), h('span', { class: 'sb-item' }, `${this.tabs.length} open`));
-      R.append(h('span', { class: 'sb-item' }, h('span', { class: 'sb-dot' }), 'local · 127.0.0.1'), h('span', { class: 'sb-item' }, 'v' + (window.BDS?.version || '')));
+      const root = this.info?.root || '';
+      // the last two folders are enough to tell copies apart ("Desktop\\Box-DocSpitter", "E:\\Box-DocSpitter")
+      const short = root.split(/[\\/]/).filter(Boolean).slice(-2).join('\\');
+      R.append(h('span', { class: 'sb-item' }, h('span', { class: 'sb-dot' }), 'local · 127.0.0.1'),
+        root ? h('button', { class: 'sb-item sb-root', title: `Running from ${root}\nClick to open the folder`, onclick: () => api.reveal(root) }, icon('folder', 'sm'), short) : null,
+        h('span', { class: 'sb-item' }, 'v' + (window.BDS?.version || '')));
       return;
     }
     const modeBtn = h('button', { class: 'sb-item mode', title: 'Reopen in a different editor' }, (TOOL_OF_MODE[tab.mode] ? this.toolName(TOOL_OF_MODE[tab.mode]) : MODE_LABEL[tab.mode] || 'Loading').toLowerCase());
@@ -971,6 +978,7 @@ class App {
       tape: { mode: 'tape', ext: '', base: this.toolName('BoxTape') },
       scribe: { mode: 'scribe', ext: '', base: this.toolName('BoxScribe') },
       diff: { mode: 'diff', ext: '', base: this.toolName('BoxDiff') },
+      cut: { mode: 'cut', ext: 'boxcut', base: `Untitled ${this.toolName('Video editor').toLowerCase()}` },
       paint: { mode: 'paint', ext: 'png', base: 'Untitled image' },
     }[kind];
     if (!spec) return;
@@ -992,7 +1000,7 @@ class App {
     this.activate(tab);
     try {
       const bytes = spec.content ? new TextEncoder().encode(spec.content) : null;
-      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images, diff: opts.diff, pickRight: opts.pickRight });
+      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images, diff: opts.diff, pickRight: opts.pickRight, media: opts.media });
       if (images) this.setDirty(tab, true);
     } catch (e) {
       this.failOpen(tab, e, null);
@@ -1396,7 +1404,7 @@ class App {
     const toolGrid = h('div', { class: 'new-cards tool-cards' });
     for (const [ic, title, sub, fn] of this.ordered('tools', [
       ['form-fill', 'Fill a form', 'gov pdfs · autofill · sign', () => this.fillForm()],
-      ['video', 'Video trimmer', 'cut · gif · mp3 · frames', () => this.openVideoTrimmer()],
+      ['video', 'Video editor', 'tracks · keyframes · chroma key', () => this.newDocument('cut')],
       ['magnet', 'BoxVidKlep', 'grab videos from a link', () => this.newDocument('klep')],
       ['spaces', 'BoxSpaces', 'open a folder, IDE-style', () => this.openSpace()],
       ['layers', 'StoragePeek', 'what’s eating your drives', () => this.newDocument('storage')],
@@ -1831,6 +1839,7 @@ class App {
         else if (!r.ok) toast(`The update to ${r.version} didn’t work (${r.reason}), so Box-DocSpitter is still on ${r.from || 'the previous version'}. Nothing of yours was touched.`, { type: 'warn', timeout: 14000 });
       }
     } catch { /* browser mode or old server */ }
+    this.launchUpdateCheck();
     const last = this.settings.lastSeenVersion;
     if (!this.settings.welcomed) {
       this.saveSettings({ welcomed: true, lastSeenVersion: version });
@@ -1840,6 +1849,26 @@ class App {
       this.saveSettings({ lastSeenVersion: version });
       if (last) this.showWhatsNew(last);
     }
+  }
+
+  /** At launch: quietly ask GitHub for a newer version; if there is one, say so in a toast (bottom right, with ×). */
+  async launchUpdateCheck() {
+    if (this.settings.updateCheckOnLaunch === false || !window.bdsShell) return;
+    await new Promise((r) => setTimeout(r, 2500)); // let the app settle first
+    try {
+      const H = { 'X-BDS-Token': api.token, 'Content-Type': 'application/json' };
+      const st = await fetch('/api/update/status', { headers: H }).then((r) => r.json());
+      if (st.pending) return; // already downloaded: Settings → Updates shows it
+      const r = await fetch('/api/update/check', { method: 'POST', headers: H });
+      if (!r.ok) return; // offline, private repo without a token… stay quiet
+      const info = await r.json();
+      if (!info.newer) return;
+      const git = st.gitCheckout;
+      toast(git ? `Update ${info.latest} is on GitHub — this is a git copy, so update it with git pull.` : `Box-DocSpitter ${info.latest} is available (you have ${info.current}).`, {
+        timeout: 0, closable: true,
+        action: git ? null : { label: 'Update…', fn: () => { this.showPanel('settings'); setTimeout(() => [...document.querySelectorAll('.settings-group h4')].find((x) => x.textContent === 'Updates')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150); } },
+      });
+    } catch { /* never bother anyone over a failed check */ }
   }
 
   async changelog() {
@@ -2005,7 +2034,9 @@ class App {
       renderToken();
     };
     refresh();
-    return h('div', { class: 'settings-group' }, h('h4', {}, 'Updates'), line, note, out, actions, tokenRow);
+    const auto = h('input', { type: 'checkbox', checked: this.settings.updateCheckOnLaunch !== false });
+    auto.addEventListener('change', () => this.saveSettings({ updateCheckOnLaunch: auto.checked }));
+    return h('div', { class: 'settings-group' }, h('h4', {}, 'Updates'), line, note, out, actions, h('label', { class: 'check' }, auto, 'Check for updates when the app starts'), tokenRow);
   }
 
   windowsSettings() {

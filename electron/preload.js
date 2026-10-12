@@ -1,5 +1,5 @@
 // Exposes a tiny, fixed bridge to the page. Nothing here reads or writes files directly.
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('bdsShell', {
   isShell: true,
@@ -9,5 +9,7 @@ contextBridge.exposeInMainWorld('bdsShell', {
   startDrag: (file) => ipcRenderer.send('bds:drag', file),
   copyImage: (pngDataUrl) => ipcRenderer.invoke('bds:copyImage', pngDataUrl),
   createShortcuts: () => ipcRenderer.invoke('bds:shortcuts'),
+  // where a file dropped from Explorer lives on disk (the video editor uses files in place, without copying them)
+  pathForFile: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
   appReady: () => ipcRenderer.send('bds:ready'), // tells the boot file an update started fine
 });

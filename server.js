@@ -1621,6 +1621,7 @@ const routes = {
     downloads: knownFolder('downloads'), pictures: knownFolder('pictures'),
     drives: listDrives(), pdfExport: !!BROWSER || SHELL_MODE, nativeDialogs: IS_WIN, appMode: APP_MODE || SHELL_MODE, shell: SHELL_MODE,
     user: os.userInfo().username,
+    root: ROOT, // the folder this copy runs from (shown in the status bar)
   }),
 
   'GET /api/list': async (req, q) => {
@@ -2156,6 +2157,9 @@ const routes = {
 
 // Windows file associations ("open .pdf with Box-DocSpitter").
 Object.assign(routes, require('./file-assoc')({ root: ROOT, isWin: IS_WIN, readJSONBody }));
+
+// Video editor export (frames from the page → ffmpeg).
+Object.assign(routes, require('./render-server')({ tools, readBody, readJSONBody, requirePath, newJob, startJob, runFfmpegJob, cacheDir: path.join(DATA, 'cache', 'video'), log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
 
 // Spotify links in BoxTape: read the track list, match each song on YouTube.
 const spotify = require('./spotify-server')({

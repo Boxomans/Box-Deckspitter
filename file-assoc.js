@@ -8,6 +8,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 
 const APP = 'Box-DocSpitter';
@@ -30,11 +32,20 @@ const KINDS = {
 
 const EXT_RE = /^[a-z0-9]{1,12}$/;
 
+// The script runs from a temporary .ps1 file: registering many file types makes a script far longer than
+// Windows allows on a command line (that was "spawn ENAMETOOLONG"). UTF-8 with a BOM keeps non-English
+// folder names intact in Windows PowerShell 5.
 function runPs(script, timeout = 60000) {
+  const file = path.join(os.tmpdir(), `bds-assoc-${crypto.randomBytes(6).toString('hex')}.ps1`);
   return new Promise((resolve, reject) => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    try { fs.writeFileSync(file, '﻿' + script, 'utf8'); } catch (e) { reject(e); return; }
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file],
       { windowsHide: true, timeout, maxBuffer: 4 * 1024 * 1024 },
-      (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).trim().split('\n').slice(-3).join(' '))) : resolve(stdout)));
+      (err, stdout, stderr) => {
+        fs.rm(file, { force: true }, () => {});
+        if (err) reject(new Error((stderr || err.message).trim().split('\n').slice(-3).join(' ')));
+        else resolve(stdout);
+      });
   });
 }
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
