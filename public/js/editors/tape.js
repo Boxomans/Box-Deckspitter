@@ -138,7 +138,14 @@ export class TapeEditor extends BaseEditor {
     this.lanes = h('select', { class: 'tape-lanes', title: 'How many tracks download at the same time' }, [1, 2, 3, 4, 5, 6].map((n) => h('option', { value: String(n) }, `${n} at a time`)));
     this.lanes.value = String(this.app.settings.tapeParallel || 3);
     this.lanes.addEventListener('change', () => this.app.saveSettings({ tapeParallel: Number(this.lanes.value) }));
-    R.append(h('div', { class: 'klep-results-head' }, h('label', { class: 'check' }, all, count),
+    // tick everything you don't have yet, untick what's already in the audio dump
+    const newOnly = this.items.some((x) => x.already)
+      ? h('button', { class: 'btn sm', 'data-tip': 'Select only the songs that aren’t in your audio dump yet', onclick: () => {
+        for (const b of this.boxes) b.checked = !b._item.already;
+        update();
+      } }, icon('check', 'sm'), 'Only new songs')
+      : null;
+    R.append(h('div', { class: 'klep-results-head' }, h('label', { class: 'check' }, all, count), newOnly,
       this.title ? h('span', { class: 'faint klep-pagetitle' }, '· ' + this.title) : null, h('div', { class: 'grow' }), this.lanes, goBtn), list);
     update();
   }

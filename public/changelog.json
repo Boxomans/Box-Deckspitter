@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.5",
+    "date": "2026-10-11",
+    "notes": [
+      "BoxTape: an “Only new songs” button ticks just the songs that aren’t in your audio dump yet."
+    ]
+  },
+  {
     "version": "1.0.4",
     "date": "2026-10-11",
     "notes": [
