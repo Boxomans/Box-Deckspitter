@@ -2337,6 +2337,9 @@ Object.assign(routes, require('./settings-transfer')({
   log: (msg) => console.log(`[${APP_NAME}] ${msg}`),
 }));
 
+// BoxSwap: profiles of files to hot-swap in a folder (kept in data/boxswap unless you pick another master folder).
+Object.assign(routes, require('./swap-server')({ readJSONBody, requirePath, dataDir: DATA, appRoot: ROOT }));
+
 // Video editor export (frames from the page → ffmpeg).
 Object.assign(routes, require('./render-server')({ tools, readBody, readJSONBody, requirePath, newJob, startJob, runFfmpegJob, cacheDir: path.join(DATA, 'cache', 'video'), log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
 

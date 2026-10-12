@@ -34,6 +34,7 @@ const EDITORS = {
   secure: () => import('./editors/secure.js').then((m) => m.SecureNotesEditor),
   tomcat: () => import('./editors/tomcat.js').then((m) => m.TomcatEditor),
   browser: () => import('./editors/browser.js').then((m) => m.BrowserEditor),
+  swap: () => import('./editors/swap.js').then((m) => m.SwapEditor),
   paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
 
@@ -73,10 +74,13 @@ console.log('spit it out');
 `;
 
 /**
- * Drag `el` and drop it on `zone()`, or flick it toward the zone and let go: either way `onMove()` runs.
+ * Drag `el` and drop it on `zone()`, or flick it toward the zone and let go: either way `onMove(drop)` runs, with the
+ * pointer-up event when it was dropped right on the zone (so it can land where it was let go) or null for a flick.
+ * Dropped back inside `home()` (the place it already is) it runs `onHome(event)` instead, to reorder it there.
+ * `marker(event, el)` is told where the pointer is while dragging (and `null` at the end), to show where it would land.
  * A plain click (no drag) is left alone. A ghost copy follows the pointer and flies to where it lands.
  */
-function flingable(el, zone, onMove) {
+function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const sx = e.clientX;
@@ -102,6 +106,7 @@ function flingable(el, zone, onMove) {
       // a collapsed (empty) right sidebar slides out once the drag heads its way
       if (zone().classList.contains('rail-empty')) zone().classList.toggle('peek', ev.clientX > innerWidth - 260);
       zone().classList.toggle('fling-hot', inside(zone(), ev.clientX, ev.clientY, 20));
+      marker?.(ev, el);
     };
     const up = (ev) => {
       el.removeEventListener('pointermove', move);
@@ -115,6 +120,17 @@ function flingable(el, zone, onMove) {
       const z = zone();
       z.classList.remove('fling-target', 'fling-hot', 'peek');
       el.classList.remove('fling-source');
+      marker?.(null, el);
+      const hm = home?.();
+      if (hm && hm.contains(el) && inside(hm, ev.clientX, ev.clientY, 20)) {
+        // let go where it already lives: it just moves along there
+        ghost.style.transition = 'opacity 0.18s, transform 0.18s';
+        requestAnimationFrame(() => { ghost.style.opacity = '0'; ghost.style.transform = 'scale(0.8)'; });
+        const g0 = ghost;
+        setTimeout(() => g0.remove(), 200);
+        onHome?.(ev);
+        return;
+      }
       const r = z.getBoundingClientRect();
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;
@@ -139,7 +155,8 @@ function flingable(el, zone, onMove) {
       });
       const g = ghost;
       setTimeout(() => g.remove(), 260);
-      if (go) setTimeout(onMove, 120);
+      const dropped = inside(z, ev.clientX, ev.clientY, 20) ? ev : null;
+      if (go) setTimeout(() => onMove(dropped), 120);
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -157,9 +174,9 @@ const TOP_TOOLS = ['btn-music', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-sho
 // tool modes and the home-card name they're renamed by
 // files the video editor can use
 const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
-const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', cut: 'Video editor', secure: 'Secure notes' };
+const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', swap: 'BoxSwap', cut: 'Video editor', secure: 'Secure notes' };
 // tabs that are tools rather than files
-const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'secure', 'tomcat', 'browser'];
+const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'tomcat', 'browser'];
 const TOOL_LABEL = { 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
@@ -516,6 +533,7 @@ class App {
     const tabs = [...rail.querySelectorAll('.rrail-tab')].some((t) => !t.hidden);
     const tools = [...(rail.querySelector('.rrail-tools')?.children || [])].some((t) => !t.hidden);
     rail.classList.toggle('rail-empty', !tabs && !tools);
+    this.layoutRail();
   }
 
   // ---- the ♪ player can sit under its top-bar button or dock as a right-sidebar tab; drag or flick to move it
@@ -529,14 +547,13 @@ class App {
     return this._musicTab;
   }
 
-  setMusicDock(side, { animate = true } = {}) {
+  setMusicDock(side, { animate = true, drop = null } = {}) {
     const btn = $('#btn-music');
     const tab = this.musicRailTab();
     if ((this.settings.musicDock === 'side') !== side) this.saveSettings({ musicDock: side ? 'side' : 'top' });
     if (side) {
-      const spacer = $('#rightrail .rrail-spacer');
-      if (spacer) spacer.before(tab); else $('#rightrail').append(tab);
       btn.hidden = true;
+      if (drop) this.railMove(tab, drop.clientY); else this.placeSaved(tab);
       // dragged in: open it there; at startup: only if it was open when the app closed
       if (animate || this.settings.rightPanel === 'music') this.toggleRightPanel('music', { force: true });
     } else {
@@ -553,8 +570,10 @@ class App {
   wireMusicDock() {
     const topZone = () => $('.titlebar-actions');
     const sideZone = () => $('#rightrail');
-    flingable($('#btn-music'), sideZone, () => this.setMusicDock(true));
-    flingable(this.musicRailTab(), topZone, () => this.setMusicDock(false));
+    const marker = (ev, el) => this.railMarker(ev, el);
+    const inRail = (el) => ({ home: sideZone, onHome: (ev) => this.railMove(el, ev.clientY), marker });
+    flingable($('#btn-music'), sideZone, (drop) => this.setMusicDock(true, { drop }), { marker });
+    flingable(this.musicRailTab(), topZone, () => this.setMusicDock(false), inRail(this.musicRailTab()));
     // chars, claude and clip can move to the top bar too (and back): there they open as a drop-down
     for (const tab of $$('.rrail-tab[data-rpanel]')) {
       const name = tab.dataset.rpanel;
@@ -563,8 +582,9 @@ class App {
         h('span', { class: 'top-panel-glyph' }, tab.querySelector('.rrail-glyph')?.textContent || '•'));
       btn.addEventListener('click', () => this.toggleTopPanel(name));
       $('#btn-music').before(btn);
-      flingable(tab, topZone, () => this.setPanelDock(name, 'top'));
-      flingable(btn, sideZone, () => this.setPanelDock(name, 'side'));
+      flingable(tab, topZone, () => this.setPanelDock(name, 'top'), inRail(tab));
+      flingable(btn, sideZone, (drop) => this.setPanelDock(name, 'side', { drop }), { marker });
+
       tab.title = `${tab.title} · drag or flick it to the top bar to move it there`;
     }
     for (const [name, where] of Object.entries(this.settings.panelDock || {})) if (where === 'top' && SIDE_PANELS[name]) this.setPanelDock(name, 'top', { save: false });
@@ -572,7 +592,95 @@ class App {
     this.syncRail();
   }
 
-  // ---- the sound, theme and shortcuts buttons can move from the top bar to the bottom of the right sidebar (and back)
+  // ---- the right sidebar: anything in it sits wherever it was let go (top, bottom, or anywhere between), and can be
+  //      dragged along it. Items never overlap: one dropped onto another pushes the rest along. Remembered as a
+  //      fraction of the sidebar's height, so the spots hold when the window is resized.
+
+  /** A rail item's name in settings.railPos. */
+  railKey(el) {
+    if (TOP_TOOLS.includes(el.id)) return el.id;
+    if (el.classList?.contains('tomcat-mini')) return 'tomcat-mini';
+    return el.dataset?.rpanel ? `rpanel:${el.dataset.rpanel}` : null;
+  }
+  /** Everything showing in the sidebar. */
+  railItems(skip) {
+    return [...$('#rightrail').children].filter((c) => c !== skip && !c.hidden && !c.classList.contains('rrail-spacer') && !c.classList.contains('rrail-tools'));
+  }
+  /** Into the sidebar (where it sits on screen is up to layoutRail). */
+  placeInRail(el) {
+    const rail = $('#rightrail');
+    this.railTools();
+    if (el.parentElement !== rail) rail.insertBefore(el, rail.querySelector('.rrail-spacer'));
+  }
+  placeSaved(el) { this.placeInRail(el); this.layoutRail(); }
+
+  /** Where each item goes: as near its spot as it can be without overlapping the others. */
+  railTops(items, H, override) {
+    const pos = this.settings.railPos || {};
+    const PAD = 8, GAP = 6;
+    let stack = PAD;
+    const list = items.map((el, i) => {
+      const key = this.railKey(el);
+      const h = el.offsetHeight;
+      let want = override?.el === el ? override.top : (key && pos[key] != null ? pos[key] * H : null);
+      // never placed by hand: tabs stack from the top where they sit, the moved top-bar buttons from the bottom
+      if (want == null) {
+        if (TOP_TOOLS.includes(el.id)) want = H;
+        else { want = stack; stack += h + GAP; }
+      }
+      return { el, h, want, i };
+    }).sort((a, b) => a.want - b.want || a.i - b.i);
+    let prev = PAD - GAP;
+    for (const x of list) { x.top = Math.max(Math.min(x.want, H - PAD - x.h), PAD, prev + GAP); prev = x.top + x.h; }
+    let next = H - PAD + GAP;
+    for (const x of [...list].reverse()) { x.top = Math.max(PAD, Math.min(x.top, next - GAP - x.h)); next = x.top; }
+    return list;
+  }
+  layoutRail() {
+    const rail = $('#rightrail');
+    if (!rail) return;
+    rail.classList.add('rrail-free');
+    const H = rail.clientHeight;
+    const W = rail.clientWidth;
+    if (!H) return;
+    for (const x of this.railTops(this.railItems(), H)) {
+      x.el.style.top = `${Math.round(x.top)}px`;
+      x.el.style.left = `${Math.round((W - x.el.offsetWidth) / 2)}px`;
+    }
+    if (!this._railRO) {
+      // re-place when the window (or something in the sidebar, like the radar's readout) changes size
+      this._railRO = new ResizeObserver(() => cancelAnimationFrame(this._railRaf) || (this._railRaf = requestAnimationFrame(() => this.layoutRail())));
+      this._railRO.observe(rail);
+    }
+    for (const el of this.railItems()) if (!el._railObserved) { el._railObserved = true; this._railRO.observe(el); }
+  }
+  /** Let go at height y (inside the sidebar): its spot is where its middle was. */
+  railMove(el, y) {
+    this.placeInRail(el);
+    const rail = $('#rightrail');
+    const r = rail.getBoundingClientRect();
+    const key = this.railKey(el);
+    if (key) this.saveSettings({ railPos: { ...(this.settings.railPos || {}), [key]: Math.min(1, Math.max(0, (y - r.top - el.offsetHeight / 2) / (r.height || 1))) } });
+    this.syncRail();
+  }
+  /** While dragging over the sidebar: an outline where the item would land. */
+  railMarker(ev, el) {
+    const rail = $('#rightrail');
+    let m = this._railMarker;
+    if (!m) { m = this._railMarker = h('div', { class: 'rrail-marker' }); document.body.append(m); }
+    const r = rail.getBoundingClientRect();
+    if (!ev || rail.classList.contains('rail-empty') || ev.clientX < r.left - 20 || ev.clientX > r.right + 20 || ev.clientY < r.top || ev.clientY > r.bottom) { m.hidden = true; return; }
+    // measure it the size it'll be in the sidebar (a top-bar button is a different shape there)
+    const h0 = el.closest('#rightrail') ? el.offsetHeight : (TOP_TOOLS.includes(el.id) ? 62 : 70);
+    const fake = { offsetHeight: h0 };
+    const probe = this.railTops([...this.railItems(el), fake].map((x) => x), r.height, { el: fake, top: ev.clientY - r.top - h0 / 2 }).find((x) => x.el === fake);
+    m.hidden = false;
+    m.style.left = `${r.left + 2}px`;
+    m.style.width = `${r.width - 4}px`;
+    m.style.top = `${Math.round(r.top + probe.top)}px`;
+    m.style.height = `${h0}px`;
+  }
+
   railTools() {
     if (!this._railTools) {
       this._railTools = h('div', { class: 'rrail-tools' });
@@ -581,19 +689,18 @@ class App {
     return this._railTools;
   }
 
-  setToolDock(id, side, { save = true } = {}) {
+  setToolDock(id, side, { save = true, drop = null } = {}) {
     const el = $(`#${id}`);
     if (!el) return;
+    el.classList.toggle('in-rail', side); // before measuring, so it's sized like the other sidebar items
     if (side) {
-      this.railTools().append(el);
-      // keep the same order as in the top bar
-      [...this._railTools.children].sort((a, b) => TOP_TOOLS.indexOf(a.id) - TOP_TOOLS.indexOf(b.id)).forEach((c) => this._railTools.append(c));
+      if (drop) this.railMove(el, drop.clientY);
+      else this.placeSaved(el);
     } else {
       const bar = $('.titlebar-actions');
       const after = TOP_TOOLS.slice(TOP_TOOLS.indexOf(id) + 1).map((x) => $(`#${x}`)).find((x) => x && x.parentElement === bar);
       if (after) bar.insertBefore(el, after); else bar.append(el);
     }
-    el.classList.toggle('in-rail', side);
     this.syncRail();
     if (save) this.saveSettings({ toolDock: { ...(this.settings.toolDock || {}), [id]: side ? 'side' : 'top' } });
   }
@@ -604,13 +711,14 @@ class App {
       if (!el) continue;
       el.dataset.rlabel = TOOL_LABEL[id];
       // drag or flick it to the other place
-      flingable(el, () => (el.closest('#rightrail') ? $('.titlebar-actions') : $('#rightrail')), () => this.setToolDock(id, !el.closest('#rightrail')));
+      flingable(el, () => (el.closest('#rightrail') ? $('.titlebar-actions') : $('#rightrail')), (drop) => this.setToolDock(id, !el.closest('#rightrail'), { drop }),
+        { home: () => $('#rightrail'), onHome: (ev) => this.railMove(el, ev.clientY), marker: (ev, x) => this.railMarker(ev, x) });
       if ((this.settings.toolDock || {})[id] === 'side') this.setToolDock(id, true, { save: false });
     }
   }
 
   /** Move chars / claude / clip between the right sidebar ('side') and the top bar ('top'). */
-  setPanelDock(name, where, { save = true } = {}) {
+  setPanelDock(name, where, { save = true, drop = null } = {}) {
     const tab = $(`.rrail-tab[data-rpanel="${name}"]`);
     const btn = $(`.top-panel-btn[data-tpanel="${name}"]`);
     if (!tab || !btn) return;
@@ -619,6 +727,7 @@ class App {
     if (!top && this.topPanel === name) this.closeTopPanel();
     tab.hidden = top;
     btn.hidden = !top;
+    if (!top && drop) this.railMove(tab, drop.clientY);
     this.syncRail();
     if (save) this.saveSettings({ panelDock: { ...(this.settings.panelDock || {}), [name]: top ? 'top' : 'side' } });
     if (save && top) this.toggleTopPanel(name); // show where it went
@@ -848,6 +957,7 @@ class App {
       { label: `${this.toolName('BoxTape')} — playlist to MP3s`, icon: 'music', action: () => this.newDocument('tape') },
       { label: `${this.toolName('BoxScribe')} — image to text (OCR)`, icon: 'scan-text', action: () => this.newDocument('scribe') },
       { label: `${this.toolName('BoxDiff')} — compare two files`, icon: 'diff', action: () => this.newDocument('diff') },
+      { label: `${this.toolName('BoxSwap')} — swap sets of files in a folder`, icon: 'swap', action: () => this.newDocument('swap') },
       { label: `${this.toolName('Secure notes')} — passwords & private notes`, icon: 'lock', action: () => this.newDocument('secure') },
       { label: 'Music player', icon: 'music', action: () => this.music.open() },
       // web pages need the desktop app's <webview>s
@@ -1258,6 +1368,7 @@ class App {
       tape: { mode: 'tape', ext: '', base: this.toolName('BoxTape') },
       scribe: { mode: 'scribe', ext: '', base: this.toolName('BoxScribe') },
       diff: { mode: 'diff', ext: '', base: this.toolName('BoxDiff') },
+      swap: { mode: 'swap', ext: '', base: this.toolName('BoxSwap') },
       secure: { mode: 'secure', ext: '', base: this.toolName('Secure notes') },
       tomcat: { mode: 'tomcat', ext: '', base: 'F-14F Super Tomcat' },
       browser: { mode: 'browser', ext: '', base: 'Browser' },
@@ -1270,7 +1381,7 @@ class App {
       images = await pickOpen({ multi: true, title: 'Choose images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
       if (!images) return;
     }
-    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'secure' || kind === 'tomcat' || kind === 'browser') && !opts.another) {
+    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'swap' || kind === 'secure' || kind === 'tomcat' || kind === 'browser') && !opts.another) {
       const existing = this.tabs.find((t) => t.mode === spec.mode);
       if (existing) { this.activate(existing); return existing; }
     }
@@ -1695,6 +1806,7 @@ class App {
       ['music', 'BoxTape', 'youtube playlist → mp3s', () => this.newDocument('tape')],
       ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
       ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
+      ['swap', 'BoxSwap', 'profiles of files · hot-swap a folder', () => this.newDocument('swap')],
       ['lock', 'Secure notes', 'passwords & private notes · encrypted', () => this.newDocument('secure')],
       ...(window.bdsShell?.browser ? [['globe', 'Browser', 'the web · send pages & media to the dumps', () => this.newDocument('browser')]] : []),
     ], (c) => c[1])) {

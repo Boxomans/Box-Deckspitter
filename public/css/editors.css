@@ -904,3 +904,41 @@ textarea.sn-input { resize: none; min-height: 140px; height: 100%; line-height: 
 .sn-empty { flex: 1; display: grid; place-items: center; align-content: center; gap: 10px; color: var(--text-3); font-size: 13px; }
 .sn-form { display: flex; flex-direction: column; gap: 8px; min-width: 320px; }
 @media (max-width: 720px) { .sn-body { grid-template-columns: 1fr; } .sn-side { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); } }
+
+/* BoxSwap */
+.bs-g { background: linear-gradient(135deg, #f5c26b, #ff7ac6 55%, #b48cff) !important; -webkit-background-clip: text !important; background-clip: text !important; }
+.bs-store { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg-2); font-size: 12.5px; color: var(--text-2); }
+.bs-path { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.bs-pill { flex: none; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 11px; color: var(--text-3); white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.bs-pill.on { color: var(--accent); border-color: var(--accent); }
+.bs-body { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 760px) { .bs-body { grid-template-columns: 1fr; } }
+.bs-targets { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.bs-target { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); color: var(--text-2); text-align: left; cursor: pointer; font: inherit; }
+.bs-target:hover { border-color: var(--text-3); }
+.bs-target.sel { border-color: var(--accent); background: var(--bg-3, var(--bg-2)); color: var(--text); }
+.bs-target.gone { opacity: 0.6; }
+.bs-target-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bs-target-name b { font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-target-name span { font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-detail { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.bs-detail-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bs-detail-title { display: flex; flex-direction: column; min-width: 0; }
+.bs-detail-title b { font-size: 18px; }
+.bs-detail-title span { font-size: 11px; color: var(--text-3); word-break: break-all; }
+.bs-profs { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+.bs-prof { display: flex; align-items: center; gap: 12px; padding: 11px 14px; background: var(--bg-2); }
+.bs-prof + .bs-prof { border-top: 1px solid var(--line); }
+.bs-prof.on { background: color-mix(in srgb, var(--accent) 9%, var(--bg-2)); }
+.bs-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--text-3); }
+.bs-prof.on .bs-dot { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.bs-prof-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bs-prof-name b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-prof-name span { font-size: 11px; color: var(--text-3); }
+.bs-warn, .bs-note { display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border-radius: 9px; font-size: 12px; }
+.bs-warn { background: rgba(255, 107, 139, 0.1); color: #ff8fa6; border: 1px solid rgba(255, 107, 139, 0.35); }
+.bs-note { background: var(--bg-2); color: var(--text-2); border: 1px solid var(--line); }
+.bs-help { font-size: 11.5px; color: var(--text-3); line-height: 1.55; margin: 0; }
+.bs-empty { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 18px; border: 1px dashed var(--line); border-radius: 11px; color: var(--text-2); font-size: 12.5px; }
+.bs-empty p { margin: 0; line-height: 1.5; }
+.bs-plan ul { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }

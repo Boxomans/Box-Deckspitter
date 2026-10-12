@@ -38,6 +38,7 @@ const HOSTILE_MISSILES = {
   'PL-15': { speedMach: 5.0, turnRateDps: 22 },
 };
 // points and $ per kill
+const INCOME = 0.5; // $ per kill is half the bounty below
 const BOUNTY = { 'J-11': [100, 10], 'J-36': [150, 15], 'PL-15': [50, 5], 'PL-21': [80, 8] };
 const NOTCH_HOLD = 5; // seconds without firing after a notch
 // missiles don't always kill: a target breaks hard as one closes in (the seeker has to out-turn it), and a fuse can dud
@@ -47,7 +48,10 @@ const overshootChance = (agility, turnDps) => clamp(0.25 * agility * (20 / turnD
 const dudChance = (fuseLevel) => Math.max(0.02, 0.15 - 0.025 * fuseLevel);
 export const SPEEDS = [1, 2, 3];
 const MAGAZINE_STEP = { 'FOX-1': 1, 'FOX-2': 2, 'FOX-3': 1 };
-/** Hangar upgrades: each level costs base·1.6^level. */
+/**
+ * Hangar upgrades: each level costs base·growth^level (growth 1.6 unless given). max Infinity: no cap.
+ * `rebirth: n`: only in the hangar once you've reborn n times.
+ */
 export const UPGRADES = [
   { id: 'reload', name: 'Reload crews', what: 'Missiles come back 10% faster per level', base: 60, max: 5 },
   { id: 'magazine', name: 'Extra rails', what: '+1 AIM-7R, +2 AIM-9X, +1 AIM-54F per level', base: 120, max: 3 },
@@ -58,8 +62,14 @@ export const UPGRADES = [
   { id: 'flares', name: 'Bigger dispenser', what: '+2 chaff/flares and 15% faster reload per level', base: 90, max: 3 },
   { id: 'notch', name: 'Beam training', what: 'Notch is ready 10% sooner per level', base: 110, max: 5 },
   { id: 'ecm', name: 'ECM pod', what: '6% chance per level to spoof each inbound missile', base: 150, max: 5 },
+  { id: 'contracts', name: 'Defense contracts', what: '+10% $ from every kill per level. No limit.', base: 200, max: Infinity, growth: 1.35 },
+  { id: 'armor', name: 'Armor plating', what: 'Shrug off one missile hit per sortie per level', base: 2500, max: 3, rebirth: 1 },
 ];
-export const upgradeCost = (u, level) => Math.round(u.base * 1.6 ** level);
+export const upgradeCost = (u, level) => Math.round(u.base * (u.growth || 1.6) ** level);
+/** Rebirth: at this much $, trade the $ and every upgrade for a rebirth, which opens new upgrades. */
+export const REBIRTH_AT = 1_000_000;
+export const unlockedUpgrades = (rebirths = 0) => UPGRADES.filter((u) => (u.rebirth || 0) <= rebirths);
+export const nextUnlock = (rebirths = 0) => UPGRADES.filter((u) => (u.rebirth || 0) > rebirths).sort((a, b) => a.rebirth - b.rebirth)[0] || null;
 
 const BANDIT_TYPES = [
   { name: 'J-36', mach: 3.0, spawnMin: 180, spawnMax: 185 },
@@ -138,6 +148,7 @@ class TomcatGame {
     this.usedAuto = this.auto; this.autoCd = 0; this.restartIn = 0;
     this.flares = this.flareMax(); this.flareT = 0; this.flareCd = 0; this.flareFx = 0;
     this.notchCd = 0; this.notchHold = 0;
+    this.armor = this.upgrades().armor || 0;
     this.inv = Object.fromEntries(Object.keys(MISSILES).map((k) => [k, { count: this.spec(k).max, regenT: 0, regenActive: false }]));
     this.foxMode = 'FOX-1';
     this.infoMode = null;
@@ -328,7 +339,8 @@ class TomcatGame {
   award(what) {
     // later waves pay more (+15% a wave), so the money keeps up with the hangar prices
     const pay = 1 + 0.15 * this.heat();
-    const [pts, cash] = (BOUNTY[what] || [50, 5]).map((n) => Math.round(n * pay));
+    const [pts, base] = (BOUNTY[what] || [50, 5]).map((n) => Math.round(n * pay));
+    const cash = Math.max(1, Math.round(INCOME * base * (1 + 0.1 * (this.upgrades().contracts || 0))));
     this.score += pts;
     this.earned += cash;
     this.onEarn?.(cash);
@@ -488,7 +500,11 @@ class TomcatGame {
         m.ecmRolled = true;
         if (Math.random() < 0.06 * (this.upgrades().ecm || 0)) { this.hostiles.splice(i, 1); this.toast(`${m.id} SPOOFED (ECM)`, 2, '#c9a8ff'); continue; }
       }
-      if (m.distance <= 1.0) { this.hostiles.splice(i, 1); this.end(`HIT BY ${m.wpn}`); }
+      if (m.distance <= 1.0) {
+        this.hostiles.splice(i, 1);
+        if (this.armor > 0) { this.armor--; this.toast(`HIT BY ${m.wpn} — ARMOR HELD${this.armor ? ` (${this.armor} LEFT)` : ''}`, 2.4, '#ffb36b'); continue; }
+        this.end(`HIT BY ${m.wpn}`);
+      }
     }
   }
 
@@ -1507,25 +1523,71 @@ export class TomcatEditor extends BaseEditor {
     const t = this.app.settings.tomcat || {};
     const cash = t.cash || 0;
     const lv = t.upgrades || {};
-    const rows = UPGRADES.map((u) => {
+    const reborn = t.rebirths || 0;
+    const rows = unlockedUpgrades(reborn).map((u) => {
       const level = lv[u.id] || 0;
       const cost = upgradeCost(u, level);
       const maxed = level >= u.max;
       const buy = h('button', { class: 'th-buy', disabled: maxed || cash < cost }, maxed ? 'MAX' : `$${cost.toLocaleString()}`);
       buy.addEventListener('click', () => this.buy(u));
-      return h('div', { class: 'th-row' },
-        h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, u.name), h('div', { class: 'th-what' }, u.what)),
-        h('div', { class: 'th-pips' }, ...Array.from({ length: u.max }, (_, i) => h('span', { class: i < level ? 'on' : '' }))),
-        buy);
+      const pips = u.max === Infinity
+        ? h('div', { class: 'th-pips th-level' }, `LV ${level}`)
+        : h('div', { class: 'th-pips' }, ...Array.from({ length: u.max }, (_, i) => h('span', { class: i < level ? 'on' : '' })));
+      return h('div', { class: `th-row${u.rebirth ? ' th-reborn' : ''}` },
+        h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, u.rebirth ? `★ ${u.name}` : u.name), h('div', { class: 'th-what' }, u.what)),
+        pips, buy);
     });
+    // rebirth: shown once there's something new it would open
+    const next = nextUnlock(reborn);
+    if (next) {
+      const ready = cash >= REBIRTH_AT;
+      const btn = h('button', { class: 'th-buy th-rebirth-btn', disabled: !ready }, this.rebirthArmed ? 'CONFIRM' : 'REBIRTH');
+      btn.addEventListener('click', () => this.rebirth());
+      rows.push(h('div', { class: 'th-row th-rebirth' },
+        h('div', { class: 'th-info' },
+          h('div', { class: 'th-name' }, `Rebirth${reborn ? ` ${reborn + 1}` : ''}`),
+          h('div', { class: 'th-what' }, this.rebirthArmed
+            ? `Sure? Your $ and every upgrade go back to zero. High scores and stats stay. Opens ★ ${next.name}.`
+            : `At $${REBIRTH_AT.toLocaleString()}: start over with $0 and no upgrades, and open a new upgrade: ★ ${next.name}.`),
+          ready ? null : h('div', { class: 'th-bar' }, h('span', { style: `width:${Math.min(100, (cash / REBIRTH_AT) * 100).toFixed(1)}%` }))),
+        btn));
+    }
     const close = h('button', { class: 'th-close', title: 'Close (H or Esc)' }, '×');
     close.addEventListener('click', () => this.closeHangar());
     const focused = this.hangar.contains(document.activeElement);
     this.hangar.replaceChildren(h('div', { class: 'th-card' },
-      h('div', { class: 'th-head' }, h('span', {}, 'HANGAR'), h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`), close),
+      h('div', { class: 'th-head' }, h('span', {}, 'HANGAR'), reborn ? h('span', { class: 'th-stars', title: `Reborn ${reborn}×` }, `★${reborn}`) : null, h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`), close),
       h('div', { class: 'th-sub' }, 'Splash bandits and missiles for $. Upgrades stay between sorties.'),
       ...rows));
     if (focused) this.hangar.focus();
+  }
+
+  /** First click arms it, the second does it: the $ and upgrades go, the rebirth count goes up. */
+  rebirth() {
+    const t = { ...(this.app.settings.tomcat || {}) };
+    if ((t.cash || 0) < REBIRTH_AT || !nextUnlock(t.rebirths || 0)) return;
+    if (!this.rebirthArmed) {
+      this.rebirthArmed = true;
+      clearTimeout(this.rebirthDisarm);
+      this.rebirthDisarm = setTimeout(() => { this.rebirthArmed = false; if (this.hangar) this.renderHangar(); }, 6000);
+      this.renderHangar();
+      return;
+    }
+    this.rebirthArmed = false;
+    clearTimeout(this.rebirthDisarm);
+    t.cash = 0;
+    t.upgrades = {};
+    t.rebirths = (t.rebirths || 0) + 1;
+    this.app.settings.tomcat = t;
+    this.flight.flushCash();
+    // the ramp loads to the new (smaller) racks
+    const g = this.game;
+    for (const [k, inv] of Object.entries(g.inv)) inv.count = Math.min(inv.count, g.spec(k).max);
+    g.flares = Math.min(g.flares, g.flareMax());
+    g.armor = 0;
+    this.app.sounds?.play?.('click');
+    this.renderHangar();
+    this.refreshStatus();
   }
 
   buy(u) {
@@ -1533,7 +1595,7 @@ export class TomcatEditor extends BaseEditor {
     const lv = { ...(t.upgrades || {}) };
     const level = lv[u.id] || 0;
     const cost = upgradeCost(u, level);
-    if (level >= u.max || (t.cash || 0) < cost) return;
+    if (level >= u.max || (t.cash || 0) < cost || (u.rebirth || 0) > (t.rebirths || 0)) return;
     const g = this.game;
     const before = Object.fromEntries(Object.keys(g.inv).map((k) => [k, g.spec(k).max]));
     t.cash -= cost;
@@ -1541,10 +1603,12 @@ export class TomcatEditor extends BaseEditor {
     t.upgrades = lv;
     this.app.settings.tomcat = t;
     this.flight.flushCash();
+    if (u.id === 'armor') g.armor = lv.armor; // bought on the ramp: on for this sortie
     // new rails come loaded
     for (const [k, inv] of Object.entries(g.inv)) inv.count += g.spec(k).max - before[k];
     this.app.sounds?.play?.('click');
     this.renderHangar();
+    this.refreshStatus();
   }
 
   status() {

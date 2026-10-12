@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.0.24",
+    "date": "2026-10-12",
+    "notes": [
+      "New tool: BoxSwap. Pick a folder (like a game's Mods or Data folder), make profiles of files for it, and hot-swap which profile is in. Profiles live in data/boxswap or a master folder you pick.",
+      "BoxSwap never deletes: switches never overwrite, a crash mid-switch is undone next time, and removed profiles go to a .removed folder.",
+      "BoxSwap: right-click a folder or profile to set a description, shown at the bottom of its menu.",
+      "Right sidebar: drop items anywhere along it (top, middle or bottom) and drag to reorder; items never overlap and the layout is remembered.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.23",
     "date": "2026-10-12",
     "notes": [

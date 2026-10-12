@@ -54,6 +54,7 @@ export function showMenu(items, pos, opts = {}) {
   list.forEach((item) => {
     if (item.sep) { el.append(h('div', { class: 'menu-sep' })); return; }
     if (item.heading) { el.append(h('div', { class: 'menu-heading' }, item.heading)); return; }
+    if (item.note) { el.append(h('div', { class: 'menu-note' }, item.note)); return; }
     const btn = h('button', { class: 'menu-item', role: 'menuitem', disabled: !!item.disabled },
       h('span', { class: 'mi-icon' }, item.checked ? icon('check', 'sm') : item.icon ? icon(item.icon, 'sm') : null),
       h('span', { class: 'mi-label' }, item.label),
