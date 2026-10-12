@@ -97,6 +97,8 @@ function flingable(el, zone, onMove) {
       }
       ghost.style.left = `${ev.clientX - ghost.offsetWidth / 2}px`;
       ghost.style.top = `${ev.clientY - ghost.offsetHeight / 2}px`;
+      // a collapsed (empty) right sidebar slides out once the drag heads its way
+      if (zone().classList.contains('rail-empty')) zone().classList.toggle('peek', ev.clientX > innerWidth - 260);
       zone().classList.toggle('fling-hot', inside(zone(), ev.clientX, ev.clientY, 20));
     };
     const up = (ev) => {
@@ -109,7 +111,7 @@ function flingable(el, zone, onMove) {
       el.addEventListener('click', swallow, { capture: true, once: true });
       setTimeout(() => el.removeEventListener('click', swallow, { capture: true }), 50);
       const z = zone();
-      z.classList.remove('fling-target', 'fling-hot');
+      z.classList.remove('fling-target', 'fling-hot', 'peek');
       el.classList.remove('fling-source');
       const r = z.getBoundingClientRect();
       const cx = r.left + r.width / 2;
@@ -426,6 +428,15 @@ class App {
     });
   }
 
+  /** The right sidebar collapses when nothing is in it (it slides out again while a button is dragged toward it). */
+  syncRail() {
+    const rail = $('#rightrail');
+    if (!rail) return;
+    const tabs = [...rail.querySelectorAll('.rrail-tab')].some((t) => !t.hidden);
+    const tools = rail.querySelector('.rrail-tools')?.children.length > 0;
+    rail.classList.toggle('rail-empty', !tabs && !tools);
+  }
+
   // ---- the ♪ player can sit under its top-bar button or dock as a right-sidebar tab; drag or flick to move it
   musicRailTab() {
     if (!this._musicTab) {
@@ -455,6 +466,7 @@ class App {
       btn.hidden = false;
     }
     tab.classList.toggle('playing', !!this.music.playing);
+    this.syncRail();
   }
 
   wireMusicDock() {
@@ -476,6 +488,7 @@ class App {
     }
     for (const [name, where] of Object.entries(this.settings.panelDock || {})) if (where === 'top' && SIDE_PANELS[name]) this.setPanelDock(name, 'top', { save: false });
     this.wireToolDock();
+    this.syncRail();
   }
 
   // ---- the sound, theme and shortcuts buttons can move from the top bar to the bottom of the right sidebar (and back)
@@ -500,6 +513,7 @@ class App {
       if (after) bar.insertBefore(el, after); else bar.append(el);
     }
     el.classList.toggle('in-rail', side);
+    this.syncRail();
     if (save) this.saveSettings({ toolDock: { ...(this.settings.toolDock || {}), [id]: side ? 'side' : 'top' } });
   }
 
@@ -524,6 +538,7 @@ class App {
     if (!top && this.topPanel === name) this.closeTopPanel();
     tab.hidden = top;
     btn.hidden = !top;
+    this.syncRail();
     if (save) this.saveSettings({ panelDock: { ...(this.settings.panelDock || {}), [name]: top ? 'top' : 'side' } });
     if (save && top) this.toggleTopPanel(name); // show where it went
     else if (save) this.toggleRightPanel(name, { force: true });

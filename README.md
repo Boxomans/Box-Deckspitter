@@ -13,9 +13,9 @@ downloads, update checks).
 
 | | |
 |---|---|
-| **Box-DocSpitter.vbs** | Starts the app in its own window, with no console. Drag files onto it to open them. |
+| **Box-DocSpitter.exe** | Starts the app in its own window, with no console. Drag files onto it to open them. On a fresh copy it sets up `node_modules` first. |
 | **Create Shortcuts.bat** | Adds Box-DocSpitter to your Desktop and Start menu, with its icon. Run it again after moving the folder. |
-| **Box-DocSpitter (with console).bat** | Same as the `.vbs`, but shows the server log. |
+| **Box-DocSpitter (with console).bat** | Same as the `.exe`, but shows the server log. |
 | **Restore previous version.bat** | Puts back the version from before the last in-app update. Works even if the app won't start. |
 
 The app opens in its own window (built on Electron, in `node_modules/electron`), with its own taskbar icon
@@ -68,7 +68,7 @@ new. **Download** fetches it and checks every file for errors first; **Restart &
 The repo holds only the source (about 2 MB). The libraries and the Electron runtime come from npm:
 
 1. Install **Node.js 18+** (`winget install OpenJS.NodeJS.LTS`) and download or clone this repo.
-2. Double-click `Box-DocSpitter.vbs`. On first run it does `npm install` (a few hundred MB), then opens the
+2. Double-click `Box-DocSpitter.exe`. On first run it does `npm install` (a few hundred MB), then opens the
    app. Or run `npm install` yourself in the folder.
 3. Optional: `winget install yt-dlp` and `winget install Gyan.FFmpeg` for BoxVidKlep, BoxTape and faster video
    exports.
@@ -80,7 +80,7 @@ Your personal data (`data/`) and the dumps are never part of the repo. They're l
 The folder is self-contained. Nothing needs installing, not even Node.js, because Electron brings its own.
 1. Copy the whole `Box-DocSpitter` folder, including `node_modules`, anywhere: another PC, a USB stick or `C:\Apps`.
    Keep the path reasonably short. Windows can't start programs more than about 260 characters deep.
-2. On the new PC, double-click `Create Shortcuts.bat`, or just `Box-DocSpitter.vbs`.
+2. On the new PC, double-click `Create Shortcuts.bat`, or just `Box-DocSpitter.exe`.
 
 Everything the app stores lives in `data\`, including Electron's cache. Nothing goes into `%APPDATA%`.
 Before handing a copy to someone else, use **Settings → Reset → Reset to clean state**. It erases settings,

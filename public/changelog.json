@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.18",
+    "date": "2026-10-12",
+    "notes": [
+      "Box-DocSpitter now starts from Box-DocSpitter.exe instead of the old .vbs script (drag files onto it to open them; on a fresh copy it still sets up the app files first). The app keeps the .exe up to date itself.",
+      "The right sidebar folds away when nothing is docked in it, giving the page more room, and slides back out when you drag a button toward it."
+    ]
+  },
+  {
     "version": "1.0.17",
     "date": "2026-10-12",
     "notes": [

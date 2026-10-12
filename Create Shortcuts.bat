@@ -13,8 +13,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "    $lnk.TargetPath = $electron;" ^
   "    $lnk.Arguments = '\"' + (Join-Path $dir 'electron\main.js') + '\"';" ^
   "  } else {" ^
-  "    $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe';" ^
-  "    $lnk.Arguments = '\"' + (Join-Path $dir 'Box-DocSpitter.vbs') + '\"';" ^
+  "    $lnk.TargetPath = Join-Path $dir 'Box-DocSpitter.exe';" ^
+  "    $lnk.Arguments = '';" ^
   "  }" ^
   "  $lnk.WorkingDirectory = $dir;" ^
   "  $lnk.IconLocation = (Join-Path $dir 'public\assets\icon.ico') + ',0';" ^

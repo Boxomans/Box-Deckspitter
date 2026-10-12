@@ -1321,6 +1321,36 @@ function scanTool() {
   return scanToolPromise;
 }
 
+/**
+ * Keeps Box-DocSpitter.exe (the launcher) in step with tools/launcher.cs: the source's hash is stamped into
+ * the .exe, and it's rebuilt only when that stamp is missing (no .exe, or an update changed the source).
+ */
+async function buildLauncher() {
+  if (!IS_WIN) return;
+  const src = path.join(ROOT, 'tools', 'launcher.cs');
+  const exe = path.join(ROOT, `${APP_NAME}.exe`);
+  // Line endings ignored: git may check the source out with either.
+  const hash = crypto.createHash('sha1').update((await fsp.readFile(src, 'utf8')).replace(/\r\n/g, '\n')).digest('hex').slice(0, 10);
+  const stamp = `bds-launcher:${hash}`;
+  if ((await fsp.readFile(exe).catch(() => Buffer.alloc(0))).includes(stamp)) return;
+  const windir = process.env.WINDIR || 'C:\\Windows';
+  const csc = [
+    path.join(windir, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'),
+    path.join(windir, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe'),
+  ].find((p) => fs.existsSync(p));
+  if (!csc) return;
+  const dir = path.join(DATA, 'bin');
+  await fsp.mkdir(dir, { recursive: true });
+  const stampSrc = path.join(dir, 'launcher-stamp.cs');
+  const out = path.join(dir, `${APP_NAME}.exe`);
+  await fsp.writeFile(stampSrc, `[assembly: System.Reflection.AssemblyDescription("${stamp}")]\n`);
+  await new Promise((resolve, reject) => execFile(csc, ['/nologo', '/optimize+', '/target:winexe', `/out:${out}`,
+    `/win32icon:${path.join(PUBLIC, 'assets', 'icon.ico')}`, src, stampSrc], { windowsHide: true, timeout: 60000 },
+  (err, stdout) => (err ? reject(new Error('Launcher compile failed: ' + (stdout || err.message))) : resolve())));
+  await fsp.rename(out, exe); // fails harmlessly if the .exe is still running; tried again next start
+  console.log(`[${APP_NAME}] rebuilt ${APP_NAME}.exe`);
+}
+
 function applyScanLine(tree, job, line) {
   const f = line.split('\t');
   switch (f[0]) {
@@ -2534,6 +2564,7 @@ function listen(port) {
   await writeJSON(path.join(DATA, 'session.json'), { port: PORT, pid: process.pid, startedAt }).catch(() => {});
   console.log(`[${APP_NAME}] v${VERSION} running at http://${HOST}:${PORT}/`);
   if (APP_MODE || SHELL_MODE) openAppWindow(fileArgs);
+  buildLauncher().catch((e) => console.error(`[${APP_NAME}] ${e.message}`));
 })().catch((e) => { console.error(e); process.exit(1); });
 
 if (SHELL_MODE) process.on('disconnect', () => shutdown('shell closed'));

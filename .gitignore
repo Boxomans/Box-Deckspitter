@@ -13,7 +13,6 @@ audio-dump/
 
 # Machine-specific shortcuts and tools
 *.lnk
-Box-DocSpitter.exe
 .claude/
 
 # OS / editor clutter

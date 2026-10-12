@@ -53,13 +53,13 @@ const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 module.exports = function createAssoc({ root, isWin, readJSONBody }) {
   const electron = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
   const mainJs = path.join(root, 'electron', 'main.js');
-  const vbs = path.join(root, `${APP}.vbs`);
+  const launcher = path.join(root, `${APP}.exe`);
   const icon = path.join(root, 'public', 'assets', 'icon.ico');
 
   /** The command Windows runs to open a file with Box-DocSpitter. */
   function openCommand() {
     if (fs.existsSync(electron)) return `"${electron}" "${mainJs}" "%1"`;
-    return `"${path.join(process.env.WINDIR || 'C:\\Windows', 'System32', 'wscript.exe')}" "${vbs}" "%1"`;
+    return `"${launcher}" "%1"`;
   }
 
   async function status() {

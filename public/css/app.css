@@ -1302,3 +1302,8 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 .applock-err { min-height: 16px; font-size: 12px; color: #ff6b8a; text-align: center; }
 .applock-card .btn { width: 100%; justify-content: center; }
 .applock-hint { font-size: 11px; text-align: center; }
+
+/* the right sidebar folds away when it's empty, and slides back out while a button is dragged toward it */
+#rightrail { transition: width .18s ease, padding .18s ease, border-color .18s; }
+#rightrail.rail-empty { width: 0; padding-left: 0; padding-right: 0; border-left-color: transparent; overflow: hidden; }
+#rightrail.rail-empty.peek { width: 30px; border-left-color: var(--line); box-shadow: inset 2px 0 0 var(--accent-line); }
