@@ -1285,3 +1285,20 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .drop-into { background: var(--accent-soft-2) !important; outline: 1px dashed var(--accent); outline-offset: -2px; }
 .dump-folder .dump-thumb { color: var(--accent); }
 .dump-folder { cursor: pointer; }
+
+/* home: clear the recent list */
+.home-clear { order: 2; border: 0; background: none; color: var(--text-3); font: inherit; letter-spacing: inherit; text-transform: inherit; padding: 2px 6px; border-radius: 5px; cursor: pointer; }
+.home-clear:hover { color: var(--text); background: var(--bg-3); }
+.home-section-title:has(.home-clear)::after { order: 1; }
+
+/* app PIN lock: covers everything; what's behind isn't even drawn */
+body.app-locked > *:not(.applock) { visibility: hidden !important; }
+.applock { position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center; background: var(--bg-0); -webkit-app-region: drag; }
+.applock-card { -webkit-app-region: no-drag; display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(340px, calc(100vw - 32px)); padding: 28px 24px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--bg-1); box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
+.applock-logo { color: var(--accent); }
+.applock-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.applock-input, .applock-field { width: 100%; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-0); color: var(--text); font: 15px var(--font-mono); text-align: center; letter-spacing: 0.2em; }
+.applock-field { text-align: left; letter-spacing: normal; font-size: 13px; }
+.applock-err { min-height: 16px; font-size: 12px; color: #ff6b8a; text-align: center; }
+.applock-card .btn { width: 100%; justify-content: center; }
+.applock-hint { font-size: 11px; text-align: center; }

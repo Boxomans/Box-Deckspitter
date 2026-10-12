@@ -2252,6 +2252,8 @@ const routes = {
     const removed = [];
     for (const name of await fsp.readdir(DATA).catch(() => [])) {
       if (name === 'session.json' || name === 'update') continue; // update bookkeeping isn't user data
+      // Secure notes are only erased when that box was ticked (they can't be got back)
+      if (name === 'secure-notes' && !body.secureNotes) continue;
       const full = path.join(DATA, name);
       if (name === 'backups') {
         // keep backups of earlier app versions (so "go back" still works); everything else in there goes
@@ -2294,6 +2296,14 @@ const routes = {
 
 // Windows file associations ("open .pdf with Box-DocSpitter").
 Object.assign(routes, require('./file-assoc')({ root: ROOT, isWin: IS_WIN, readJSONBody }));
+
+// Settings export / import (.zip: settings + the still-encrypted Secure notes) and the app PIN lock.
+Object.assign(routes, require('./settings-transfer')({
+  root: ROOT, data: DATA, version: VERSION, readJSONBody, requirePath,
+  settings: () => settingsObj(),
+  saveSettings: async (next) => { settingsCache = next; await writeJSON(SETTINGS_FILE, settingsCache); },
+  log: (msg) => console.log(`[${APP_NAME}] ${msg}`),
+}));
 
 // Video editor export (frames from the page → ffmpeg).
 Object.assign(routes, require('./render-server')({ tools, readBody, readJSONBody, requirePath, newJob, startJob, runFfmpegJob, cacheDir: path.join(DATA, 'cache', 'video'), log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));

@@ -2,7 +2,7 @@
 // (own icon, own taskbar entry, no browser chrome). Everything still talks to 127.0.0.1 with the per-launch token.
 // Loaded by electron/main.js (the boot file), which applies updates and rolls them back if this doesn't start.
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeImage, clipboard, ClipboardItem } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeImage, clipboard, ClipboardItem, powerMonitor } = require('electron');
 const { fork } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -256,6 +256,31 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     return made;
   });
 
+  // ---- Secure notes (electron/secure-notes.js): encrypted here, in the window's own process. Only the app's
+  // own page may ask; the local server never sees any of it.
+  const notes = require('./secure-notes.js')({
+    dir: path.join(ROOT, 'data', 'secure-notes'),
+    clipboard,
+    onLockChange: (unlocked, reason) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        // while the notes are open the window shows black in screenshots, recordings and screen shares
+        try { w.setContentProtection(!!unlocked); } catch { /* not supported */ }
+        if (!unlocked) w.webContents.send('bds:notes-locked', reason || 'manual');
+      }
+    },
+  });
+  const fromApp = (e) => { try { return !!origin && new URL(e.senderFrame?.url || e.sender.getURL()).origin === origin; } catch { return false; } };
+  ipcMain.handle('bds:notes', (e, req) => (fromApp(e) ? notes.handle(req || {}) : { ok: false, error: 'Not allowed', code: 'denied' }));
+  // Windows locked, the PC going to sleep: lock the notes (and tell the page, for the app's PIN lock)
+  app.whenReady().then(() => {
+    for (const ev of ['lock-screen', 'suspend']) {
+      powerMonitor.on(ev, () => {
+        notes.lock({ reason: ev });
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send('bds:system-lock', ev);
+      });
+    }
+  });
+
   ipcMain.handle('bds:fullscreen', (e, on) => {
     const win = winOf(e);
     if (win) win.setFullScreen(!!on);
@@ -293,6 +318,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
 
   app.on('will-quit', () => {
     quitting = true;
+    notes.lock({ hard: true, reason: 'quit' });
     if (server) { try { server.disconnect(); } catch { /* gone */ } try { server.kill(); } catch { /* gone */ } }
   });
 }

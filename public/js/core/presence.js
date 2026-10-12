@@ -26,6 +26,8 @@ const LINES = {
   paint: { plain: ['Painting'], silly: ['painting something', 'making art (allegedly)', 'pushing pixels', 'using the paint bucket irresponsibly'] },
   tape: { plain: ['Making a mixtape'], silly: ['making a mixtape', 'turning a playlist into mp3s', 'curating the audio dump'] },
   storage: { plain: ['Checking disk space'], silly: ['finding out where the space went', 'staring at a treemap', 'judging their downloads folder'] },
+  // never anything about what's in them
+  secure: { plain: ['Box-DocSpitter'], silly: ['Box-DocSpitter'] },
   home: { plain: ['On the home screen'], silly: ['deciding what to spit out', 'idling on the home screen', 'thinking about documents'] },
 };
 
@@ -47,7 +49,7 @@ function category(tab) {
   return LINES[tab.mode] ? tab.mode : 'doc';
 }
 
-const KIND = { mail: 'email', video: 'video', form: 'form', klep: 'video', storage: 'drive', doc: 'document', pdf: 'pdf', text: 'text file', config: 'config', html: 'webpage', markdown: 'markdown note', code: 'code file', sheet: 'spreadsheet', image: 'image', hex: 'binary file', home: 'nothing yet' };
+const KIND = { secure: 'file', mail: 'email', video: 'video', form: 'form', klep: 'video', storage: 'drive', doc: 'document', pdf: 'pdf', text: 'text file', config: 'config', html: 'webpage', markdown: 'markdown note', code: 'code file', sheet: 'spreadsheet', image: 'image', hex: 'binary file', home: 'nothing yet' };
 
 /** Fill {ext} {kind} {tabs} — the only things custom lines can reveal. */
 function fill(text, tab, cat, tabCount) {

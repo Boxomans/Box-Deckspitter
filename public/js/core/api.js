@@ -93,6 +93,8 @@ export const api = {
   presence: (body) => request('POST', '/api/presence', { json: body }),
   presenceStatus: () => request('GET', '/api/presence'),
 
+  get: (url) => request('GET', url),
+  post: (url, json = {}) => request('POST', url, { json }),
   /** dir: a folder in the dump ('' = the top) → its folders and files; leave it out for every file. */
   dump: (kind = 'image', dir) => request('GET', `/api/dump?kind=${enc(kind)}${dir != null ? `&dir=${enc(dir)}` : ''}`),
   dumpFolder: (path, kind = 'media') => request('POST', '/api/dump/folder', { json: { path, kind } }),

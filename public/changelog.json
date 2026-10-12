@@ -1,5 +1,20 @@
 [
   {
+    "version": "1.0.17",
+    "date": "2026-10-12",
+    "notes": [
+      "New: Secure notes (Tools → Secure notes) — passwords and private notes, encrypted on this PC. Only the app window can open them, the local server never sees them, and a copied file is useless anywhere else.",
+      "Secure notes ask for your PIN every time you open them, and lock when you leave the tab, after a few idle minutes, or when Windows locks. After the app restarts, your passphrase is needed.",
+      "Your secure key (XXXX-XXXX-XXXX-XXXX-XXXX-XXXX, made at setup — a sticky note is fine) is asked for every 30 days, and opens your notes on a new PC together with your PIN.",
+      "Secure notes: passwords show only while you hold the eye; copied ones clear from the clipboard after 20 s and stay out of Windows clipboard history; the window shows black in screenshots and screen shares while they're open; the last 10 versions are kept. Optional: a key file on a USB stick.",
+      "New: an optional PIN lock for the whole app (Settings → Security), with lock after idle, when Windows locks, or Ctrl+Alt+L.",
+      "New: export / import your setup (Settings → Your setup): settings, theme, renames and layout, plus your still-encrypted Secure notes, as one .zip. Never the dumps.",
+      "Ctrl+right-click files in Files, BoxSpaces, Recent or the dumps to attach them to the email you're writing in BoxMail (Shift+drag works too).",
+      "Home: a “clear” button on the recent list.",
+      "New home tagline."
+    ]
+  },
+  {
     "version": "1.0.16",
     "date": "2026-10-11",
     "notes": [

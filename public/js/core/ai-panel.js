@@ -117,6 +117,7 @@ export class AiPanel {
 
   selectionText() {
     const ed = this.app.active?.editor;
+    if (ed?.secret) return ''; // Secure notes are never sent to Claude
     try {
       if (ed?.getSelectionText) return ed.getSelectionText() || '';
       return String(getSelection() || '');
@@ -125,6 +126,7 @@ export class AiPanel {
 
   async documentText() {
     const ed = this.app.active?.editor;
+    if (ed?.secret) return '';
     try { return ed?.getContextText ? String(await ed.getContextText() || '') : ''; } catch { return ''; }
   }
 

@@ -9,7 +9,7 @@
 import { BaseEditor } from './base.js';
 import { h, clear, formatBytes, escapeHtml, basename, extOf, stripExt, toBytes, bytesToBase64 } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { toast, errorToast, modal, confirmDialog, promptDialog, contextMenu, showMenu } from '../core/ui.js';
+import { toast, errorToast, modal, confirmDialog, promptDialog, contextMenu, showMenu, PATHS_MIME, draggedPaths } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { pickOpen, pickSave } from '../core/files.js';
 import { streamClaude } from '../core/ai-stream.js';
@@ -443,7 +443,7 @@ export class MailEditor extends BaseEditor {
     const dumpPicker = async (kind, anchor) => {
       let items = [];
       try { items = (await api.dump(kind)).items; } catch (e) { return errorToast(e); }
-      if (!items.length) return toast(`The ${kind === 'doc' ? 'doc' : 'image'} dump is empty — add files from a document’s bottom bar.`, { type: 'warn' });
+      if (!items.length) return toast(`The ${kind === 'doc' ? 'doc' : 'media'} dump is empty — add files from a document’s bottom bar.`, { type: 'warn' });
       const grid = h('div', { class: `mail-dumppick ${kind}` }, items.map((it) => {
         const on = () => st.attachments.some((x) => x.dump === kind && x.name === it.name);
         const b = h('button', { class: `mail-dumpitem ${on() ? 'on' : ''}`, title: `${it.name} · ${formatBytes(it.size)}` },
@@ -457,16 +457,21 @@ export class MailEditor extends BaseEditor {
         });
         return b;
       }));
-      modal({ title: `Attach from the ${kind === 'doc' ? 'doc' : 'image'} dump`, body: h('div', {}, h('div', { class: 'faint', style: { marginBottom: '8px', fontSize: '12px' } }, 'Click to attach or detach.'), grid), wide: true, buttons: [{ label: 'Done', primary: true, value: 'ok' }] });
+      modal({ title: `Attach from the ${kind === 'doc' ? 'doc' : 'media'} dump`, body: h('div', {}, h('div', { class: 'faint', style: { marginBottom: '8px', fontSize: '12px' } }, 'Click to attach or detach.'), grid), wide: true, buttons: [{ label: 'Done', primary: true, value: 'ok' }] });
     };
 
-    const fromDisk = async () => {
-      const paths = await pickOpen({ multi: true, title: 'Attach files', filters: [{ name: 'All files', extensions: ['*'] }] });
+    // files on disk are attached where they are (read when the email is sent)
+    const addPaths = async (paths) => {
+      let n = 0;
       for (const p of paths || []) {
         const st2 = await api.stat(p).catch(() => ({}));
+        if (st2.exists === false || st2.isDir) continue;
         addAtt({ path: p, name: basename(p), size: st2.size || 0 });
+        n++;
       }
+      return n;
     };
+    const fromDisk = async () => addPaths(await pickOpen({ multi: true, title: 'Attach files', filters: [{ name: 'All files', extensions: ['*'] }] }));
 
     const fromTabs = (anchor) => {
       const tabs = this.app.tabs.filter((t) => t.editor && t !== this.tab && (t.editor.saveFormats?.().length || t.mode === 'doc'));
@@ -483,10 +488,12 @@ export class MailEditor extends BaseEditor {
 
     // drop files anywhere on the composer to attach them
     const wrap = h('div', { class: 'mail-compose' });
-    wrap.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); wrap.classList.add('drop'); } });
+    wrap.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(PATHS_MIME)) { e.preventDefault(); wrap.classList.add('drop'); } });
     wrap.addEventListener('dragleave', (e) => { if (e.target === wrap) wrap.classList.remove('drop'); });
     wrap.addEventListener('drop', async (e) => {
       wrap.classList.remove('drop');
+      const carried = draggedPaths(e); // Shift+drag from Files, BoxSpaces, Recent, the dumps
+      if (carried.length) { e.preventDefault(); await addPaths(carried); return; }
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
       for (const f of e.dataTransfer.files) addAtt({ name: f.name, size: f.size, load: async () => new Uint8Array(await f.arrayBuffer()) });
@@ -601,8 +608,17 @@ export class MailEditor extends BaseEditor {
     renderAtts();
     clear(this.view).append(wrap);
     (to.value ? (replyTo ? body : subject) : to).focus();
-    this.composing = { runClaude };
+    this.composing = { runClaude, addPaths };
     return this.composing;
+  }
+
+  /** Ctrl+right-click on files in Files / BoxSpaces / Recent / the dumps: attached to the email being written (a new one if none). */
+  async receiveFiles(paths) {
+    if (!this.accounts?.length) { toast('Add a Gmail account in BoxMail first.', { type: 'warn' }); return paths.length; }
+    if (!this.composing) this.compose();
+    const n = await this.composing.addPaths(paths);
+    if (n) toast(`Attached ${n} file${n === 1 ? '' : 's'}`, { type: 'ok', timeout: 1500 });
+    return n;
   }
 
   async attachTab(t, ext, addAtt, name) {

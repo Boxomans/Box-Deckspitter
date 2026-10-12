@@ -49,6 +49,7 @@ export function createClips(app) {
   let lastProgrammatic = '';
   document.addEventListener('copy', (e) => {
     if (e.target?.type === 'password') return;
+    if (e.target?.closest?.('[data-no-clip]') || app.active?.editor?.secret) return; // Secure notes: never in the history
     setTimeout(() => {
       let text = '';
       try { text = e.clipboardData?.getData('text/plain') || ''; } catch { /* ignore */ }

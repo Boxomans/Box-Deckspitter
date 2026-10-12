@@ -12,4 +12,8 @@ contextBridge.exposeInMainWorld('bdsShell', {
   // where a file dropped from Explorer lives on disk (the video editor uses files in place, without copying them)
   pathForFile: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
   appReady: () => ipcRenderer.send('bds:ready'), // tells the boot file an update started fine
+  // Secure notes: one request at a time to the window's process ({ op, ... } → { ok, ... })
+  notes: (req) => ipcRenderer.invoke('bds:notes', req),
+  onNotesLocked: (cb) => { ipcRenderer.on('bds:notes-locked', (_e, reason) => cb(reason)); },
+  onSystemLock: (cb) => { ipcRenderer.on('bds:system-lock', (_e, why) => cb(why)); },
 });
