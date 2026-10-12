@@ -848,6 +848,8 @@ class App {
       { label: `${this.toolName('BoxDiff')} — compare two files`, icon: 'diff', action: () => this.newDocument('diff') },
       { label: `${this.toolName('Secure notes')} — passwords & private notes`, icon: 'lock', action: () => this.newDocument('secure') },
       { label: 'Music player', icon: 'music', action: () => this.music.open() },
+      // web pages need the desktop app's <webview>s
+      ...(window.bdsShell?.browser ? [{ label: `${this.toolName('Browser')} — the web, with the dumps`, icon: 'globe', action: () => this.newDocument('browser') }] : []),
     ];
   }
 
@@ -1690,6 +1692,7 @@ class App {
       ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
       ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
       ['lock', 'Secure notes', 'passwords & private notes · encrypted', () => this.newDocument('secure')],
+      ...(window.bdsShell?.browser ? [['globe', 'Browser', 'the web · send pages & media to the dumps', () => this.newDocument('browser')]] : []),
     ], (c) => c[1])) {
       const card = this.homeCard(ic, title, sub);
       card.addEventListener('click', fn);
