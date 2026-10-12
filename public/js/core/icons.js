@@ -175,6 +175,8 @@ const P = {
   'x-square': '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 9 6 6M15 9l-6 6"/>',
   'row-add': '<rect x="3" y="4" width="18" height="10" rx="1.5"/><path d="M3 9h18M12 17v4M10 19h4"/>',
   'col-add': '<rect x="4" y="3" width="10" height="18" rx="1.5"/><path d="M9 3v18M17 12h4M19 10v4"/>',
+  // F-14 from above (filled, unlike the rest); same shape as F14_PATH in editors/tomcat.js
+  f14: '<path transform="scale(.24)" fill="currentColor" stroke="none" d="M50 1L52.6 18L53 30L57 30L57 36L65 56L97 65.5L99 70.5L64 72L64 78L74 92L67 96L62 91.5L58 96L54 92L51 96.5L50 99L49 96.5L46 92L42 96L38 91.5L33 96L26 92L36 78L36 72L1 70.5L3 65.5L35 56L43 36L43 30L47 30L47.4 18Z"/>',
 };
 
 export function iconMarkup(name, cls = '') {

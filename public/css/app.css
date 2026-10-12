@@ -1307,3 +1307,8 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 #rightrail { transition: width .18s ease, padding .18s ease, border-color .18s; }
 #rightrail.rail-empty { width: 0; padding-left: 0; padding-right: 0; border-left-color: transparent; overflow: hidden; }
 #rightrail.rail-empty.peek { width: 30px; border-left-color: var(--line); box-shadow: inset 2px 0 0 var(--accent-line); }
+
+/* F-14F Super Tomcat (easter egg) */
+.tomcat-root { flex: 1; min-height: 0; position: relative; background: #111; overflow: hidden; }
+.tomcat-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; outline: none; cursor: crosshair; }
+

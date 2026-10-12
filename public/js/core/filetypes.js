@@ -95,10 +95,10 @@ export function extForLang(lang) {
 
 export const MODE_ICON = {
   doc: 'file-doc', pdf: 'file-pdf', text: 'file-text', code: 'file-code', sheet: 'sheet', image: 'image', hex: 'binary',
-  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot', secure: 'lock',
+  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot', secure: 'lock', tomcat: 'f14',
 };
 
-export const MODE_LABEL = { cut: 'Video editor', secure: 'Secure notes',
+export const MODE_LABEL = { cut: 'Video editor', secure: 'Secure notes', tomcat: 'F-14F Super Tomcat',
   doc: 'Document', pdf: 'PDF', text: 'Text', code: 'Code', sheet: 'Sheet', image: 'Image', hex: 'Binary',
   video: 'Video', form: 'Form', klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', paint: 'BoxPaint', diff: 'BoxDiff',
 };

@@ -32,6 +32,7 @@ const EDITORS = {
   scribe: () => import('./editors/scribe.js').then((m) => m.ScribeEditor),
   diff: () => import('./editors/diff.js').then((m) => m.DiffEditor),
   secure: () => import('./editors/secure.js').then((m) => m.SecureNotesEditor),
+  tomcat: () => import('./editors/tomcat.js').then((m) => m.TomcatEditor),
   paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
 
@@ -151,12 +152,12 @@ const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) =>
 // side panels that can move between the right sidebar and the top bar
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
-const TOP_TOOLS = ['btn-music', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
+const TOP_TOOLS = ['btn-music', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
 // tool modes and the home-card name they're renamed by
 // files the video editor can use
 const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
 const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', cut: 'Video editor', secure: 'Secure notes' };
-const TOOL_LABEL = { 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
+const TOOL_LABEL = { 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
 
@@ -319,6 +320,30 @@ class App {
     return box;
   }
 
+  /** The F-14 button shows only while the easter egg is turned on (Settings → Easter eggs). */
+  syncTomcat() {
+    const on = !!this.settings.tomcatEnabled;
+    $('#btn-tomcat').hidden = !on;
+    $('#btn-tomcat').title = 'F-14F Super Tomcat · drag or flick it to the right sidebar to dock it there';
+    if (!on) for (const t of this.tabs.filter((x) => x.mode === 'tomcat')) this.closeTab(t);
+    this.syncRail();
+  }
+
+  easterEggSettings() {
+    const cb = h('input', { type: 'checkbox', checked: !!this.settings.tomcatEnabled });
+    cb.addEventListener('change', async () => {
+      await this.saveSettings({ tomcatEnabled: cb.checked });
+      this.syncTomcat();
+      if (cb.checked) toast('F-14F Super Tomcat is in the top bar. Fight’s on.', { type: 'ok', timeout: 3000 });
+    });
+    const s = this.settings.tomcat || {};
+    return h('div', { class: 'settings-group' }, h('h4', {}, 'Easter eggs'),
+      h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat')),
+      h('span', { class: 'faint', style: { fontSize: '11px' } }, s.games
+        ? `${s.games} sortie${s.games === 1 ? '' : 's'} · ${s.splashes || 0} splashes · best ${Math.floor((s.bestTime || 0) / 60)}m ${Math.floor((s.bestTime || 0) % 60)}s`
+        : 'An AWG-9 radar intercept game, behind a button in the top bar.'));
+  }
+
   /** A modal of password boxes → their values (null if cancelled). */
   async askSecrets(title, fields, note) {
     const inputs = fields.map((f) => h('input', { type: 'password', placeholder: f.label, autocomplete: 'off', spellcheck: 'false', class: 'applock-field' }));
@@ -412,6 +437,9 @@ class App {
     $('#btn-music').title = 'Music player (audio-dump) · drag or flick it to the right sidebar to dock it there';
     $('#btn-music').addEventListener('click', () => this.music.toggleOpen());
     this.wireMusicDock();
+    $('#btn-tomcat').append(icon('f14'));
+    $('#btn-tomcat').addEventListener('click', () => this.newDocument('tomcat'));
+    this.syncTomcat();
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
     const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'clock', mediadump: 'image', docdump: 'file-pdf', settings: 'settings' };
@@ -433,7 +461,7 @@ class App {
     const rail = $('#rightrail');
     if (!rail) return;
     const tabs = [...rail.querySelectorAll('.rrail-tab')].some((t) => !t.hidden);
-    const tools = rail.querySelector('.rrail-tools')?.children.length > 0;
+    const tools = [...(rail.querySelector('.rrail-tools')?.children || [])].some((t) => !t.hidden);
     rail.classList.toggle('rail-empty', !tabs && !tools);
   }
 
@@ -1027,7 +1055,7 @@ class App {
     const t = this.active;
     document.title = t ? `${t.dirty ? '● ' : ''}${t.title} — Box-DocSpitter` : 'Box-DocSpitter';
     const el = clear($('#doc-title'));
-    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff'].includes(t?.mode) && !t.path;
+    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'secure', 'tomcat'].includes(t?.mode) && !t.path;
     if (t) el.append(...[h('b', {}, t.title), t.path ? h('span', {}, '  ·  ' + dirname(t.path)) : tool ? null : h('span', {}, '  ·  not saved yet')].filter(Boolean));
   }
 
@@ -1173,6 +1201,7 @@ class App {
       scribe: { mode: 'scribe', ext: '', base: this.toolName('BoxScribe') },
       diff: { mode: 'diff', ext: '', base: this.toolName('BoxDiff') },
       secure: { mode: 'secure', ext: '', base: this.toolName('Secure notes') },
+      tomcat: { mode: 'tomcat', ext: '', base: 'F-14F Super Tomcat' },
       cut: { mode: 'cut', ext: 'boxcut', base: `Untitled ${this.toolName('Video editor').toLowerCase()}` },
       paint: { mode: 'paint', ext: 'png', base: 'Untitled image' },
     }[kind];
@@ -1182,7 +1211,7 @@ class App {
       images = await pickOpen({ multi: true, title: 'Choose images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
       if (!images) return;
     }
-    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'secure') && !opts.another) {
+    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'secure' || kind === 'tomcat') && !opts.another) {
       const existing = this.tabs.find((t) => t.mode === spec.mode);
       if (existing) { this.activate(existing); return existing; }
     }
@@ -2201,6 +2230,7 @@ class App {
         this.mailSettings(),
         this.discordSettings(),
         this.aiSettings(),
+        this.easterEggSettings(),
         h('div', { class: 'settings-group' }, h('h4', {}, 'About'),
           h('span', { class: 'dim mono', style: { fontSize: '11px' } }, `v${window.BDS?.version} · data folder: Box-DocSpitter\\data`)),
         h('div', { class: 'settings-group danger-zone' }, h('h4', {}, 'Reset'),
