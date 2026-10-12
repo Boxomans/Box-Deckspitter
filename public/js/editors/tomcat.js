@@ -590,7 +590,7 @@ class TomcatGame {
     f.spin += dt;
     const watching = this.watching();
     if (f.phase === 'countdown') {
-      if (!watching) return;
+      if (!watching) { f.cd = DOGFIGHT_COUNTDOWN; return; } // a full 3-2-1 once you're back
       f.cd -= dt;
       if (f.cd <= 0) f.phase = 'qte';
     } else if (f.phase === 'qte') {
@@ -1550,8 +1550,10 @@ export class Flight {
     const ox = W / 2, oy = H - (docked ? 2 : 4);
     const R = Math.min(oy - 2, W / 2 / Math.sin(AZ_LIMIT) - 1);
     const at = (az, d) => { const r = clamp(d / RADAR_RANGE_KM, 0, 1) * R; return [ox + Math.sin(az) * r, oy - Math.cos(az) * r]; };
-    // the wedge, range rings, and a sweep
-    ctx.strokeStyle = 'rgba(120,220,120,.35)'; ctx.lineWidth = 1;
+    const merged = !!g.dogfight && !g.gameOver;
+    this.mini.classList.toggle('merged', merged);
+    // the wedge, range rings, and a sweep (red while merged)
+    ctx.strokeStyle = merged ? 'rgba(255,90,90,.5)' : 'rgba(120,220,120,.35)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(...at(-AZ_LIMIT, RADAR_RANGE_KM)); ctx.moveTo(ox, oy); ctx.lineTo(...at(AZ_LIMIT, RADAR_RANGE_KM)); ctx.stroke();
     for (const k of docked ? [1] : [1 / 3, 2 / 3, 1]) { ctx.beginPath(); ctx.arc(ox, oy, R * k, -Math.PI / 2 - AZ_LIMIT, -Math.PI / 2 + AZ_LIMIT); ctx.stroke(); }
     if (!g.paused && !g.gameOver && g.started) {
@@ -1565,7 +1567,20 @@ export class Flight {
     // ours: blue, like on the B-scope
     ctx.fillStyle = '#4aa3ff';
     for (const m of g.missiles) if (!m.lost) { ctx.beginPath(); ctx.arc(...at(m.bearing, Math.hypot(m.x, m.y)), dot * 0.75, 0, Math.PI * 2); ctx.fill(); }
-    ctx.fillStyle = '#cfe8cf'; ctx.beginPath(); ctx.moveTo(ox, oy - (docked ? 3 : 5)); ctx.lineTo(ox - (docked ? 2 : 3), oy); ctx.lineTo(ox + (docked ? 2 : 3), oy); ctx.fill();
+    ctx.fillStyle = merged ? '#ff6b6b' : '#cfe8cf'; ctx.beginPath(); ctx.moveTo(ox, oy - (docked ? 3 : 5)); ctx.lineTo(ox - (docked ? 2 : 3), oy); ctx.lineTo(ox + (docked ? 2 : 3), oy); ctx.fill();
+    // merged: MERGED right across the scope, pulsing, until you open the game and fight it
+    if (merged && !docked) {
+      const pulse = 0.65 + 0.35 * Math.abs(Math.sin(performance.now() / 260));
+      ctx.fillStyle = 'rgba(20,4,4,.72)'; ctx.fillRect(0, H / 2 - 17, W, 34);
+      ctx.save();
+      ctx.translate(W / 2, H / 2 + 1);
+      ctx.rotate(-0.12);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 25px ${MONO}`;
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.8)'; ctx.strokeText('MERGED', 0, 0);
+      ctx.fillStyle = `rgba(255,59,59,${pulse})`; ctx.fillText('MERGED', 0, 0);
+      ctx.restore();
+    }
     // nearest enemy: a missile beats a bandit for attention at the same range
     let near = null;
     for (const b of g.bandits) if (!near || b.distance < near.d) near = { d: b.distance, msl: false };
@@ -1574,7 +1589,7 @@ export class Flight {
     let label;
     if (g.gameOver) label = g.auto ? `DOWN · ${Math.max(0, Math.ceil(g.restartIn))}s` : 'DOWN';
     else if (!g.started) label = 'READY';
-    else if (g.dogfight) label = docked ? 'MERGE' : 'MERGED — CLICK!';
+    else if (g.dogfight) label = docked ? 'MERGE' : this.game.watching() ? 'FIGHT!' : 'OPEN TO FIGHT';
     else if (g.paused) label = 'PAUSED';
     else if (!near) label = 'CLEAR';
     else label = docked ? km : `${near.msl ? 'MSL' : 'BANDIT'} ${km}${g.speed > 1 ? ` ${g.speed}×` : ''}`;

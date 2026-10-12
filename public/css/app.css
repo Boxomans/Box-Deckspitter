@@ -1373,6 +1373,14 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 .tomcat-mini.docked .tm-bar { flex-direction: column; margin: 0; }
 .tomcat-mini.docked .tm-btn { display: none; }
 .tomcat-mini.docked .tm-dist { writing-mode: vertical-rl; font-size: 9.5px; letter-spacing: 0.08em; overflow: visible; }
+/* merged: the whole radar goes red until you open the game */
+.tomcat-mini.merged { border-color: #ff4d4d; background: rgba(40, 6, 6, 0.92); color: #ff6b6b; box-shadow: 0 0 0 1px rgba(255, 77, 77, 0.35), 0 0 14px rgba(255, 50, 50, 0.45); animation: tm-merged 0.9s ease-in-out infinite alternate; }
+.tomcat-mini.merged .tm-btn { border-color: #6a2424; }
+.tomcat-mini.merged .tm-btn:hover { border-color: #ff6b6b; background: #2a1010; }
+.tomcat-mini.merged .tm-dist { color: #ff6b6b; font-weight: bold; }
+.tomcat-mini.docked.merged { background: #4a0e0e; }
+@keyframes tm-merged { to { border-color: #ff9a9a; box-shadow: 0 0 0 1px rgba(255, 120, 120, 0.5), 0 0 20px rgba(255, 50, 50, 0.7); } }
+@media (prefers-reduced-motion: reduce) { .tomcat-mini.merged { animation: none; } }
 
 
 /* ---------------------------------------------------------------- browser (left sidebar → globe) */
