@@ -1251,3 +1251,10 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .new-card.dragging { opacity: 0.4; }
 .new-card.drop-before { box-shadow: -3px 0 0 var(--accent), var(--focus); }
 .new-card.drop-after { box-shadow: 3px 0 0 var(--accent), var(--focus); }
+
+/* Settings → Sounds */
+.sound-list { display: flex; flex-direction: column; gap: 4px; }
+.sound-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px; background: var(--bg-2); }
+.sound-name { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 12.5px; }
+.sound-name .faint { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sound-reset-all { align-self: flex-start; margin-top: 4px; }

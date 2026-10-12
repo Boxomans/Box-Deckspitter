@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.10",
+    "date": "2026-10-11",
+    "notes": [
+      "Settings → Sounds: play, change or reset each UI sound (hover, click, typing, open, close). Pick any audio file; “Default” puts the original back, and “Reset all to default” does them all. Your sounds are kept in data\\sounds, so updates don't touch them.",
+      "Renaming a tool with F2 on its home card now renames it everywhere: its open tabs, the window title, the tool's own heading, the status bar and the Tools menu. Ctrl+F2 puts the original name back everywhere."
+    ]
+  },
+  {
     "version": "1.0.9",
     "date": "2026-10-11",
     "notes": [

@@ -278,7 +278,7 @@ export class DiffEditor extends BaseEditor {
     });
     const [a, b] = this.sides;
     if (a && b) this.app.setTabMeta(this.tab, { title: `${a.name} vs ${b.name}` });
-    else this.app.setTabMeta(this.tab, { title: 'BoxDiff' });
+    else this.app.setTabMeta(this.tab, { title: this.app.toolName('BoxDiff') });
 
     const imgs = a?.info.kind === 'image' && b?.info.kind === 'image';
     this.host.hidden = imgs || !(a || b);

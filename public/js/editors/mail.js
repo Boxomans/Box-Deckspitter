@@ -128,7 +128,7 @@ export class MailEditor extends BaseEditor {
 
   renderSetup() {
     this.root.append(h('div', { class: 'mail-hero' },
-      h('div', { class: 'klep-title' }, h('span', { class: 'g mail-g' }, 'BoxMail'), h('span', { class: 'klep-cursor' })),
+      h('div', { class: 'klep-title' }, h('span', { class: 'g mail-g' }, this.app.toolLabel('BoxMail')), h('span', { class: 'klep-cursor' })),
       h('div', { class: 'klep-sub mono' }, '> your gmail, with the dumps one click away'),
       h('div', { class: 'mail-hero-text' }, 'Read your inbox split into Primary, Updates, Promotions and more, and write emails with attachments straight from the image dump, the doc dump or any open document. Claude can draft, polish and summarize.'),
       h('div', { class: 'row' },
@@ -619,7 +619,7 @@ export class MailEditor extends BaseEditor {
   status() {
     const acct = this.accounts?.find((a) => a.id === this.acct);
     return {
-      left: [{ text: 'BoxMail', icon: 'mail' }, ...(acct ? [{ text: acct.address }] : []), ...(this.items?.length ? [{ text: `${this.items.length} shown` }] : [])],
+      left: [{ text: this.app.toolName('BoxMail'), icon: 'mail' }, ...(acct ? [{ text: acct.address }] : []), ...(this.items?.length ? [{ text: `${this.items.length} shown` }] : [])],
       right: [{ text: this.emlMode ? '.eml file' : (BOXES.find((b) => b[0] === this.box)?.[1] || '') + (this.box === 'inbox' ? ' · ' + (CATS.find((c) => c[0] === this.cat)?.[1] || '') : '') }],
     };
   }

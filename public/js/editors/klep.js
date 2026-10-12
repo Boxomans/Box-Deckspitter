@@ -45,7 +45,7 @@ export class KlepEditor extends BaseEditor {
     this.results = h('div', { class: 'klep-results' });
     this.downloads = h('div', { class: 'klep-downloads' });
     const hero = h('div', { class: 'klep-hero' },
-      h('div', { class: 'klep-title' }, h('span', { class: 'g' }, 'BoxVidKlep'), h('span', { class: 'klep-cursor' })),
+      h('div', { class: 'klep-title' }, h('span', { class: 'g' }, this.app.toolLabel('BoxVidKlep')), h('span', { class: 'klep-cursor' })),
       h('div', { class: 'klep-sub mono' }, '> paste a link · it greps the videos out · you pick what to keep'),
       h('div', { class: 'klep-bar' }, this.input, this.playlistSeg, this.modeSel, this.goBtn),
       h('div', { class: 'klep-meta' }, h('span', { class: 'faint mono' }, 'save to'), this.dirChip,
@@ -313,7 +313,7 @@ export class KlepEditor extends BaseEditor {
     return row;
   }
 
-  status() { return { left: [{ text: 'BoxVidKlep', icon: 'magnet' }, { text: this.dir || '' }], right: [{ text: this.tools?.ytdlp ? 'yt-dlp ready' : 'direct links only' }] }; }
+  status() { return { left: [{ text: this.app.toolName('BoxVidKlep'), icon: 'magnet' }, { text: this.dir || '' }], right: [{ text: this.tools?.ytdlp ? 'yt-dlp ready' : 'direct links only' }] }; }
   saveFormats() { return []; }
   focus() { this.input?.focus(); }
   insertText(t) { this.input.focus(); document.execCommand('insertText', false, t); return true; }

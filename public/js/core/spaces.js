@@ -57,7 +57,7 @@ export class Spaces {
     clear(host);
     if (!this.root) return this.renderEmpty(host);
     const name = basename(this.root);
-    const head = h('div', { class: 'panel-head' }, h('span', { class: 'spaces-name', title: this.root }, 'BoxSpaces · ' + name), h('div', { class: 'grow' }),
+    const head = h('div', { class: 'panel-head' }, h('span', { class: 'spaces-name', title: this.root }, this.app.toolName('BoxSpaces') + ' · ' + name), h('div', { class: 'grow' }),
       h('button', { class: 'icon-btn', 'data-tip': 'New file', onclick: () => this.newFile(this.root) }, icon('file-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'New folder', onclick: () => this.newFolder(this.root) }, icon('folder-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => this.refresh() }, icon('refresh', 'sm')),
@@ -85,7 +85,7 @@ export class Spaces {
   renderEmpty(host) {
     const recent = (this.app.settings.spaces || []);
     host.append(
-      h('div', { class: 'panel-head' }, 'BoxSpaces', h('div', { class: 'grow' })),
+      h('div', { class: 'panel-head' }, this.app.toolName('BoxSpaces'), h('div', { class: 'grow' })),
       h('div', { class: 'panel-body' }, h('div', { class: 'spaces-empty' },
         icon('spaces', 'xl'),
         h('div', {}, 'Open a folder to work on it like a project — file tree, git status, search across files, quick open with Ctrl+E.'),

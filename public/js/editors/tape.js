@@ -44,7 +44,7 @@ export class TapeEditor extends BaseEditor {
     const need = [!this.tools.ytdlp ? 'yt-dlp (winget install yt-dlp)' : null, !this.tools.ffmpeg ? 'ffmpeg (winget install Gyan.FFmpeg)' : null].filter(Boolean);
     this.pane.append(h('div', { class: 'klep-root' }, h('div', { class: 'klep-inner' },
       h('div', { class: 'klep-hero' },
-        h('div', { class: 'klep-title' }, h('span', { class: 'g tape-g' }, 'BoxTape'), h('span', { class: 'klep-cursor' })),
+        h('div', { class: 'klep-title' }, h('span', { class: 'g tape-g' }, this.app.toolLabel('BoxTape')), h('span', { class: 'klep-cursor' })),
         h('div', { class: 'klep-sub mono' }, '> playlist in, mp3s out — straight into the audio dump'),
         h('div', { class: 'klep-bar' }, this.input, this.goBtn),
         need.length
@@ -281,11 +281,11 @@ export class TapeEditor extends BaseEditor {
     } catch (e) {
       batch.titleEl.textContent = `Failed: ${batch.name}`;
       clear(batch.actions).append(h('button', { class: 'icon-btn', onclick: () => batch.card.remove() }, icon('x', 'sm')));
-      errorToast(e, 'BoxTape');
+      errorToast(e, this.app.toolName('BoxTape'));
     }
     batch.state = 'finished';
   }
 
-  status() { return { left: [{ text: 'BoxTape', icon: 'music' }, { text: 'saves to audio-dump' }], right: [{ text: this.tools?.ytdlp && this.tools?.ffmpeg ? 'yt-dlp + ffmpeg ready' : 'needs yt-dlp + ffmpeg' }] }; }
+  status() { return { left: [{ text: this.app.toolName('BoxTape'), icon: 'music' }, { text: 'saves to audio-dump' }], right: [{ text: this.tools?.ytdlp && this.tools?.ffmpeg ? 'yt-dlp + ffmpeg ready' : 'needs yt-dlp + ffmpeg' }] }; }
   saveFormats() { return []; }
 }

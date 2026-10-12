@@ -100,7 +100,7 @@ export class ScribeEditor extends BaseEditor {
       this.progress, this.progressText, this.text);
     this.work = h('div', { class: 'scribe-work', hidden: true }, this.left, this.right);
     this.root = h('div', { class: 'scribe-root' },
-      h('div', { class: 'scribe-head' }, h('span', { class: 'klep-title' }, h('span', { class: 'g scribe-g' }, 'BoxScribe')), h('span', { class: 'klep-sub mono' }, '> pictures in, text out — offline')),
+      h('div', { class: 'scribe-head' }, h('span', { class: 'klep-title' }, h('span', { class: 'g scribe-g' }, this.app.toolLabel('BoxScribe'))), h('span', { class: 'klep-sub mono' }, '> pictures in, text out — offline')),
       this.drop, this.work);
     this.pane.append(this.root);
 
@@ -403,7 +403,7 @@ export class ScribeEditor extends BaseEditor {
 
   status() {
     const done = this.pages.filter((p) => p.done).length;
-    return { left: [{ text: 'BoxScribe', icon: 'scan-text' }, ...(this.pages.length ? [{ text: `${done}/${this.pages.length} read` }] : [])], right: [{ text: 'offline · English' }] };
+    return { left: [{ text: this.app.toolName('BoxScribe'), icon: 'scan-text' }, ...(this.pages.length ? [{ text: `${done}/${this.pages.length} read` }] : [])], right: [{ text: 'offline · English' }] };
   }
 
   saveFormats() { return []; }

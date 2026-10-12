@@ -148,6 +148,8 @@ const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) =>
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
 const TOP_TOOLS = ['btn-music', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
+// tool modes and the home-card name they're renamed by
+const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff' };
 const TOOL_LABEL = { 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, text & code — (almost) nothing leaves this machine';
@@ -561,15 +563,15 @@ class App {
 
   toolItems() {
     return [
-      { label: 'Fill a form…', icon: 'form-fill', action: () => this.fillForm() },
-      { label: 'Video trimmer…', icon: 'video', action: () => this.openVideoTrimmer() },
-      { label: 'BoxVidKlep', icon: 'magnet', action: () => this.newDocument('klep') },
-      { label: 'BoxSpaces — open folder…', icon: 'folder-open', action: () => this.openSpace() },
-      { label: 'StoragePeek', icon: 'layers', action: () => this.newDocument('storage') },
-      { label: 'BoxMail', icon: 'mail', action: () => this.newDocument('mail') },
-      { label: 'BoxTape — playlist to MP3s', icon: 'music', action: () => this.newDocument('tape') },
-      { label: 'BoxScribe — image to text (OCR)', icon: 'scan-text', action: () => this.newDocument('scribe') },
-      { label: 'BoxDiff — compare two files', icon: 'diff', action: () => this.newDocument('diff') },
+      { label: `${this.toolName('Fill a form')}…`, icon: 'form-fill', action: () => this.fillForm() },
+      { label: `${this.toolName('Video trimmer')}…`, icon: 'video', action: () => this.openVideoTrimmer() },
+      { label: this.toolName('BoxVidKlep'), icon: 'magnet', action: () => this.newDocument('klep') },
+      { label: `${this.toolName('BoxSpaces')} — open folder…`, icon: 'folder-open', action: () => this.openSpace() },
+      { label: this.toolName('StoragePeek'), icon: 'layers', action: () => this.newDocument('storage') },
+      { label: this.toolName('BoxMail'), icon: 'mail', action: () => this.newDocument('mail') },
+      { label: `${this.toolName('BoxTape')} — playlist to MP3s`, icon: 'music', action: () => this.newDocument('tape') },
+      { label: `${this.toolName('BoxScribe')} — image to text (OCR)`, icon: 'scan-text', action: () => this.newDocument('scribe') },
+      { label: `${this.toolName('BoxDiff')} — compare two files`, icon: 'diff', action: () => this.newDocument('diff') },
       { label: 'Music player', icon: 'music', action: () => this.music.open() },
     ];
   }
@@ -842,7 +844,7 @@ class App {
       R.append(h('span', { class: 'sb-item' }, h('span', { class: 'sb-dot' }), 'local · 127.0.0.1'), h('span', { class: 'sb-item' }, 'v' + (window.BDS?.version || '')));
       return;
     }
-    const modeBtn = h('button', { class: 'sb-item mode', title: 'Reopen in a different editor' }, (MODE_LABEL[tab.mode] || 'Loading').toLowerCase());
+    const modeBtn = h('button', { class: 'sb-item mode', title: 'Reopen in a different editor' }, (TOOL_OF_MODE[tab.mode] ? this.toolName(TOOL_OF_MODE[tab.mode]) : MODE_LABEL[tab.mode] || 'Loading').toLowerCase());
     modeBtn.addEventListener('click', () => tab.path && showMenu(this.reopenAsItems(tab), { anchor: modeBtn }));
     L.append(modeBtn,
       h('span', { class: 'sb-item', title: tab.dirty ? 'Unsaved changes' : 'Saved' }, h('span', { class: `sb-dot ${tab.dirty ? 'dirty' : ''}` }), tab.dirty ? 'modified' : tab.path ? 'saved' : 'new'),
@@ -963,12 +965,12 @@ class App {
       pdf: { mode: 'pdf', ext: 'pdf', base: 'Untitled' },
       'pdf-images': { mode: 'pdf', ext: 'pdf', base: 'Images' },
       'form-images': { mode: 'form', ext: 'pdf', base: 'Form' },
-      klep: { mode: 'klep', ext: '', base: 'BoxVidKlep' },
-      storage: { mode: 'storage', ext: '', base: 'StoragePeek' },
-      mail: { mode: 'mail', ext: '', base: 'BoxMail' },
-      tape: { mode: 'tape', ext: '', base: 'BoxTape' },
-      scribe: { mode: 'scribe', ext: '', base: 'BoxScribe' },
-      diff: { mode: 'diff', ext: '', base: 'BoxDiff' },
+      klep: { mode: 'klep', ext: '', base: this.toolName('BoxVidKlep') },
+      storage: { mode: 'storage', ext: '', base: this.toolName('StoragePeek') },
+      mail: { mode: 'mail', ext: '', base: this.toolName('BoxMail') },
+      tape: { mode: 'tape', ext: '', base: this.toolName('BoxTape') },
+      scribe: { mode: 'scribe', ext: '', base: this.toolName('BoxScribe') },
+      diff: { mode: 'diff', ext: '', base: this.toolName('BoxDiff') },
       paint: { mode: 'paint', ext: 'png', base: 'Untitled image' },
     }[kind];
     if (!spec) return;
@@ -1283,6 +1285,29 @@ class App {
     document.removeEventListener('paste', onPaste);
   }
 
+  /** A tool's name as you've named it (F2 on its home card), e.g. toolName('BoxTape'). */
+  toolName(key) { return (this.settings.cardNames || {})[key] || key; }
+
+  /** A span showing a tool's name that follows renames while it's on screen (tool headings). */
+  toolLabel(key) { return h('span', { dataset: { toolname: key } }, this.toolName(key)); }
+
+  /** After a rename: every heading, open tab, menu and status bar that shows the tool picks up the new name. */
+  toolRenamed(key, was) {
+    const now = this.toolName(key);
+    for (const el of $$(`[data-toolname="${CSS.escape(key)}"]`)) el.textContent = now;
+    const mode = Object.keys(TOOL_OF_MODE).find((m) => TOOL_OF_MODE[m] === key);
+    if (mode) {
+      for (const t of this.tabs) {
+        if (t.mode !== mode || t.path) continue;
+        // "BoxTape" or "BoxTape 2" → the same with the new name (tabs named after their contents are left alone)
+        if (t.title === was || t.title.startsWith(was + ' ')) this.setTabMeta(t, { title: now + t.title.slice(was.length) });
+      }
+    }
+    if (key === 'BoxSpaces' && this.panel === 'spaces' && this.spaces?.host) this.spaces.render(this.spaces.host);
+    this.renderMenubar();
+    this.updateStatus(this.active);
+  }
+
   /** A home screen card. Hover + F2 renames it (saved in settings); Ctrl+F2 puts the original name back. */
   homeCard(ic, title, sub) {
     const names = this.settings.cardNames || {};
@@ -1305,12 +1330,14 @@ class App {
       nameEl,
       value: () => (this.settings.cardNames || {})[title] || title,
       commit: (n) => {
+        const was = this.toolName(title);
         const next = { ...(this.settings.cardNames || {}) };
         if (!n.trim() || n.trim() === title) delete next[title]; else next[title] = n.trim();
         this.saveSettings({ cardNames: next });
         nameEl.textContent = next[title] || title;
+        this.toolRenamed(title, was);
       },
-      reset: () => { const next = { ...(this.settings.cardNames || {}) }; delete next[title]; this.saveSettings({ cardNames: next }); nameEl.textContent = title; },
+      reset: () => { const was = this.toolName(title); const next = { ...(this.settings.cardNames || {}) }; delete next[title]; this.saveSettings({ cardNames: next }); nameEl.textContent = title; this.toolRenamed(title, was); },
     });
     return card;
   }
@@ -1723,6 +1750,7 @@ class App {
             r.addEventListener('change', () => { this.saveSettings({ soundVolume: Number(r.value) }); this.sounds.play('click'); });
             return h('label', { class: 'row', style: { gap: '8px', alignItems: 'center' } }, h('span', { class: 'dim' }, 'Volume'), r);
           })()),
+        this.soundSettings(),
         h('div', { class: 'settings-group' }, h('h4', {}, 'Documents'),
           h('span', { class: 'dim' }, 'Default font for new documents'),
           sel('docFont', ['Calibri', 'Arial', 'Georgia', 'Times New Roman', 'Cambria', 'Segoe UI', 'Verdana', 'Garamond', 'Inter'].map((f) => [f, f])),
@@ -1848,6 +1876,45 @@ class App {
           h('li', {}, h('kbd', {}, 'F1'), ' lists every shortcut. ', h('b', {}, 'Settings'), ' (bottom left) has the theme, sounds, updates and more.'))),
       buttons: [{ label: 'Let’s go', value: true, primary: true }],
     });
+  }
+
+  /** Settings → Sounds: preview, swap or reset each UI sound. */
+  soundSettings() {
+    const list = h('div', { class: 'sound-list' });
+    const render = async () => {
+      const { SOUND_LABELS } = await import('./core/sounds.js');
+      let custom = {};
+      try { custom = await api.customSounds(); } catch { /* old server */ }
+      clear(list);
+      for (const [name, label] of Object.entries(SOUND_LABELS)) {
+        const mine = custom[name];
+        list.append(h('div', { class: 'sound-row' },
+          h('button', { class: 'icon-btn', 'data-tip': 'Play it', onclick: () => this.sounds.preview(name) }, icon('play', 'sm')),
+          h('div', { class: 'sound-name' }, h('span', {}, label), h('span', { class: 'faint mono' }, mine ? `your file · ${mine.file.replace(/^[^.]+/, name)}` : 'default')),
+          h('button', { class: 'btn sm', onclick: () => pick(name) }, 'Change…'),
+          mine ? h('button', { class: 'btn sm ghost', onclick: async () => { await api.resetSound(name).catch(errorToast); await this.sounds.reload(name, false); render(); } }, 'Default') : null));
+      }
+      if (Object.keys(custom).length) list.append(h('button', { class: 'btn sm ghost sound-reset-all', onclick: async () => {
+        if (!(await confirmDialog('Back to the default sounds?', 'All the UI sounds go back to the ones Box-DocSpitter came with. Your own files are deleted from data\\sounds.', { okLabel: 'Use the defaults' }))) return;
+        await api.resetSound(null).catch(errorToast);
+        for (const n of Object.keys(custom)) await this.sounds.reload(n, false);
+        render();
+      } }, icon('undo', 'sm'), 'Reset all to default'));
+    };
+    const pick = async (name) => {
+      const paths = await pickOpen({ title: 'Choose a sound', filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus', 'webm'] }] });
+      if (!paths?.length) return;
+      try {
+        const { bytes } = await api.read(paths[0]);
+        if (bytes.length > 8 * 1024 * 1024) throw new Error('That file is too big for a UI sound (8 MB max). Short clips work best.');
+        await api.setCustomSound(name, extOf(paths[0]), bytes);
+        await this.sounds.reload(name, true);
+        render();
+      } catch (e) { errorToast(e, 'Couldn’t use that sound'); }
+    };
+    render();
+    return h('div', { class: 'settings-group' }, h('h4', {}, 'Sounds'),
+      h('div', { class: 'dim', style: { fontSize: '12px' } }, 'Swap any UI sound for your own clip. Short sounds (under a second) feel best.'), list);
   }
 
   updateSettings() {

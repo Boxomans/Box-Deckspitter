@@ -1495,6 +1495,8 @@ function scanView(scan, p) {
 // ---------------------------------------------------------------------------
 
 const SECRETS_FILE = path.join(DATA, 'secrets.json');
+const SOUNDS_DIR = path.join(DATA, 'sounds');
+const UI_SOUNDS = ['hover', 'click', 'type', 'open', 'close'];
 const CLIPS_FILE = path.join(DATA, 'clips.json');
 const AI_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 const AI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -1976,6 +1978,40 @@ const routes = {
       for (const g of byHash.values()) if (g.length > 1) groups.push(g);
     }
     return { groups };
+  },
+  // Custom UI sounds live in data/sounds/<sound>.<ext> (your data: kept through updates, wiped by a reset).
+  'GET /api/sounds/custom': async () => {
+    const out = {};
+    for (const n of await fsp.readdir(SOUNDS_DIR).catch(() => [])) {
+      const m = /^(hover|click|type|open|close)\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm)$/i.exec(n);
+      if (m) { const st = await fsp.stat(path.join(SOUNDS_DIR, n)).catch(() => null); if (st) out[m[1].toLowerCase()] = { file: n, mtime: st.mtimeMs }; }
+    }
+    return out;
+  },
+  'GET /api/sounds/file': async (req, q) => {
+    const name = String(q.get('name') || '').toLowerCase();
+    if (!UI_SOUNDS.includes(name)) throw Object.assign(new Error('Unknown sound'), { status: 400 });
+    const f = (await fsp.readdir(SOUNDS_DIR).catch(() => [])).find((n) => n.toLowerCase().startsWith(name + '.'));
+    if (!f) throw Object.assign(new Error('No custom sound'), { status: 404 });
+    return { file: f, data: (await fsp.readFile(path.join(SOUNDS_DIR, f))).toString('base64') };
+  },
+  'POST /api/sounds/custom': async (req, q) => {
+    const name = String(q.get('name') || '').toLowerCase();
+    const ext = String(q.get('ext') || '').toLowerCase().replace(/^\./, '');
+    if (!UI_SOUNDS.includes(name)) throw Object.assign(new Error('Unknown sound'), { status: 400 });
+    if (!/^(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm)$/.test(ext)) throw Object.assign(new Error('Pick an audio file (mp3, wav, ogg, m4a, flac…)'), { status: 400 });
+    const body = await readBody(req, 8 * 1024 * 1024);
+    if (!body.length) throw Object.assign(new Error('Empty file'), { status: 400 });
+    await fsp.mkdir(SOUNDS_DIR, { recursive: true });
+    for (const n of await fsp.readdir(SOUNDS_DIR).catch(() => [])) if (n.toLowerCase().startsWith(name + '.')) await fsp.rm(path.join(SOUNDS_DIR, n), { force: true });
+    await fsp.writeFile(path.join(SOUNDS_DIR, `${name}.${ext}`), body);
+    return { ok: true, file: `${name}.${ext}` };
+  },
+  'POST /api/sounds/reset': async (req) => {
+    const { name } = await readJSONBody(req);
+    const names = name ? [String(name).toLowerCase()] : UI_SOUNDS;
+    for (const n of await fsp.readdir(SOUNDS_DIR).catch(() => [])) if (names.some((x) => n.toLowerCase().startsWith(x + '.'))) await fsp.rm(path.join(SOUNDS_DIR, n), { force: true });
+    return { ok: true };
   },
   'POST /api/dump/add': async (req, q) => {
     const kind = q.get('kind') || 'image';

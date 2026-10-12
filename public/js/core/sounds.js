@@ -1,7 +1,12 @@
 // UI sounds: hover, click, typing, opening and closing documents. Preloaded into Web Audio so they play
-// instantly; muted with the speaker button in the title bar (settings.sounds).
+// instantly; muted with the speaker button in the title bar (settings.sounds). Any of them can be swapped for
+// your own file in Settings → Sounds (kept in data/sounds); "Default" goes back to the built-in one.
 
-const FILES = { hover: 'hover.mp3', click: 'click.mp3', type: 'type.mp3', open: 'open.mp3', close: 'close.mp3' };
+import { api } from './api.js';
+import { base64ToBytes } from './dom.js';
+
+export const FILES = { hover: 'hover.mp3', click: 'click.mp3', type: 'type.mp3', open: 'open.mp3', close: 'close.mp3' };
+export const SOUND_LABELS = { hover: 'Hover', click: 'Click', type: 'Typing', open: 'Open document', close: 'Close document' };
 const LEVEL = { hover: 0.22, click: 0.5, type: 0.32, open: 0.6, close: 0.55 };
 const GAP = { hover: 45, click: 35, type: 22, open: 250, close: 250 }; // min ms between repeats
 
@@ -25,8 +30,18 @@ export function createSounds(app) {
     master = ctx.createGain();
     master.gain.value = volume();
     master.connect(ctx.destination);
-    for (const [name, file] of Object.entries(FILES)) {
-      fetch(`/assets/sounds/${file}`).then((r) => r.arrayBuffer()).then((b) => ctx.decodeAudioData(b)).then((buf) => { buffers[name] = buf; }).catch(() => {});
+    api.customSounds().catch(() => ({})).then((custom) => { for (const name of Object.keys(FILES)) load(name, !!custom[name]); });
+  }
+
+  /** (Re)load one sound: your custom file if there is one (and it decodes), otherwise the built-in one. */
+  async function load(name, custom) {
+    if (!ctx) return;
+    const builtIn = () => fetch(`/assets/sounds/${FILES[name]}`).then((r) => r.arrayBuffer());
+    try {
+      const bytes = custom ? base64ToBytes((await api.customSound(name)).data).buffer : await builtIn();
+      buffers[name] = await ctx.decodeAudioData(bytes);
+    } catch {
+      if (custom) { try { buffers[name] = await ctx.decodeAudioData(await builtIn()); } catch { /* none */ } }
     }
   }
 
@@ -77,6 +92,10 @@ export function createSounds(app) {
 
   return {
     play,
+    /** After a sound was changed or reset: load it again and play it so you hear the result. */
+    async reload(name, custom) { start(); await load(name, custom); last[name] = 0; const was = app.settings.sounds; app.settings.sounds = true; play(name); app.settings.sounds = was; },
+    /** Preview a sound even when sounds are switched off. */
+    preview(name) { start(); last[name] = 0; const was = app.settings.sounds; app.settings.sounds = true; play(name); app.settings.sounds = was; },
     setVolume() { if (master) master.gain.value = volume(); },
     toggle() {
       const next = !on();

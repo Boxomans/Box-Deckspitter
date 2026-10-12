@@ -21,7 +21,7 @@ export class StorageEditor extends BaseEditor {
     this.scanEl = h('div', { class: 'sp-scan' });
     this.root = h('div', { class: 'sp-root' }, h('div', { class: 'sp-inner' },
       h('div', { class: 'sp-head' },
-        h('div', { class: 'klep-title' }, h('span', { class: 'g sp-g' }, 'StoragePeek'), h('span', { class: 'klep-cursor' })),
+        h('div', { class: 'klep-title' }, h('span', { class: 'g sp-g' }, this.app.toolLabel('StoragePeek')), h('span', { class: 'klep-cursor' })),
         h('div', { class: 'klep-sub mono' }, '> where did all the space go'),
         h('div', { class: 'row' },
           h('button', { class: 'btn', onclick: () => this.loadDrives() }, icon('refresh', 'sm'), 'Refresh drives'),
@@ -244,7 +244,7 @@ export class StorageEditor extends BaseEditor {
 
   status() {
     const v = this.view;
-    return { left: [{ text: 'StoragePeek', icon: 'layers' }, ...(v ? [{ text: `${v.path} · ${formatBytes(v.size)}` }] : [])], right: [{ text: `${this.drives?.length || 0} drives` }] };
+    return { left: [{ text: this.app.toolName('StoragePeek'), icon: 'layers' }, ...(v ? [{ text: `${v.path} · ${formatBytes(v.size)}` }] : [])], right: [{ text: `${this.drives?.length || 0} drives` }] };
   }
 
   saveFormats() { return []; }
