@@ -1181,8 +1181,10 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 #rightpanel[data-panel="music"] { width: 330px; }
 .music-pop.docked { z-index: auto; position: static; width: auto; max-height: none; height: 100%; min-height: 0; border: 0; border-radius: 0; box-shadow: none; padding: 10px 12px; overflow-y: auto; background: transparent; }
 .music-pop.docked:has(.music-eq:not([hidden])) { width: auto; }
-.music-pop.docked .music-list { max-height: none; flex: 1 1 auto; min-height: 120px; }
-.music-pop.docked:has(.music-eq:not([hidden])) .music-list { max-height: none; }
+/* docked: the whole panel scrolls as one, so the song list shows every song instead of being squeezed */
+#rightpanel > .rp-container { flex: 1 1 auto; height: auto; }
+.music-pop.docked > * { flex-shrink: 0; }
+.music-pop.docked .music-list, .music-pop.docked:has(.music-eq:not([hidden])) .music-list { max-height: none; min-height: 0; flex: none; overflow: visible; }
 .music-pop.docked .music-eq-bands { overflow-x: auto; grid-template-columns: repeat(10, 30px); justify-content: space-between; }
 .music-pop.docked .music-cuts { grid-template-columns: 1fr; gap: 6px; }
 .music-pop.docked .music-curve { height: 110px; }
