@@ -26,6 +26,7 @@ const LINES = {
   paint: { plain: ['Painting'], silly: ['painting something', 'making art (allegedly)', 'pushing pixels', 'using the paint bucket irresponsibly'] },
   tape: { plain: ['Making a mixtape'], silly: ['making a mixtape', 'turning a playlist into mp3s', 'curating the audio dump'] },
   storage: { plain: ['Checking disk space'], silly: ['finding out where the space went', 'staring at a treemap', 'judging their downloads folder'] },
+  browser: { plain: ['Browsing the web'], silly: ['surfing the information superhighway', 'reading the whole internet', 'opening one more tab'] },
   tomcat: { plain: ['Flying an F-14'], silly: ['flying a Tomcat at FL300', 'calling FOX-3', 'splashing bandits', 'dodging a PL-15', 'going Mach 1 between documents'] },
   // never anything about what's in them
   secure: { plain: ['Box-DocSpitter'], silly: ['Box-DocSpitter'] },

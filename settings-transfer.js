@@ -11,8 +11,9 @@ const crypto = require('crypto');
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 const KIND = 'box-docspitter-setup';
-// settings that belong to this PC or this session, not to "your setup"
-const LOCAL_ONLY = new Set(['explorerDir', 'spaces', 'musicLast', 'musicPos', 'musicPlaying', 'musicQueue', 'musicShuffleOrder', 'lastSeenVersion', 'welcomed']);
+// settings that belong to this PC or this session, not to "your setup". Easter egg game progress (tomcat*) is
+// yours: it always goes with the export.
+const LOCAL_ONLY = new Set(['explorerDir', 'spaces', 'musicLast', 'musicPos', 'musicPlaying', 'musicQueue', 'musicShuffleOrder', 'lastSeenVersion', 'welcomed', 'browserTabs', 'browserActive']);
 const NOTE_FILES = ['notes.bdsv', 'device.key'];
 const MAX_ZIP = 50 * 1024 * 1024;
 

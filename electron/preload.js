@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('bdsShell', {
   notes: (req) => ipcRenderer.invoke('bds:notes', req),
   onNotesLocked: (cb) => { ipcRenderer.on('bds:notes-locked', (_e, reason) => cb(reason)); },
   onSystemLock: (cb) => { ipcRenderer.on('bds:system-lock', (_e, why) => cb(why)); },
+  // the built-in browser: requests ({ op, ... } → { ok, ... }) and events from its pages (new tab, keys, saved…)
+  browser: (req) => ipcRenderer.invoke('bds:browser', req),
+  onBrowser: (cb) => { ipcRenderer.on('bds:browser-event', (_e, ev) => cb(ev)); },
 });

@@ -37,6 +37,23 @@ const HOSTILE_MISSILES = {
   'PL-21': { speedMach: 8.5, turnRateDps: 18 },
   'PL-15': { speedMach: 5.0, turnRateDps: 22 },
 };
+// points and $ per kill
+const BOUNTY = { 'J-11': [100, 10], 'J-36': [150, 15], 'PL-15': [50, 5], 'PL-21': [80, 8] };
+const NOTCH_HOLD = 5; // seconds without firing after a notch
+const MAGAZINE_STEP = { 'FOX-1': 1, 'FOX-2': 2, 'FOX-3': 1 };
+/** Hangar upgrades: each level costs base·1.6^level. */
+export const UPGRADES = [
+  { id: 'reload', name: 'Reload crews', what: 'Missiles come back 10% faster per level', base: 60, max: 5 },
+  { id: 'magazine', name: 'Extra rails', what: '+1 AIM-7R, +2 AIM-9X, +1 AIM-54F per level', base: 120, max: 3 },
+  { id: 'motor', name: 'Hotter motors', what: 'Missiles fly 8% faster per level', base: 80, max: 5 },
+  { id: 'seeker', name: 'Better seekers', what: 'Missiles turn 10% harder and fuse 15% wider per level', base: 80, max: 5 },
+  { id: 'reach', name: 'Longer burn', what: 'Missiles reach 10% further per level', base: 100, max: 5 },
+  { id: 'flares', name: 'Bigger dispenser', what: '+2 chaff/flares and 15% faster reload per level', base: 90, max: 3 },
+  { id: 'notch', name: 'Beam training', what: 'Notch is ready 10% sooner per level', base: 110, max: 5 },
+  { id: 'ecm', name: 'ECM pod', what: '6% chance per level to spoof each inbound missile', base: 150, max: 5 },
+];
+export const upgradeCost = (u, level) => Math.round(u.base * 1.6 ** level);
+
 const BANDIT_TYPES = [
   { name: 'J-36', mach: 3.0, spawnMin: 180, spawnMax: 185 },
   { name: 'J-11', mach: 2.0, spawnMin: 118, spawnMax: 122 },
@@ -52,14 +69,19 @@ function shortCode(name) { const m = /AIM-(\d+)([A-Z]+)/.exec(name); return m ? 
 export function clock(t) { const m = Math.floor(t / 60); const s = Math.floor(t % 60); const cs = Math.floor((t - Math.floor(t)) * 100); return `${pad2(m)}:${pad2(s)}.${pad2(cs)}`; }
 
 class TomcatGame {
-  constructor(canvas, { onGameOver, best } = {}) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare } = {}) {
+    this.canvas = null;
+    this.ctx = null;
     this.onGameOver = onGameOver;
+    this.onAuto = onAuto;
+    this.upgrades = upgrades || (() => ({}));
+    this.onEarn = onEarn;
+    this.onHangar = onHangar;
+    this.onFlare = onFlare;
+    this.auto = auto;
     this.best = best || (() => ({}));
     this.W = 0; this.H = 0;
     this.paused = false;
-    this.running = false;
     this.mouse = { x: 0, y: 0 };
     this.hoveredMissileId = null;
     this.infoMode = null;
@@ -68,11 +90,21 @@ class TomcatGame {
     this.selBtns = { up: { w: 32, h: 32 }, dn: { w: 32, h: 32 } };
     this.foxBtns = ['FOX-1', 'FOX-2', 'FOX-3'].map((label) => ({ label, w: 92, h: 36 }));
     this.fireBtn = { w: 92, h: 36 };
+    this.flareBtn = { w: 92, h: 36 };
+    this.notchBtn = { w: 92, h: 36 };
+    this.flareRect = {};
     this.restartBtn = { x: 10, y: 10, w: 120, h: 40 };
     this.pauseBtn = { x: 140, y: 10, w: 96, h: 40 };
+    this.autoBtn = { x: 246, y: 10, w: 96, h: 40 };
+    this.hangarBtn = { x: 352, y: 10, w: 106, h: 40 };
     this.contactRegions = [];
     this.reset();
+    if (canvas) this.attach(canvas);
   }
+
+  /** Draw into this canvas (the full-size game tab) from now on; detach() when it's no longer on screen. */
+  attach(canvas) { this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.resize(); }
+  detach() { this.canvas = null; this.ctx = null; }
 
   // ---------------------------------------------------------------- state
 
@@ -82,8 +114,11 @@ class TomcatGame {
     this.nextId = 1; this.nextMissileId = 1; this.nextHostileId = 1;
     this.spawnT = 0; this.nextSpawn = rand(3, 7);
     this.simTime = 0; this.gameOver = null;
-    this.splashes = 0; this.intercepts = 0; this.shots = 0;
-    this.inv = Object.fromEntries(Object.entries(MISSILES).map(([k, m]) => [k, { count: m.max, regenT: 0, regenActive: false }]));
+    this.splashes = 0; this.intercepts = 0; this.shots = 0; this.score = 0; this.earned = 0;
+    this.usedAuto = this.auto; this.autoCd = 0; this.restartIn = 0;
+    this.flares = this.flareMax(); this.flareT = 0; this.flareCd = 0; this.flareFx = 0;
+    this.notchCd = 0; this.notchHold = 0;
+    this.inv = Object.fromEntries(Object.keys(MISSILES).map((k) => [k, { count: this.spec(k).max, regenT: 0, regenActive: false }]));
     this.foxMode = 'FOX-1';
     this.infoMode = null;
     this.toasts.length = 0;
@@ -150,9 +185,10 @@ class TomcatGame {
 
   fire() {
     if (this.gameOver || this.paused) return;
+    if (this.notchHold > 0) { this.toast(`NOTCHING — WEAPONS HOLD ${Math.ceil(this.notchHold)}s`, 1.2, '#c9a8ff'); return; }
     const sel = this.selectedTrack();
     if (!sel) { this.toast('NO TARGET'); return; }
-    const card = MISSILES[this.foxMode];
+    const card = this.spec(this.foxMode);
     const inv = this.inv[this.foxMode];
     if (inv.count <= 0) { this.toast(`OUT OF ${card.short} — ${Math.ceil(inv.regenT)}s`, 1.6, '#ffb36b'); return; }
     const tp = this.posOf(sel.kind, sel.obj.id);
@@ -161,13 +197,145 @@ class TomcatGame {
       id: 'M' + this.nextMissileId++, code: card.code, name: card.name, guidance: card.guidance,
       turnRate: rad(card.turnRateDps), speed: card.speedMach * MACH1_KMPS, rMaxKm: card.rMaxKm, activeKm: card.activeKm,
       state: card.guidance === 'ARH' ? 'inertial' : 'guiding', x: 0, y: 0, heading, rangeKm: 0, bearing: heading, travelled: 0,
-      targetId: sel.obj.id, targetKind: sel.kind,
+      targetId: sel.obj.id, targetKind: sel.kind, killRadiusKm: card.killRadiusKm,
     });
     this.shots++;
     inv.count--;
     if (inv.count <= 0 && !inv.regenActive) { inv.regenActive = true; inv.regenT = card.regen; }
-    const dist = Math.hypot(tp.x, tp.y);
-    this.toast(`${card.code} AWAY (${card.short})${dist > card.rMaxKm ? ' — OUT OF RANGE' : ''}`, 1.6, dist > card.rMaxKm ? '#ffb36b' : '#fff');
+    // in range if the missile meets it head-on before running out: it only has to fly d·vm/(vm+vt)
+    const vm = card.speedMach * MACH1_KMPS;
+    const vt = sel.kind === 'bandit' ? Math.max(0, sel.obj.closure || 0) : sel.obj.speed;
+    const far = (Math.hypot(tp.x, tp.y) * vm) / (vm + vt) > card.rMaxKm;
+    this.toast(`${card.code} AWAY (${card.short})${far ? ' — OUT OF RANGE' : ''}`, 1.6, far ? '#ffb36b' : '#fff');
+  }
+
+  /** A missile's numbers with the hangar upgrades applied. */
+  spec(code) {
+    const base = MISSILES[code];
+    const u = this.upgrades();
+    return {
+      ...base,
+      max: base.max + (u.magazine || 0) * MAGAZINE_STEP[code],
+      regen: base.regen * (1 - 0.1 * (u.reload || 0)),
+      speedMach: base.speedMach * (1 + 0.08 * (u.motor || 0)),
+      turnRateDps: base.turnRateDps * (1 + 0.1 * (u.seeker || 0)),
+      killRadiusKm: KILL_RADIUS_KM * (1 + 0.15 * (u.seeker || 0)),
+      rMaxKm: Math.round(base.rMaxKm * (1 + 0.1 * (u.reach || 0))),
+    };
+  }
+
+  // chaff/flares: one every few seconds, up to a full dispenser
+  flareMax() { return 6 + 2 * (this.upgrades().flares || 0); }
+  flareReload() { return 8 * (1 - 0.15 * (this.upgrades().flares || 0)); }
+
+  /** Pops a chaff/flare: every enemy missile on the field rolls a 10% chance of being juked. */
+  flare() {
+    if (this.gameOver || this.paused || this.flareCd > 0) return;
+    if (this.flares <= 0) { this.toast(`NO FLARES — ${Math.ceil(this.flareReload() - this.flareT)}s`, 1.4, '#ffb36b'); return; }
+    this.flares--;
+    this.flareCd = 0.8;
+    this.flareFx = 1;
+    this.onFlare?.();
+    let spoofed = 0;
+    for (let i = this.hostiles.length - 1; i >= 0; i--) {
+      const m = this.hostiles[i];
+      if (Math.random() < 0.1) { this.hostiles.splice(i, 1); spoofed++; this.toast(`${m.id} JUKED (FLARE)`, 2, '#ffcf6b'); }
+    }
+    if (!spoofed) this.toast('FLARE', 1, '#ffcf6b');
+  }
+
+  // notch: turn the jet across the radar beams; every missile in the air loses you, but you can't shoot meanwhile
+  notchCooldown() { return 45 * (1 - 0.1 * (this.upgrades().notch || 0)); }
+
+  notch() {
+    if (this.gameOver || this.paused) return;
+    if (this.notchCd > 0) { this.toast(`NOTCH READY IN ${Math.ceil(this.notchCd)}s`, 1.4, '#ffb36b'); return; }
+    const n = this.hostiles.length;
+    this.hostiles.length = 0;
+    this.notchCd = this.notchCooldown();
+    this.notchHold = NOTCH_HOLD;
+    this.toast(n ? `NOTCH — ${n} missile${n === 1 ? '' : 's'} defeated` : 'NOTCH', 2, '#c9a8ff');
+  }
+
+  updateFlares(dt) {
+    this.notchCd = Math.max(0, this.notchCd - dt);
+    this.notchHold = Math.max(0, this.notchHold - dt);
+    this.flareCd = Math.max(0, this.flareCd - dt);
+    this.flareFx = Math.max(0, this.flareFx - dt);
+    const max = this.flareMax();
+    if (this.flares >= max) { this.flares = max; this.flareT = 0; return; }
+    this.flareT += dt;
+    if (this.flareT >= this.flareReload()) { this.flares++; this.flareT = 0; }
+  }
+
+  /** Points and $ for a kill. */
+  award(what) {
+    const [pts, cash] = BOUNTY[what] || [50, 5];
+    this.score += pts;
+    this.earned += cash;
+    this.onEarn?.(cash);
+    return cash;
+  }
+
+  // ---------------------------------------------------------------- automatic mode
+
+  toggleAuto() {
+    this.auto = !this.auto;
+    if (this.auto) this.usedAuto = true;
+    this.toast(this.auto ? 'AUTO ON — the WSO has the trigger' : 'AUTO OFF', 1.6, '#8afc96');
+    this.onAuto?.(this.auto);
+  }
+
+  /** Seconds until a track becomes dangerous: a bandit reaching its launch range (or the merge), a missile reaching us. */
+  deadline(kind, o, d, vt) {
+    if (kind === 'hostile') return (d - 1) / vt;
+    const merge = (d - KILL_RANGE_KM) / vt;
+    if (!o.fired1) { const t = (d - (o.type === 'J-36' ? 160 : 80)) / vt; return t > 0 ? t : merge; }
+    if (o.type === 'J-11' && !o.fired2) return Math.min(merge, Math.max(0, (o.nextShotAt ?? 0) - this.simTime));
+    return merge;
+  }
+
+  /**
+   * The cheapest missile (AIM-9X, then AIM-7R, then AIM-54F) that kills the track before its deadline, even if
+   * that means holding fire until it's in reach. If none can make it in time, the quickest one in reach now.
+   * Returns a FOX code, 'wait', or null.
+   */
+  pickWeapon({ d, vt, deadline }) {
+    let fallback = null, fastest = Infinity;
+    for (const code of ['FOX-2', 'FOX-1', 'FOX-3']) {
+      const card = this.spec(code);
+      if (this.inv[code].count <= 0) continue;
+      const vm = card.speedMach * MACH1_KMPS;
+      const reach = card.rMaxKm * 0.9; // head-on intercept needs the missile to fly d·vm/(vm+vt)
+      const dReach = (reach * (vm + vt)) / vm;
+      const inReach = d <= dReach;
+      const wait = Math.max(0, (d - dReach) / vt);
+      const flight = Math.min(d, dReach) / (vm + vt);
+      if (wait + flight <= deadline - 1) return inReach ? code : 'wait';
+      if (inReach && flight < fastest) { fastest = flight; fallback = code; }
+    }
+    return fallback;
+  }
+
+  autopilot(dt) {
+    this.autoCd = Math.max(0, this.autoCd - dt);
+    if (this.autoCd > 0) return;
+    const covered = new Set(this.missiles.map((m) => m.targetId));
+    const plans = this.tracksSorted()
+      .filter((t) => !covered.has(t.obj.id))
+      .map((t) => {
+        const vt = t.kind === 'bandit' ? Math.max(0.05, t.obj.closure || t.obj.mach * MACH1_KMPS) : t.obj.speed;
+        return { t, d: t.dist, vt, deadline: this.deadline(t.kind, t.obj, t.dist, vt) };
+      })
+      .sort((a, b) => a.deadline - b.deadline);
+    for (const p of plans) {
+      const code = this.pickWeapon(p);
+      if (!code || code === 'wait') continue;
+      this.selectedKind = p.t.kind; this.selectedId = p.t.obj.id; this.foxMode = code;
+      this.fire();
+      this.autoCd = 0.4; // one shot at a time, like a person would
+      return;
+    }
   }
 
   updateMissiles(dt) {
@@ -195,14 +363,14 @@ class TomcatGame {
       const Vy = (m.y - py) - (tp.y - tpPrev.y);
       const denom = Vx * Vx + Vy * Vy;
       const u = denom > 1e-9 ? clamp(-(R0x * Vx + R0y * Vy) / denom, 0, 1) : 0;
-      if (Math.hypot(R0x + u * Vx, R0y + u * Vy) >= KILL_RADIUS_KM) continue;
+      if (Math.hypot(R0x + u * Vx, R0y + u * Vy) >= m.killRadiusKm) continue;
       this.missiles.splice(i, 1);
       if (m.targetKind === 'bandit') {
         const bi = this.bandits.findIndex((b) => b.id === m.targetId);
-        if (bi >= 0) { this.bandits.splice(bi, 1); this.splashes++; this.toast(`SPLASH ${m.targetId}`, 2, '#8afc96'); }
+        if (bi >= 0) { const [b] = this.bandits.splice(bi, 1); this.splashes++; this.toast(`SPLASH ${m.targetId}  +$${this.award(b.type)}`, 2, '#8afc96'); }
       } else {
         const hi = this.hostiles.findIndex((x) => x.id === m.targetId);
-        if (hi >= 0) { this.hostiles.splice(hi, 1); this.intercepts++; this.toast(`INTERCEPT ${m.targetId}`, 2, '#8fbfff'); }
+        if (hi >= 0) { const [x] = this.hostiles.splice(hi, 1); this.intercepts++; this.toast(`INTERCEPT ${m.targetId}  +$${this.award(x.wpn)}`, 2, '#8fbfff'); }
       }
     }
   }
@@ -230,6 +398,10 @@ class TomcatGame {
       m.rangeKm = m.y;
       m.bearing = Math.atan2(m.x, m.y);
       m.distance = Math.hypot(m.x, m.y);
+      if (!m.ecmRolled && m.distance <= 15) {
+        m.ecmRolled = true;
+        if (Math.random() < 0.06 * (this.upgrades().ecm || 0)) { this.hostiles.splice(i, 1); this.toast(`${m.id} SPOOFED (ECM)`, 2, '#c9a8ff'); continue; }
+      }
       if (m.distance <= 1.0) { this.hostiles.splice(i, 1); this.end(`HIT BY ${m.wpn}`); }
     }
   }
@@ -237,8 +409,15 @@ class TomcatGame {
   // ---------------------------------------------------------------- loop
 
   update(dt) {
-    if (this.gameOver || this.paused) return;
+    if (this.paused) return;
+    for (let i = this.toasts.length - 1; i >= 0; i--) if ((this.toasts[i].t -= dt) <= 0) this.toasts.splice(i, 1);
+    if (this.gameOver) {
+      // automatic mode flies again on its own
+      if (this.auto) { this.restartIn -= dt; if (this.restartIn <= 0) this.reset(); }
+      return;
+    }
     this.simTime += dt;
+    this.score += dt; // a point a second
     this.spawnT += dt;
     if (this.spawnT >= this.nextSpawn) { this.spawnT = 0; this.nextSpawn = rand(...this.spawnGap()); this.spawnBandit(); }
 
@@ -259,9 +438,16 @@ class TomcatGame {
     // targets move first, so the missiles' proximity fuse sees where they went this step
     this.updateHostiles(dt);
     this.updateMissiles(dt);
+    this.updateFlares(dt);
+    if (this.auto && !this.gameOver) {
+      // last-ditch defence: keep popping flares while a missile is about to arrive
+      if (this.hostiles.some((m) => m.distance <= 15)) this.flare();
+      if (this.notchCd <= 0 && this.hostiles.some((m) => m.distance <= 5)) this.notch();
+      if (this.notchHold <= 0) this.autopilot(dt);
+    }
 
     for (const [code, inv] of Object.entries(this.inv)) {
-      const card = MISSILES[code];
+      const card = this.spec(code);
       if (inv.count === 0 && !inv.regenActive) { inv.regenActive = true; inv.regenT = card.regen; }
       if (!inv.regenActive) continue;
       inv.regenT -= dt;
@@ -283,35 +469,20 @@ class TomcatGame {
   end(reason) {
     if (this.gameOver) return;
     const before = { ...this.best() };
-    this.gameOver = { reason, time: this.simTime, splashes: this.splashes, intercepts: this.intercepts, before };
+    this.gameOver = { reason, time: this.simTime, splashes: this.splashes, intercepts: this.intercepts, score: Math.floor(this.score), earned: this.earned, auto: this.usedAuto, before };
+    this.restartIn = 5;
     this.onGameOver?.(this.gameOver);
   }
 
-  start() {
-    if (this.running) return;
-    this.running = true;
-    this.last = performance.now();
-    const frame = (t) => {
-      if (!this.running) return;
-      const dt = Math.min(0.06, (t - this.last) / 1000);
-      this.last = t;
-      this.update(dt);
-      this.draw(dt);
-      this.raf = requestAnimationFrame(frame);
-    };
-    this.raf = requestAnimationFrame(frame);
-  }
-
-  stop() { this.running = false; cancelAnimationFrame(this.raf); }
-
   resize() {
+    if (!this.canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const r = this.canvas.getBoundingClientRect();
     this.W = Math.max(1, r.width); this.H = Math.max(1, r.height);
     this.canvas.width = Math.floor(this.W * dpr);
     this.canvas.height = Math.floor(this.H * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (!this.running) this.draw(0);
+    this.draw();
   }
 
   // ---------------------------------------------------------------- layout
@@ -335,12 +506,15 @@ class TomcatGame {
     for (const b of this.foxBtns) { Object.assign(b, { x: leftW - b.w - pad, y }); y += b.h + gap; }
     const f3 = this.foxBtns[2];
     Object.assign(this.fireBtn, { x: f3.x - this.fireBtn.w - 12, y: f3.y });
+    Object.assign(this.flareBtn, { x: this.fireBtn.x, y: this.foxBtns[1].y });
+    Object.assign(this.notchBtn, { x: this.fireBtn.x, y: this.foxBtns[0].y });
   }
 
   // ---------------------------------------------------------------- drawing
 
-  draw(dt) {
+  draw() {
     const { ctx, W, H } = this;
+    if (!ctx) return;
     this.layout();
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#111';
@@ -357,12 +531,14 @@ class TomcatGame {
     this.drawHud();
     this.button(this.restartBtn, 'RESTART', false, 18);
     this.button(this.pauseBtn, this.paused ? 'RESUME' : 'PAUSE', this.paused, 16);
+    this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, 15);
+    this.button(this.hangarBtn, 'HANGAR', false, 15);
     this.drawSelectorButtons();
     this.drawFoxButtons();
     this.drawContacts();
     this.drawMissileCounters();
     this.drawMissileInfo();
-    this.drawToasts(this.paused || this.gameOver ? 0 : dt);
+    this.drawToasts();
     if (this.gameOver) this.drawGameOver();
     else if (this.paused) this.drawPaused();
   }
@@ -403,6 +579,23 @@ class TomcatGame {
         ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * (R - 8), cy + Math.sin(a) * (R - 8)); ctx.lineTo(cx + Math.cos(a) * (R + 8), cy + Math.sin(a) * (R + 8)); ctx.stroke();
       }
     }
+    if (this.flareFx > 0) {
+      const t = 1 - this.flareFx;
+      ctx.save();
+      ctx.globalAlpha = this.flareFx;
+      ctx.fillStyle = '#ffcf6b';
+      for (let i = 0; i < 8; i++) {
+        const side = i % 2 ? 1 : -1, k = Math.floor(i / 2) + 1;
+        ctx.beginPath();
+        ctx.arc(cx + side * (L * 0.12 + k * L * 0.07 * t), cy + L * 0.42 + k * L * 0.11 * t, 3 + 2 * (1 - t), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    if (this.notchHold > 0) {
+      const k = Math.min(1, (NOTCH_HOLD - this.notchHold) / 0.5, this.notchHold / 0.5); // turn in, hold, turn back
+      ctx.translate(cx, cy); ctx.rotate((Math.PI / 2) * k); ctx.translate(-cx, -cy);
+    }
     ctx.translate(cx - L / 2, cy - L / 2);
     ctx.scale(L / 100, L / 100);
     const p = new Path2D(F14_PATH);
@@ -431,7 +624,20 @@ class TomcatGame {
     ctx.fillText(clock(this.simTime), W - 12, 12);
     ctx.textAlign = 'left';
     ctx.fillStyle = '#cfd8cf';
-    ctx.fillText(`SPLASH ${this.splashes}   INT ${this.intercepts}   WAVE ${this.maxBandits() - 2}`, 250, 22);
+    const best = this.best();
+    const bestScore = Math.max(Math.floor(this.score), (this.auto || this.usedAuto ? best.auto?.bestScore : best.bestScore) || 0);
+    ctx.fillText(`SCORE ${Math.floor(this.score).toLocaleString()}   BEST ${bestScore.toLocaleString()}`, 470, 14);
+    ctx.fillStyle = '#9ecf9f';
+    ctx.fillText(`SPLASH ${this.splashes}   INT ${this.intercepts}   WAVE ${this.maxBandits() - 2}`, 470, 32);
+    ctx.fillStyle = '#ffd36b';
+    ctx.font = `bold 16px ${MONO}`;
+    ctx.fillText(`$${(best.cash || 0).toLocaleString()}`, 14, 58);
+    if (this.notchHold > 0 && !this.gameOver) {
+      ctx.textAlign = 'center';
+      ctx.font = `bold 18px ${MONO}`;
+      ctx.fillStyle = '#c9a8ff';
+      ctx.fillText(`NOTCHING — WEAPONS HOLD ${Math.ceil(this.notchHold)}s`, leftW * 0.45, 92);
+    }
     if (this.hostiles.length && !this.gameOver && Math.floor(performance.now() / 300) % 2 === 0) {
       ctx.textAlign = 'center';
       ctx.font = `bold 18px ${MONO}`;
@@ -467,7 +673,7 @@ class TomcatGame {
     const yKill = by + BSCOPE_SIZE - KILL_RANGE_KM * kmToPx;
     ctx.strokeStyle = '#ff4d4d'; ctx.beginPath(); ctx.moveTo(bx, yKill); ctx.lineTo(bx + BSCOPE_SIZE, yKill); ctx.stroke();
 
-    const card = MISSILES[this.foxMode];
+    const card = this.spec(this.foxMode);
     const rKm = Math.min(card.rMaxKm, RADAR_RANGE_KM);
     const yR = by + BSCOPE_SIZE - rKm * kmToPx;
     ctx.strokeStyle = '#4aa3ff'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
@@ -524,14 +730,17 @@ class TomcatGame {
     const { x, by } = this.scope();
     let y = by + BSCOPE_SIZE + 28;
     ctx.fillStyle = '#9f9'; ctx.font = `14px ${MONO}`; ctx.fillText('CONTACTS', x + MARGIN, y);
-    ctx.fillStyle = '#6a8f6a'; ctx.font = `11px ${MONO}`; ctx.fillText('◆ = in range of the selected missile', x + MARGIN + 100, y);
+    ctx.fillStyle = '#6a8f6a'; ctx.textAlign = 'right';
+    this.fit('◆ = in range of selected weapon', PANEL_W - MARGIN * 2 - 96, 11);
+    ctx.fillText('◆ = in range of selected weapon', x + PANEL_W - MARGIN, y);
+    ctx.textAlign = 'left';
     y += 6;
     ctx.strokeStyle = '#2a2'; ctx.beginPath(); ctx.moveTo(x + MARGIN, y + 6); ctx.lineTo(x + PANEL_W - MARGIN, y + 6); ctx.stroke();
     y += 22;
     const tracks = this.tracksSorted();
     if (!tracks.length) { ctx.fillStyle = '#bbb'; ctx.font = `12px ${MONO}`; ctx.fillText('None', x + MARGIN, y); return; }
     const sel = this.selectedTrack();
-    const rMax = MISSILES[this.foxMode].rMaxKm;
+    const rMax = this.spec(this.foxMode).rMaxKm;
     for (const t of tracks) {
       if (y > this.H - 10) break;
       const o = t.obj;
@@ -540,9 +749,13 @@ class TomcatGame {
       const vcKts = Math.round((isBandit ? o.closure : o.speed) * KTS_PER_KMPS);
       const mach = isBandit ? o.mach : o.speed / MACH1_KMPS;
       const name = `${o.id} ${isBandit ? o.type : o.wpn}`.padEnd(9);
-      const line = `${o.distance <= rMax ? '◆' : ' '} ${name} ${altFt > PLAYER_ALT_FT ? '▲' : '▼'}${(altFt / 1000).toFixed(1)}k ft  ${Math.round(o.distance)}km  Vc ${vcKts}kt M${mach.toFixed(1)}`;
+      const vm = this.spec(this.foxMode).speedMach * MACH1_KMPS;
+      const inRange = (o.distance * vm) / (vm + (isBandit ? o.closure || 0 : o.speed)) <= rMax;
+      const line = `${inRange ? '◆' : ' '} ${name} ${altFt > PLAYER_ALT_FT ? '▲' : '▼'}${(altFt / 1000).toFixed(1)}k ft ${String(Math.round(o.distance)).padStart(3)}km Vc ${vcKts}kt M${mach.toFixed(1)}`;
       if (sel && sel.obj === o) { ctx.save(); ctx.fillStyle = 'rgba(80,140,80,0.35)'; ctx.fillRect(x + MARGIN - 2, y - 12, PANEL_W - MARGIN * 2, 20); ctx.restore(); }
-      ctx.fillStyle = isBandit ? '#fff' : '#ffb3b3'; ctx.font = `12px ${MONO}`; ctx.fillText(line, x + MARGIN, y);
+      ctx.fillStyle = isBandit ? '#fff' : '#ffb3b3';
+      this.fit(line, PANEL_W - MARGIN * 2 - 18, 12); // room on the right for the missile-on-it dot
+      ctx.fillText(line, x + MARGIN, y);
       if (this.missiles.some((m) => m.targetId === o.id)) {
         const dx = x + PANEL_W - MARGIN - 8, dy = y - 4;
         ctx.fillStyle = '#4aa3ff'; ctx.beginPath(); ctx.arc(dx, dy, 4, 0, Math.PI * 2); ctx.fill();
@@ -557,6 +770,8 @@ class TomcatGame {
 
   drawFoxButtons() {
     this.button(this.fireBtn, 'FIRE (F)', false);
+    this.button(this.flareBtn, 'FLARE (X)', this.flareFx > 0.6, 12);
+    this.button(this.notchBtn, this.notchHold > 0 ? `HOLD ${Math.ceil(this.notchHold)}s` : this.notchCd > 0 ? `NOTCH ${Math.ceil(this.notchCd)}s` : 'NOTCH (N)', this.notchHold > 0, 12);
     this.foxBtns.forEach((b, i) => this.button(b, `${b.label} (${i + 1})`, b.label === this.foxMode, 12));
   }
 
@@ -564,8 +779,8 @@ class TomcatGame {
     const { ctx } = this;
     const pad = 12, gap = 8, w = 200, h = 26;
     let y = this.H - h - pad;
-    for (const code of ['FOX-1', 'FOX-2', 'FOX-3']) {
-      const card = MISSILES[code], inv = this.inv[code];
+    for (const code of ['FOX-3', 'FOX-2', 'FOX-1']) { // bottom up: AIM-54F at the bottom, AIM-7R on top
+      const card = this.spec(code), inv = this.inv[code];
       Object.assign(this.counterRects[code], { x: pad, y, w, h });
       const active = this.foxMode === code, empty = inv.count === 0;
       ctx.save();
@@ -583,12 +798,27 @@ class TomcatGame {
       ctx.restore();
       y -= h + gap;
     }
+    const max = this.flareMax();
+    Object.assign(this.flareRect, { x: pad, y, w, h });
+    ctx.save();
+    ctx.fillStyle = this.flares ? '#2a2316' : '#151515';
+    ctx.strokeStyle = this.flares ? '#c9a24a' : '#555';
+    ctx.lineWidth = 1.6;
+    ctx.fillRect(pad, y, w, h); ctx.strokeRect(pad, y, w, h);
+    ctx.font = `13px ${MONO}`; ctx.textBaseline = 'middle';
+    ctx.fillStyle = this.flares ? '#ffd98a' : '#888';
+    ctx.fillText(`CHAFF/FLR | ${this.flares}/${max}`, pad + 10, y + h / 2 + 1);
+    if (this.flares < max) {
+      ctx.fillStyle = '#a8c0ff'; ctx.textAlign = 'right';
+      ctx.fillText(`${Math.ceil(this.flareReload() - this.flareT)}s`, pad + w - 8, y + h / 2 + 1);
+    }
+    ctx.restore();
   }
 
   drawMissileInfo() {
     if (!this.infoMode) return;
     const { ctx } = this;
-    const m = MISSILES[this.infoMode], r = this.counterRects[this.infoMode];
+    const m = this.spec(this.infoMode), r = this.counterRects[this.infoMode];
     const padX = 10, padTop = 12, padBottom = 10, w = 280, lh = 16;
     const lines = [
       `Type: ${m.guidance === 'ARH' ? 'Active RADAR' : m.guidance === 'IR' ? 'IR' : 'Semi-active/IR terminal'}`,
@@ -610,6 +840,12 @@ class TomcatGame {
     ctx.restore();
   }
 
+  /** Sets the largest font (from `size` down to 8px) at which `text` fits in maxW. */
+  fit(text, maxW, size, weight = '') {
+    const { ctx } = this;
+    for (; size > 8; size -= 0.5) { ctx.font = `${weight}${size}px ${MONO}`; if (ctx.measureText(text).width <= maxW) return; }
+  }
+
   wrap(text, maxWidth, font) {
     const { ctx } = this;
     ctx.save(); ctx.font = font;
@@ -624,13 +860,11 @@ class TomcatGame {
     return out;
   }
 
-  drawToasts(dt) {
+  drawToasts() {
     const { ctx } = this;
     let y = 84;
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const t = this.toasts[i];
-      t.t -= dt;
-      if (t.t <= 0) { this.toasts.splice(i, 1); continue; }
       ctx.save();
       ctx.globalAlpha = clamp(t.t / 1.2, 0, 1);
       ctx.fillStyle = t.color; ctx.font = `14px ${MONO}`;
@@ -644,7 +878,12 @@ class TomcatGame {
   card(title, rows, color) {
     const { ctx } = this;
     const leftW = this.W - PANEL_W;
-    const w = Math.min(380, leftW - 40), hgt = 70 + rows.length * 22;
+    // as wide as its longest line (up to the room there is); lines still too long wrap
+    ctx.font = `13px ${MONO}`;
+    const room = Math.max(200, leftW - 40);
+    const w = Math.min(room, Math.max(300, ...rows.map(([t]) => ctx.measureText(t).width + 40)));
+    rows = rows.flatMap(([t, c]) => this.wrap(t, w - 30, `13px ${MONO}`).map((l) => [l, c]));
+    const hgt = 70 + rows.length * 22;
     const x = (leftW - w) / 2, y = Math.max(60, this.H * 0.45 - hgt / 2);
     ctx.save();
     ctx.fillStyle = 'rgba(10,12,10,0.92)'; ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -658,18 +897,28 @@ class TomcatGame {
 
   drawGameOver() {
     const g = this.gameOver, b = g.before || {};
-    const newBest = g.time > (b.bestTime || 0);
+    if (g.auto) {
+      this.card('GAME OVER', [
+        [g.reason, '#ff8080'],
+        [`Auto survived ${clock(g.time)}   ·   score ${g.score.toLocaleString()}   ·   +$${g.earned}`],
+        [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
+        [this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}…` : 'R or RESTART to fly again', '#888'],
+      ], '#ff4d4d');
+      return;
+    }
+    const newBest = g.score > (b.bestScore || 0);
     this.card('GAME OVER', [
       [g.reason, '#ff8080'],
-      [`Survived ${clock(g.time)}${newBest ? '  — NEW BEST' : ''}`, newBest ? '#8afc96' : '#ddd'],
+      [`Score ${g.score.toLocaleString()}${newBest ? '  — NEW HIGH SCORE' : ''}   ·   +$${g.earned}`, newBest ? '#8afc96' : '#ddd'],
+      [`Survived ${clock(g.time)}`],
       [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
-      [`Best ${clock(Math.max(g.time, b.bestTime || 0))}   ·   most splashes ${Math.max(g.splashes, b.bestSplashes || 0)}`, '#9ecf9f'],
+      [`High score ${Math.max(g.score, b.bestScore || 0).toLocaleString()}   ·   best time ${clock(Math.max(g.time, b.bestTime || 0))}`, '#9ecf9f'],
       ['R or RESTART to fly again', '#888'],
     ], '#ff4d4d');
   }
 
   drawPaused() {
-    this.card('PAUSED', [['P or Space to resume', '#ddd'], ['F fire · 1 2 3 weapon · ↑ ↓ / Tab target · R restart', '#888']], '#9ecf9f');
+    this.card('PAUSED', [['P or Space to resume', '#ddd'], ['F fire · 1 2 3 weapon · ↑ ↓ / Tab target', '#888'], ['X flare · N notch · A auto · H hangar · R restart', '#888']], '#9ecf9f');
   }
 
   // ---------------------------------------------------------------- input
@@ -679,11 +928,15 @@ class TomcatGame {
   key(e) {
     const k = e.key.toLowerCase();
     if (k === 'f') this.fire();
+    else if (k === 'x') this.flare();
+    else if (k === 'n') this.notch();
     else if (k === '1' || k === '2' || k === '3') this.foxMode = `FOX-${k}`;
     else if (k === 'arrowup' || k === 'w') this.cycleTarget(-1);
     else if (k === 'arrowdown' || k === 's' || (k === 'tab' && !e.shiftKey)) this.cycleTarget(1);
     else if (k === 'tab') this.cycleTarget(-1);
     else if (k === 'r') this.reset();
+    else if (k === 'a') this.toggleAuto();
+    else if (k === 'h') this.onHangar?.();
     else if (k === 'p' || k === ' ' || k === 'escape') { if (k !== 'escape' || !this.paused) this.togglePause(); }
     else return false;
     return true;
@@ -696,10 +949,14 @@ class TomcatGame {
     this.layout();
     if (inRect(x, y, this.restartBtn)) return this.reset();
     if (inRect(x, y, this.pauseBtn)) return this.togglePause();
+    if (inRect(x, y, this.autoBtn)) return this.toggleAuto();
+    if (inRect(x, y, this.hangarBtn)) return this.onHangar?.();
     if (inRect(x, y, this.selBtns.up)) return this.cycleTarget(-1);
     if (inRect(x, y, this.selBtns.dn)) return this.cycleTarget(1);
     for (const b of this.foxBtns) if (inRect(x, y, b)) { this.foxMode = b.label; return; }
     if (inRect(x, y, this.fireBtn)) return this.fire();
+    if (inRect(x, y, this.flareBtn)) return this.flare();
+    if (inRect(x, y, this.notchBtn)) return this.notch();
     for (const code of Object.keys(this.counterRects)) if (inRect(x, y, this.counterRects[code])) { this.infoMode = this.infoMode === code ? null : code; return; }
     const { bx, by } = this.scope();
     if (inRect(x, y, { x: bx, y: by, w: BSCOPE_SIZE, h: BSCOPE_SIZE })) {
@@ -735,6 +992,260 @@ class TomcatGame {
   }
 }
 
+// ---------------------------------------------------------------- the flight
+// While the easter egg is on, one sortie keeps flying for as long as the app runs: full size in its tab, as a tiny
+// radar you can drag anywhere, or folded into the right sidebar. It only stops for the hangar or for P.
+
+const SIM_STEP = 0.05; // s per update (the old frame loop capped steps at 0.06)
+const MINI_W = 120, MINI_H = 84;
+
+export class Flight {
+  constructor(app) {
+    this.app = app;
+    this.view = null; // the TomcatEditor drawing it full size, while that tab is the one on screen
+    this.game = new TomcatGame(null, {
+      best: () => app.settings.tomcat || {},
+      onGameOver: (g) => this.record(g),
+      auto: !!app.settings.tomcatAuto,
+      onAuto: (on) => app.saveSettings({ tomcatAuto: on }),
+      upgrades: () => app.settings.tomcat?.upgrades || {},
+      onEarn: (n) => this.earn(n),
+      onHangar: () => this.view?.toggleHangar(),
+      onFlare: () => this.flareSound(),
+    });
+    // a timer, not animation frames: those stop when the window is minimized. A throttled timer catches up in steps.
+    this.last = performance.now();
+    this.timer = setInterval(() => this.tick(), 16);
+    this.buildMini();
+    this.onKey = (e) => this.key(e);
+    this.onResize = () => this.placeMini();
+    document.addEventListener('keydown', this.onKey);
+    window.addEventListener('resize', this.onResize);
+    this.syncMini();
+  }
+
+  tick() {
+    const now = performance.now();
+    let left = Math.min(600, (now - this.last) / 1000); // asleep longer than 10 min: that time is lost
+    this.last = now;
+    while (left > 1e-6) { const d = Math.min(SIM_STEP, left); this.game.update(d); left -= d; }
+  }
+
+  stop() {
+    clearInterval(this.timer);
+    cancelAnimationFrame(this.miniRaf);
+    document.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('resize', this.onResize);
+    this.mini.remove();
+    this.app.syncRail?.();
+    return this.flushCash();
+  }
+
+  togglePause() {
+    if (this.view?.hangar) return;
+    this.game.togglePause();
+    this.drawMini();
+  }
+
+  /** P pauses while the pointer is on (or focus is in) the F-14 button or the radar. */
+  key(e) {
+    if (e.key.toLowerCase() !== 'p' || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
+    const btn = document.getElementById('btn-tomcat');
+    const on = (el) => el && (el.matches(':hover') || el.contains(document.activeElement));
+    if (!on(btn) && !(this.mini.isConnected && on(this.mini))) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.togglePause();
+  }
+
+  /** Lifetime stats, kept for the badges to come. Sorties flown in automatic mode count separately (s.auto). */
+  record(g) {
+    const all = { ...(this.app.settings.tomcat || {}) };
+    const s = g.auto ? { ...(all.auto || {}) } : all;
+    s.games = (s.games || 0) + 1;
+    s.splashes = (s.splashes || 0) + g.splashes;
+    s.intercepts = (s.intercepts || 0) + g.intercepts;
+    s.flightTime = (s.flightTime || 0) + g.time;
+    s.bestTime = Math.max(s.bestTime || 0, g.time);
+    s.bestSplashes = Math.max(s.bestSplashes || 0, g.splashes);
+    s.bestScore = Math.max(s.bestScore || 0, g.score);
+    if (g.auto) all.auto = s;
+    this.app.saveSettings({ tomcat: all });
+    this.view?.refreshStatus();
+  }
+
+  /** Only heard while the game is on screen. */
+  flareSound() {
+    const s = this.app.settings;
+    if (!this.view || s.sounds === false) return;
+    const a = new Audio('/assets/sounds/cm.mp3');
+    a.volume = Math.max(0, Math.min(1, s.soundVolume ?? 0.7));
+    a.play().catch(() => {});
+  }
+
+  /** $ from kills: added right away, saved a few seconds later (a busy fight is a lot of kills). */
+  earn(n) {
+    const t = (this.app.settings.tomcat ||= {});
+    t.cash = (t.cash || 0) + n;
+    clearTimeout(this.saveCash);
+    this.saveCash = setTimeout(() => this.flushCash(), 3000);
+    if (this.view?.hangar) this.view.renderHangar();
+  }
+
+  flushCash() {
+    clearTimeout(this.saveCash);
+    this.saveCash = null;
+    if (this.app.settings.tomcat) return this.app.saveSettings({ tomcat: { ...this.app.settings.tomcat } });
+  }
+
+  // ---- the tiny radar
+
+  buildMini() {
+    this.miniCanvas = h('canvas', { class: 'tm-scope' });
+    this.miniDist = h('span', { class: 'tm-dist' });
+    this.miniPause = h('button', { class: 'tm-btn', title: 'Pause / resume (P)' });
+    const fold = h('button', { class: 'tm-btn', title: 'Fold it into the right sidebar' }, '⇥');
+    this.miniPause.addEventListener('click', (e) => { e.stopPropagation(); this.togglePause(); });
+    fold.addEventListener('click', (e) => { e.stopPropagation(); this.setMini({ docked: true }); });
+    this.mini = h('div', { class: 'tomcat-mini', tabindex: '0' }, this.miniCanvas, h('div', { class: 'tm-bar' }, this.miniDist, this.miniPause, fold));
+    this.mini.addEventListener('pointerdown', (e) => this.dragMini(e));
+  }
+
+  miniState() { return this.app.settings.tomcatMini || {}; }
+
+  setMini(patch) {
+    this.app.saveSettings({ tomcatMini: { ...this.miniState(), ...patch } });
+    this.syncMini();
+  }
+
+  /** Folded: always in the sidebar. Floating: only while the game isn't on screen full size. */
+  syncMini() {
+    const docked = !!this.miniState().docked;
+    this.mini.classList.toggle('docked', docked);
+    this.mini.title = docked
+      ? 'F-14F Super Tomcat · click to open · drag it out to float it · P pauses'
+      : 'F-14F Super Tomcat · click to open · drag to move, or onto the right sidebar to fold it there · P pauses';
+    if (docked) {
+      const rail = document.getElementById('rightrail');
+      const spacer = rail.querySelector('.rrail-spacer');
+      if (this.mini.parentElement !== rail) { if (spacer) spacer.before(this.mini); else rail.append(this.mini); }
+      this.mini.style.left = this.mini.style.top = '';
+    } else if (this.view) this.mini.remove();
+    else {
+      if (this.mini.parentElement !== document.body) document.body.append(this.mini);
+      this.placeMini();
+    }
+    this.app.syncRail?.();
+    cancelAnimationFrame(this.miniRaf);
+    if (this.mini.isConnected) {
+      let lastDraw = 0;
+      const frame = (t) => {
+        if (t - lastDraw > 66) { lastDraw = t; this.drawMini(); } // ~15 fps is plenty for a radar this size
+        this.miniRaf = requestAnimationFrame(frame);
+      };
+      this.drawMini();
+      this.miniRaf = requestAnimationFrame(frame);
+    }
+  }
+
+  placeMini(x = this.miniState().x, y = this.miniState().y) {
+    if (this.mini.classList.contains('docked') || !this.mini.isConnected) return;
+    const w = this.mini.offsetWidth || MINI_W + 10, ht = this.mini.offsetHeight || MINI_H + 34;
+    x ??= innerWidth - w - 50;
+    y ??= innerHeight - ht - 50;
+    this.mini.style.left = `${clamp(x, 0, innerWidth - w)}px`;
+    this.mini.style.top = `${clamp(y, 0, innerHeight - ht)}px`;
+  }
+
+  /** Drag to move; drop on the right sidebar to fold it there; drag a folded one out to float it; a click opens the game. */
+  dragMini(e) {
+    if (e.button !== 0 || e.target.closest('.tm-btn')) return;
+    const m = this.mini, rail = document.getElementById('rightrail');
+    const sx = e.clientX, sy = e.clientY;
+    let r = m.getBoundingClientRect();
+    let dx = sx - r.left, dy = sy - r.top, dragging = false;
+    try { m.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const overRail = (x, y) => { const q = rail.getBoundingClientRect(); return x >= q.left - 20 && x <= q.right + 20 && y >= q.top && y <= q.bottom; };
+    const move = (ev) => {
+      if (!dragging) {
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+        dragging = true;
+        if (m.classList.contains('docked')) {
+          // pulled out of the sidebar: it floats from here on
+          m.classList.remove('docked');
+          document.body.append(m);
+          this.app.syncRail?.();
+          r = m.getBoundingClientRect();
+          dx = r.width / 2; dy = r.height / 2;
+        }
+        m.classList.add('dragging');
+        rail.classList.add('fling-target');
+      }
+      this.placeMini(ev.clientX - dx, ev.clientY - dy);
+      if (rail.classList.contains('rail-empty')) rail.classList.toggle('peek', ev.clientX > innerWidth - 260);
+      rail.classList.toggle('fling-hot', overRail(ev.clientX, ev.clientY));
+    };
+    const up = (ev) => {
+      m.removeEventListener('pointermove', move);
+      m.removeEventListener('pointerup', up);
+      m.removeEventListener('pointercancel', up);
+      rail.classList.remove('fling-target', 'fling-hot', 'peek');
+      m.classList.remove('dragging');
+      if (!dragging) { this.app.newDocument('tomcat'); return; }
+      if (overRail(ev.clientX, ev.clientY)) return this.setMini({ docked: true });
+      const q = m.getBoundingClientRect();
+      this.setMini({ docked: false, x: Math.round(q.left), y: Math.round(q.top) });
+    };
+    m.addEventListener('pointermove', move);
+    m.addEventListener('pointerup', up);
+    m.addEventListener('pointercancel', up);
+  }
+
+  /** Bandits and missiles in a ±45° wedge out to 185 km, and the distance to the nearest one. */
+  drawMini() {
+    const g = this.game, c = this.miniCanvas;
+    const docked = this.mini.classList.contains('docked');
+    const W = docked ? 22 : MINI_W, H = docked ? 22 : MINI_H;
+    const dpr = window.devicePixelRatio || 1;
+    if (c.width !== Math.round(W * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const ox = W / 2, oy = H - (docked ? 2 : 4);
+    const R = Math.min(oy - 2, W / 2 / Math.sin(AZ_LIMIT) - 1);
+    const at = (az, d) => { const r = clamp(d / RADAR_RANGE_KM, 0, 1) * R; return [ox + Math.sin(az) * r, oy - Math.cos(az) * r]; };
+    // the wedge, range rings, and a sweep
+    ctx.strokeStyle = 'rgba(120,220,120,.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(...at(-AZ_LIMIT, RADAR_RANGE_KM)); ctx.moveTo(ox, oy); ctx.lineTo(...at(AZ_LIMIT, RADAR_RANGE_KM)); ctx.stroke();
+    for (const k of docked ? [1] : [1 / 3, 2 / 3, 1]) { ctx.beginPath(); ctx.arc(ox, oy, R * k, -Math.PI / 2 - AZ_LIMIT, -Math.PI / 2 + AZ_LIMIT); ctx.stroke(); }
+    if (!g.paused && !g.gameOver) {
+      const sweep = Math.sin(performance.now() / 700) * AZ_LIMIT;
+      ctx.strokeStyle = 'rgba(140,255,140,.25)'; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(...at(sweep, RADAR_RANGE_KM)); ctx.stroke();
+    }
+    const dot = docked ? 1.6 : 2.4;
+    for (const b of g.bandits) { ctx.fillStyle = b.type === 'J-36' ? '#ffd27a' : '#8ef08e'; ctx.beginPath(); ctx.arc(...at(b.angle, b.distance), dot, 0, Math.PI * 2); ctx.fill(); }
+    const blink = Math.floor(performance.now() / 250) % 2 === 0;
+    for (const m of g.hostiles) { ctx.fillStyle = blink ? '#ff4d4d' : '#ff9a9a'; ctx.beginPath(); ctx.arc(...at(m.bearing, m.distance), dot, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = '#cfe8cf'; ctx.beginPath(); ctx.moveTo(ox, oy - (docked ? 3 : 5)); ctx.lineTo(ox - (docked ? 2 : 3), oy); ctx.lineTo(ox + (docked ? 2 : 3), oy); ctx.fill();
+    // nearest enemy: a missile beats a bandit for attention at the same range
+    let near = null;
+    for (const b of g.bandits) if (!near || b.distance < near.d) near = { d: b.distance, msl: false };
+    for (const m of g.hostiles) if (!near || m.distance <= near.d) near = { d: m.distance, msl: true };
+    const km = near ? `${near.d < 10 ? near.d.toFixed(1) : Math.round(near.d)}km` : '';
+    let label;
+    if (g.gameOver) label = g.auto ? `DOWN · ${Math.max(0, Math.ceil(g.restartIn))}s` : 'DOWN';
+    else if (g.paused) label = 'PAUSED';
+    else if (!near) label = 'CLEAR';
+    else label = docked ? km : `${near.msl ? 'MSL' : 'BANDIT'} ${km}`;
+    this.miniDist.textContent = label;
+    this.miniDist.classList.toggle('threat', !!near?.msl && !g.paused && !g.gameOver);
+    this.miniDist.classList.toggle('down', !!g.gameOver);
+    this.miniPause.textContent = g.paused ? '▶' : '❚❚';
+  }
+}
+
+// ---------------------------------------------------------------- the tab: the flight at full size
+
 export class TomcatEditor extends BaseEditor {
   static mode = 'tomcat';
 
@@ -742,10 +1253,8 @@ export class TomcatEditor extends BaseEditor {
     this.canvas = h('canvas', { class: 'tomcat-canvas', tabindex: '0' });
     this.root = h('div', { class: 'tomcat-root', 'data-no-clip': '' }, this.canvas);
     this.pane.append(this.root);
-    this.game = new TomcatGame(this.canvas, {
-      best: () => this.app.settings.tomcat || {},
-      onGameOver: (g) => this.record(g),
-    });
+    this.flight = await this.app.tomcatFlight();
+    this.game = this.flight.game;
     this.canvas.addEventListener('click', (e) => { this.canvas.focus(); this.game.click(e); });
     this.canvas.addEventListener('mousemove', (e) => this.game.move(e));
     this.canvas.addEventListener('mouseleave', () => { this.game.hoveredMissileId = null; });
@@ -754,36 +1263,111 @@ export class TomcatEditor extends BaseEditor {
       if (e.ctrlKey || e.altKey || e.metaKey) return;
       if (this.game.key(e)) { e.preventDefault(); e.stopPropagation(); }
     });
-    this.ro = new ResizeObserver(() => this.game.resize());
+    this.ro = new ResizeObserver(() => { if (this.game.canvas === this.canvas) this.game.resize(); });
     this.ro.observe(this.root);
-    this.game.resize();
-    this.game.start();
-    setTimeout(() => this.canvas.focus(), 30);
+    this.show();
   }
 
-  /** Lifetime stats, kept for the badges to come. */
-  record(g) {
-    const s = { ...(this.app.settings.tomcat || {}) };
-    s.games = (s.games || 0) + 1;
-    s.splashes = (s.splashes || 0) + g.splashes;
-    s.intercepts = (s.intercepts || 0) + g.intercepts;
-    s.flightTime = (s.flightTime || 0) + g.time;
-    s.bestTime = Math.max(s.bestTime || 0, g.time);
-    s.bestSplashes = Math.max(s.bestSplashes || 0, g.splashes);
-    this.app.saveSettings({ tomcat: s });
-    this.refreshStatus();
+  show() {
+    if (!this.flight || this.flight.view === this) return;
+    this.flight.view = this;
+    this.game.attach(this.canvas);
+    this.flight.syncMini();
+    const frame = () => { this.game.draw(); this.raf = requestAnimationFrame(frame); };
+    cancelAnimationFrame(this.raf);
+    this.raf = requestAnimationFrame(frame);
+    setTimeout(() => (this.hangar || this.canvas)?.focus(), 30);
+  }
+
+  /** Off screen (another tab, or closed): the flight carries on as the tiny radar. */
+  hide() {
+    cancelAnimationFrame(this.raf);
+    if (this.hangar) this.closeHangar();
+    if (this.flight?.view !== this) return;
+    this.flight.view = null;
+    this.game.detach();
+    this.flight.syncMini();
+    this.flight.flushCash();
+  }
+
+  // ---- the hangar: spend $ on upgrades that last between sorties
+
+  toggleHangar() {
+    if (this.hangar) return this.closeHangar();
+    const g = this.game;
+    this.resumeAfterHangar = !g.paused && !g.gameOver;
+    if (!g.gameOver) g.paused = true;
+    this.hangar = h('div', { class: 'tomcat-hangar', tabindex: '-1' });
+    this.hangar.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.key.toLowerCase() === 'h') { e.preventDefault(); e.stopPropagation(); this.closeHangar(); }
+    });
+    this.root.append(this.hangar);
+    this.renderHangar();
+    this.hangar.focus();
+  }
+
+  closeHangar() {
+    this.hangar?.remove();
+    this.hangar = null;
+    if (this.resumeAfterHangar) this.game.paused = false;
+    this.resumeAfterHangar = false;
+    this.canvas.focus();
+  }
+
+  renderHangar() {
+    const t = this.app.settings.tomcat || {};
+    const cash = t.cash || 0;
+    const lv = t.upgrades || {};
+    const rows = UPGRADES.map((u) => {
+      const level = lv[u.id] || 0;
+      const cost = upgradeCost(u, level);
+      const maxed = level >= u.max;
+      const buy = h('button', { class: 'th-buy', disabled: maxed || cash < cost }, maxed ? 'MAX' : `$${cost.toLocaleString()}`);
+      buy.addEventListener('click', () => this.buy(u));
+      return h('div', { class: 'th-row' },
+        h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, u.name), h('div', { class: 'th-what' }, u.what)),
+        h('div', { class: 'th-pips' }, ...Array.from({ length: u.max }, (_, i) => h('span', { class: i < level ? 'on' : '' }))),
+        buy);
+    });
+    const close = h('button', { class: 'th-close', title: 'Close (H or Esc)' }, '×');
+    close.addEventListener('click', () => this.closeHangar());
+    const focused = this.hangar.contains(document.activeElement);
+    this.hangar.replaceChildren(h('div', { class: 'th-card' },
+      h('div', { class: 'th-head' }, h('span', {}, 'HANGAR'), h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`), close),
+      h('div', { class: 'th-sub' }, 'Splash bandits and missiles for $. Upgrades stay between sorties.'),
+      ...rows));
+    if (focused) this.hangar.focus();
+  }
+
+  buy(u) {
+    const t = { ...(this.app.settings.tomcat || {}) };
+    const lv = { ...(t.upgrades || {}) };
+    const level = lv[u.id] || 0;
+    const cost = upgradeCost(u, level);
+    if (level >= u.max || (t.cash || 0) < cost) return;
+    const g = this.game;
+    const before = Object.fromEntries(Object.keys(g.inv).map((k) => [k, g.spec(k).max]));
+    t.cash -= cost;
+    lv[u.id] = level + 1;
+    t.upgrades = lv;
+    this.app.settings.tomcat = t;
+    this.flight.flushCash();
+    // new rails come loaded
+    for (const [k, inv] of Object.entries(g.inv)) inv.count += g.spec(k).max - before[k];
+    this.app.sounds?.play?.('click');
+    this.renderHangar();
   }
 
   status() {
     const s = this.app.settings.tomcat || {};
     return {
-      left: [{ text: 'F fire · 1 2 3 weapon · ↑↓ target · P pause · R restart' }],
-      right: s.games ? [{ text: `best ${clock(s.bestTime || 0)} · ${s.splashes || 0} splashes in ${s.games} sortie${s.games === 1 ? '' : 's'}` }] : [],
+      left: [{ text: 'F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · H hangar · P pause · R restart' }],
+      right: [{ text: `high score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()}` }],
     };
   }
 
   focus() { this.canvas?.focus(); }
-  onShow() { this.game?.start(); this.game?.resize(); setTimeout(() => this.canvas?.focus(), 30); }
-  onHide() { if (this.game) { if (!this.game.gameOver && this.game.simTime > 0) this.game.paused = true; this.game.stop(); } }
-  destroy() { this.ro?.disconnect(); this.game?.stop(); }
+  onShow() { this.show(); }
+  onHide() { this.hide(); }
+  destroy() { this.ro?.disconnect(); this.hide(); }
 }

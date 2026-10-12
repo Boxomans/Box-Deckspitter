@@ -1,6 +1,6 @@
 // Box-DocSpitter — application shell: tabs, menus, home, explorer, open/save plumbing.
 
-import { $, $$, h, clear, uid, basename, dirname, extOf, stripExt, formatBytes, timeAgo, formatDate, toBytes, debounce, joinPath } from './core/dom.js';
+import { $, $$, h, clear, uid, basename, dirname, extOf, stripExt, formatBytes, timeAgo, formatDate, toBytes, debounce, joinPath, vendor } from './core/dom.js';
 import { icon } from './core/icons.js';
 import { api } from './core/api.js';
 import {
@@ -33,6 +33,7 @@ const EDITORS = {
   diff: () => import('./editors/diff.js').then((m) => m.DiffEditor),
   secure: () => import('./editors/secure.js').then((m) => m.SecureNotesEditor),
   tomcat: () => import('./editors/tomcat.js').then((m) => m.TomcatEditor),
+  browser: () => import('./editors/browser.js').then((m) => m.BrowserEditor),
   paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
 
@@ -320,28 +321,64 @@ class App {
     return box;
   }
 
-  /** The F-14 button shows only while the easter egg is turned on (Settings → Easter eggs). */
+  /** The F-14 button shows, and the sortie flies, only while the easter egg is turned on (Settings → Easter eggs). */
   syncTomcat() {
     const on = !!this.settings.tomcatEnabled;
     $('#btn-tomcat').hidden = !on;
-    $('#btn-tomcat').title = 'F-14F Super Tomcat · drag or flick it to the right sidebar to dock it there';
-    if (!on) for (const t of this.tabs.filter((x) => x.mode === 'tomcat')) this.closeTab(t);
+    $('#btn-tomcat').title = 'F-14F Super Tomcat · P pauses · drag or flick it to the right sidebar to dock it there';
+    if (on) this.tomcatFlight();
+    else {
+      for (const t of this.tabs.filter((x) => x.mode === 'tomcat')) this.closeTab(t);
+      this.stopTomcatFlight();
+    }
     this.syncRail();
   }
 
+  /** The easter egg's sortie: one per app, flying from start-up for as long as it's turned on. */
+  tomcatFlight() {
+    return (this._flight ||= import('./editors/tomcat.js').then((m) => new m.Flight(this)));
+  }
+
+  async stopTomcatFlight() {
+    const f = this._flight;
+    this._flight = null;
+    await (await f)?.stop();
+  }
+
   easterEggSettings() {
-    const cb = h('input', { type: 'checkbox', checked: !!this.settings.tomcatEnabled });
-    cb.addEventListener('change', async () => {
-      await this.saveSettings({ tomcatEnabled: cb.checked });
-      this.syncTomcat();
-      if (cb.checked) toast('F-14F Super Tomcat is in the top bar. Fight’s on.', { type: 'ok', timeout: 3000 });
-    });
-    const s = this.settings.tomcat || {};
-    return h('div', { class: 'settings-group' }, h('h4', {}, 'Easter eggs'),
-      h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat')),
-      h('span', { class: 'faint', style: { fontSize: '11px' } }, s.games
-        ? `${s.games} sortie${s.games === 1 ? '' : 's'} · ${s.splashes || 0} splashes · best ${Math.floor((s.bestTime || 0) / 60)}m ${Math.floor((s.bestTime || 0) % 60)}s`
-        : 'An AWG-9 radar intercept game, behind a button in the top bar.'));
+    const box = h('div', { class: 'settings-group' });
+    const draw = () => {
+      const on = !!this.settings.tomcatEnabled;
+      const s = this.settings.tomcat || {};
+      const cb = h('input', { type: 'checkbox', checked: on });
+      cb.addEventListener('change', async () => {
+        await this.saveSettings({ tomcatEnabled: cb.checked });
+        this.syncTomcat();
+        if (cb.checked) toast('F-14F Super Tomcat is in the top bar. Fight’s on.', { type: 'ok', timeout: 3000 });
+        draw();
+      });
+      const played = s.games || s.auto?.games;
+      clear(box).append(h('h4', {}, 'Easter eggs'),
+        h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat')),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, played
+          ? `High score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()} · ${(s.games || 0) + (s.auto?.games || 0)} sorties · ${(s.splashes || 0) + (s.auto?.splashes || 0)} splashes`
+          : 'An AWG-9 radar intercept game, behind a button in the top bar.'),
+        // wiping progress only shows while the game itself is on
+        on ? h('button', { class: 'btn sm danger', style: { alignSelf: 'flex-start' }, onclick: () => this.resetTomcat(draw) }, icon('trash', 'sm'), 'Reset game progress…') : null);
+    };
+    draw();
+    return box;
+  }
+
+  /** Wipes the game: scores, stats, $ and upgrades. */
+  async resetTomcat(redraw) {
+    if (!(await confirmDialog('Reset F-14F Super Tomcat?', 'Your high scores, stats, $ and every hangar upgrade are wiped. This can’t be undone.', { danger: true, okLabel: 'Reset' }))) return;
+    for (const t of this.tabs.filter((x) => x.mode === 'tomcat')) await this.closeTab(t);
+    await this.stopTomcatFlight();
+    await this.saveSettings({ tomcat: {}, tomcatAuto: false });
+    this.syncTomcat(); // a fresh sortie, with no upgrades
+    toast('Game progress reset', { type: 'ok' });
+    redraw?.();
   }
 
   /** A modal of password boxes → their values (null if cancelled). */
@@ -393,9 +430,15 @@ class App {
     const out = await pickSave({ title: 'Export your setup', defaultName: `Box-DocSpitter setup ${day}.zip`, filters: [{ name: 'Zip file', extensions: ['zip'] }] });
     if (!out?.path) return;
     try {
+      await this.saveGames();
       const r = await api.post('/api/setup/export', { path: out.path.toLowerCase().endsWith('.zip') ? out.path : out.path + '.zip' });
       toast(`Exported${r.secureNotes ? ' (with your encrypted Secure notes)' : ''}`, { type: 'ok', timeout: 4000, action: { label: 'Show', fn: () => api.reveal(r.path) } });
     } catch (e) { errorToast(e, 'Export failed'); }
+  }
+
+  /** Easter egg game progress (cash is saved a few seconds late) → settings.json now, so exports carry all of it. */
+  async saveGames() {
+    await (await this._flight)?.flushCash();
   }
 
   async importSetup() {
@@ -416,6 +459,9 @@ class App {
     if (ok !== 'ok') return;
     try {
       if (replace.checked) await window.bdsShell?.notes?.({ op: 'lock', hard: true });
+      // close the game first so its progress can't be saved over the imported one
+      for (const t of this.tabs.filter((x) => x.mode === 'tomcat')) await this.closeTab(t);
+      await this.stopTomcatFlight();
       const r = await api.post('/api/setup/import', { path: file, replaceNotes: replace.checked });
       toast(`Imported${r.notes === 'imported' ? ' (with Secure notes)' : r.notes === 'kept' ? ' — your Secure notes here were kept' : ''}. Restarting the window…`, { type: 'ok', timeout: 2500 });
       setTimeout(() => location.reload(), 1200);
@@ -443,10 +489,15 @@ class App {
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
     const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'clock', mediadump: 'image', docdump: 'file-pdf', settings: 'settings' };
-    for (const b of $$('.rail-btn')) {
+    for (const b of $$('.rail-btn[data-panel]')) {
       b.append(icon(railIcons[b.dataset.panel], 'lg'));
       b.addEventListener('click', () => this.togglePanel(b.dataset.panel));
     }
+    // the browser opens in the main area, not as a side panel; it needs the desktop app (web pages in <webview>s)
+    const web = $('#rail-browser');
+    web.append(icon('globe', 'lg'));
+    web.hidden = !window.bdsShell?.browser;
+    web.addEventListener('click', () => this.newDocument('browser'));
     for (const b of $$('.rrail-tab')) b.addEventListener('click', () => this.toggleRightPanel(b.dataset.rpanel));
     // remember the last place the user was typing, so side panels can insert there
     document.addEventListener('focusin', (e) => {
@@ -907,6 +958,7 @@ class App {
   helpMenu() {
     return [
       { label: 'Keyboard shortcuts', icon: 'keyboard', shortcut: 'F1', action: () => this.showShortcuts() },
+      { label: 'README', icon: 'markdown', action: () => this.showReadme() },
       { label: 'About Box-DocSpitter', icon: 'info', action: () => this.showAbout() },
     ];
   }
@@ -1055,7 +1107,7 @@ class App {
     const t = this.active;
     document.title = t ? `${t.dirty ? '● ' : ''}${t.title} — Box-DocSpitter` : 'Box-DocSpitter';
     const el = clear($('#doc-title'));
-    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'secure', 'tomcat'].includes(t?.mode) && !t.path;
+    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'secure', 'tomcat', 'browser'].includes(t?.mode) && !t.path;
     if (t) el.append(...[h('b', {}, t.title), t.path ? h('span', {}, '  ·  ' + dirname(t.path)) : tool ? null : h('span', {}, '  ·  not saved yet')].filter(Boolean));
   }
 
@@ -1202,6 +1254,7 @@ class App {
       diff: { mode: 'diff', ext: '', base: this.toolName('BoxDiff') },
       secure: { mode: 'secure', ext: '', base: this.toolName('Secure notes') },
       tomcat: { mode: 'tomcat', ext: '', base: 'F-14F Super Tomcat' },
+      browser: { mode: 'browser', ext: '', base: 'Browser' },
       cut: { mode: 'cut', ext: 'boxcut', base: `Untitled ${this.toolName('Video editor').toLowerCase()}` },
       paint: { mode: 'paint', ext: 'png', base: 'Untitled image' },
     }[kind];
@@ -1211,7 +1264,7 @@ class App {
       images = await pickOpen({ multi: true, title: 'Choose images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
       if (!images) return;
     }
-    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'secure' || kind === 'tomcat') && !opts.another) {
+    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'secure' || kind === 'tomcat' || kind === 'browser') && !opts.another) {
       const existing = this.tabs.find((t) => t.mode === spec.mode);
       if (existing) { this.activate(existing); return existing; }
     }
@@ -2911,6 +2964,59 @@ class App {
         h('div', { class: 'menu-heading' }, 'Mouse'), table(mouseRows),
         h('div', { class: 'menu-heading' }, 'BoxDiff'), table([['Next / previous change', 'F7 / Shift+F7']]))),
     });
+  }
+
+  /** Help → README: README.md rendered in a window of its own (opening it again just brings that window forward). */
+  async showReadme() {
+    const w = window.open('', 'bds-readme', 'width=980,height=860');
+    if (!w) return toast('Couldn’t open a window for the README', { type: 'error' });
+    if (w.document.body?.dataset.readme) { w.focus(); return; }
+    let html;
+    try {
+      const [{ text }, marked, { sanitizeHtml }] = await Promise.all([api.get('/api/readme'), vendor.marked(), import('./editors/doc/html-tools.js')]);
+      html = sanitizeHtml(marked.parse(text, { gfm: true }), { keepWhitespace: true });
+    } catch (e) { w.close(); return errorToast(e, 'Couldn’t load the README'); }
+    // the window wears the app's current theme
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    const d = w.document;
+    d.open();
+    d.write(`<!doctype html><html><head><meta charset="utf-8"><title>Box-DocSpitter — README</title><style>
+      :root { color-scheme: ${this.settings.theme === 'light' ? 'light' : 'dark'}; }
+      body { margin: 0; background: ${v('--bg-0')}; color: ${v('--text')}; font: 14px/1.6 Inter, "Segoe UI", system-ui, sans-serif; }
+      main { max-width: 860px; margin: 0 auto; padding: 28px 32px 60px; }
+      h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 0.6em; }
+      h1 { font-size: 26px; margin-top: 0.4em; } h2 { font-size: 20px; padding-bottom: 6px; border-bottom: 1px solid ${v('--line')}; } h3 { font-size: 16px; }
+      a { color: ${v('--accent')}; }
+      code { font: 12.5px "IBM Plex Mono", Consolas, monospace; background: ${v('--bg-2')}; border: 1px solid ${v('--line')}; border-radius: 4px; padding: 1px 5px; }
+      pre { background: ${v('--bg-2')}; border: 1px solid ${v('--line')}; border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+      pre code { background: none; border: 0; padding: 0; }
+      table { border-collapse: collapse; margin: 1em 0; display: block; overflow-x: auto; }
+      th, td { border: 1px solid ${v('--line-2')}; padding: 6px 10px; text-align: left; vertical-align: top; }
+      th { background: ${v('--bg-2')}; }
+      thead:not(:has(th:not(:empty))) { display: none; }
+      blockquote { margin: 1em 0; padding: 2px 14px; border-left: 3px solid ${v('--accent-line')}; color: ${v('--text-2')}; }
+      hr { border: 0; border-top: 1px solid ${v('--line')}; margin: 2em 0; }
+      img { max-width: 100%; }
+      ::-webkit-scrollbar { width: 10px; height: 10px; } ::-webkit-scrollbar-thumb { background: ${v('--scroll')}; border-radius: 5px; }
+    </style></head><body data-readme="1"><main>${html}</main></body></html>`);
+    d.close();
+    // GitHub-style heading ids, so the README's own #links work
+    const seen = {};
+    for (const hd of d.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+      if (hd.id) continue;
+      let id = hd.textContent.trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-');
+      if (seen[id] != null) id += `-${++seen[id]}`; else seen[id] = 0;
+      hd.id = id;
+    }
+    // web links open in the default browser (via the main window), never inside the README window
+    d.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href]');
+      if (!a || a.getAttribute('href').startsWith('#')) return;
+      e.preventDefault();
+      if (/^https?:/i.test(a.href)) window.open(a.href, '_blank', 'noopener');
+    });
+    w.focus();
   }
 
   showAbout() {

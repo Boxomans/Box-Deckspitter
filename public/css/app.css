@@ -1108,6 +1108,10 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .music-presets .chip { font-size: 11px; }
 .music-list { overflow-y: auto; max-height: 240px; display: flex; flex-direction: column; border-top: 1px solid var(--line); padding-top: 6px; }
 .music-pop:has(.music-eq:not([hidden])) .music-list { max-height: 140px; }
+/* top-bar popup: the library / queue list gets the room the window has (up to 60% of its height), and shrinks
+   first when the mixer is open so the controls never get pushed off-screen */
+.music-pop:not(.docked) > * { flex-shrink: 0; }
+.music-pop:not(.docked) .music-list, .music-pop:not(.docked):has(.music-eq:not([hidden])) .music-list { max-height: 60vh; min-height: 120px; flex: 0 1 auto; }
 .music-track { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 7px; background: none; color: var(--text-2); font-size: 12.5px; text-align: left; cursor: pointer; }
 .music-track:hover { background: var(--bg-2); color: var(--text); }
 .music-track.on { background: var(--accent-soft); color: var(--accent-strong); }
@@ -1311,4 +1315,70 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 /* F-14F Super Tomcat (easter egg) */
 .tomcat-root { flex: 1; min-height: 0; position: relative; background: #111; overflow: hidden; }
 .tomcat-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; outline: none; cursor: crosshair; }
+.tomcat-hangar { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); outline: none; font-family: ui-monospace, "IBM Plex Mono", Consolas, monospace; }
+.tomcat-hangar .th-card { width: min(560px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow: auto; background: #121512; border: 2px solid #54ff6b; padding: 16px 18px; color: #ddd; }
+.tomcat-hangar .th-head { display: flex; align-items: center; gap: 12px; font-size: 20px; color: #b9ffc0; }
+.tomcat-hangar .th-cash { margin-left: auto; color: #ffd36b; font-weight: bold; }
+.tomcat-hangar .th-close { background: none; border: 1px solid #555; color: #ddd; width: 28px; height: 28px; font-size: 18px; line-height: 1; cursor: pointer; }
+.tomcat-hangar .th-sub { color: #888; font-size: 12px; margin: 4px 0 12px; }
+.tomcat-hangar .th-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid #243424; }
+.tomcat-hangar .th-info { flex: 1; min-width: 0; }
+.tomcat-hangar .th-name { color: #fff; font-size: 14px; }
+.tomcat-hangar .th-what { color: #9a9; font-size: 11px; margin-top: 2px; }
+.tomcat-hangar .th-pips { display: flex; gap: 3px; }
+.tomcat-hangar .th-pips span { width: 10px; height: 10px; border: 1px solid #3c9f4c; }
+.tomcat-hangar .th-pips span.on { background: #54ff6b; }
+.tomcat-hangar .th-buy { min-width: 84px; padding: 6px 10px; background: #1e2a1e; border: 2px solid #8bd88b; color: #ffd36b; font: inherit; font-size: 13px; cursor: pointer; }
+.tomcat-hangar .th-buy:hover:not(:disabled) { background: #2e5a2e; }
+.tomcat-hangar .th-buy:disabled { border-color: #444; color: #666; background: #161616; cursor: default; }
 
+/* the sortie off screen: a tiny radar that floats anywhere, or folds into the right sidebar */
+.tomcat-mini { position: fixed; z-index: 880; padding: 4px 4px 3px; border: 1px solid #2c4a2c; border-radius: 8px; background: rgba(8, 13, 8, 0.9); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); color: #9fe39f; font-family: ui-monospace, "IBM Plex Mono", Consolas, monospace; cursor: grab; user-select: none; touch-action: none; outline: none; -webkit-app-region: no-drag; }
+.tomcat-mini:focus-visible { border-color: #9fe39f; }
+.tomcat-mini.dragging { cursor: grabbing; opacity: 0.85; }
+.tomcat-mini .tm-scope { display: block; width: 120px; height: 84px; }
+.tomcat-mini .tm-bar { display: flex; align-items: center; gap: 3px; margin-top: 2px; font-size: 10.5px; }
+.tomcat-mini .tm-dist { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tomcat-mini .tm-dist.threat { color: #ff6b6b; }
+.tomcat-mini .tm-dist.down { color: #ff9a9a; }
+.tomcat-mini .tm-btn { flex: none; width: 20px; height: 17px; padding: 0; border: 1px solid #2c4a2c; border-radius: 4px; background: transparent; color: inherit; font-size: 9px; line-height: 1; cursor: pointer; }
+.tomcat-mini .tm-btn:hover { border-color: #9fe39f; background: #1a2a1a; }
+.tomcat-mini.docked { position: static; z-index: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 24px; padding: 3px 0 7px; border-radius: 6px; box-shadow: none; cursor: pointer; }
+.tomcat-mini.docked .tm-scope { width: 22px; height: 22px; }
+.tomcat-mini.docked .tm-bar { flex-direction: column; margin: 0; }
+.tomcat-mini.docked .tm-btn { display: none; }
+.tomcat-mini.docked .tm-dist { writing-mode: vertical-rl; font-size: 9.5px; letter-spacing: 0.08em; overflow: visible; }
+
+
+/* ---------------------------------------------------------------- browser (left sidebar → globe) */
+.bw-root { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-0); }
+.bw-top { display: flex; align-items: flex-end; gap: 4px; padding: 6px 8px 0; background: var(--bg-1); border-bottom: 1px solid var(--line); }
+.bw-strip { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.bw-strip::-webkit-scrollbar { display: none; }
+.bw-tab { display: flex; align-items: center; gap: 6px; flex: 0 1 200px; min-width: 90px; height: 30px; padding: 0 4px 0 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--text-3); font-size: 12px; cursor: default; user-select: none; }
+.bw-tab:hover { background: var(--bg-2); color: var(--text-2); }
+.bw-tab.active { background: var(--bg-0); border-color: var(--line); color: var(--text); margin-bottom: -1px; height: 31px; }
+.bw-tab.loading .bw-title { opacity: 0.7; }
+.bw-fav { width: 14px; height: 14px; flex: none; object-fit: contain; }
+.bw-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bw-close, .bw-newtab, .bw-btn { display: grid; place-items: center; flex: none; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); }
+.bw-close { width: 20px; height: 20px; }
+.bw-newtab { width: 28px; height: 28px; margin-bottom: 2px; }
+.bw-close:hover, .bw-newtab:hover, .bw-btn:hover:not(:disabled) { background: var(--bg-3); color: var(--text); }
+.bw-btn { width: 30px; height: 30px; }
+.bw-btn:disabled { opacity: 0.35; }
+.bw-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--bg-0); border-bottom: 1px solid var(--line); }
+.bw-addr-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--bg-2); }
+.bw-addr-wrap:focus-within { border-color: var(--accent-line); box-shadow: var(--focus); }
+.bw-addr { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
+.bw-lock { display: flex; align-items: center; flex: none; font-size: 11px; color: var(--text-3); }
+.bw-lock:empty { display: none; }
+.bw-lock.ok { color: var(--ok); }
+.bw-lock.bad { color: var(--danger); font-weight: 600; }
+.bw-note { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--accent-soft); border-bottom: 1px solid var(--line); color: var(--text-2); font-size: 12px; }
+.bw-views { flex: 1; min-height: 0; position: relative; background: #fff; }
+.bw-view { position: absolute; inset: 0; width: 100%; height: 100%; visibility: hidden; pointer-events: none; }
+.bw-view.active { visibility: visible; pointer-events: auto; }
+.bw-find { position: absolute; top: 8px; right: 16px; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-1); box-shadow: var(--shadow-sm); }
+.bw-find-input { width: 200px; border: 1px solid var(--line-2); border-radius: 5px; padding: 4px 6px; background: var(--bg-2); color: var(--text); font: inherit; font-size: 12px; outline: none; }
+.bw-find-count { min-width: 40px; color: var(--text-3); font-size: 11px; }

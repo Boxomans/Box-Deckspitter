@@ -34,6 +34,7 @@ const P = {
   'arrow-up': '<path d="M12 19V5M5 12l7-7 7 7"/>',
   'arrow-down': '<path d="M12 5v14M5 12l7 7 7-7"/>',
   'arrow-left': '<path d="M19 12H5M12 19l-7-7 7-7"/>',
+  'arrow-right': '<path d="M5 12h14M12 5l7 7-7 7"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',

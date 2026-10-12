@@ -140,6 +140,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
         sandbox: true,
         spellcheck: true,
         plugins: true, // built-in PDF viewer for print previews
+        webviewTag: true, // the built-in browser (electron/browser.js locks each one down)
       },
     });
     // Pinning the window to the taskbar should pin Box-DocSpitter, not bare electron.exe: tell Windows how
@@ -175,6 +176,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     win.webContents.on('will-navigate', (e, target) => {
       if (!isLocal(target)) { e.preventDefault(); openExternal(target); }
     });
+    win.webContents.on('will-attach-webview', (e, prefs, params) => browser.guardWebview(e, prefs, params));
 
     // The page asks before closing with unsaved tabs; Electron needs us to show that question ourselves.
     win.webContents.on('will-prevent-unload', (e) => {
@@ -271,6 +273,9 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   });
   const fromApp = (e) => { try { return !!origin && new URL(e.senderFrame?.url || e.sender.getURL()).origin === origin; } catch { return false; } };
   ipcMain.handle('bds:notes', (e, req) => (fromApp(e) ? notes.handle(req || {}) : { ok: false, error: 'Not allowed', code: 'denied' }));
+
+  // ---- the built-in web browser (electron/browser.js)
+  const browser = require('./browser.js')({ root: ROOT, isAppSender: fromApp });
   // Windows locked, the PC going to sleep: lock the notes (and tell the page, for the app's PIN lock)
   app.whenReady().then(() => {
     for (const ev of ['lock-screen', 'suspend']) {
@@ -309,7 +314,10 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     return { paths: r.filePaths };
   });
 
-  app.whenReady().then(startServer);
+  app.whenReady().then(async () => {
+    try { await browser.setup(); } catch (e) { console.log(`[browser] setup failed: ${e.message}`); }
+    startServer();
+  });
 
   app.on('window-all-closed', () => {
     quitting = true;

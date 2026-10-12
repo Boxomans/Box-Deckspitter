@@ -1696,6 +1696,8 @@ function openAppWindow(paths = []) {
 // ---------------------------------------------------------------------------
 
 const routes = {
+  // Help → README: the app's own README.md
+  'GET /api/readme': async () => ({ text: await fsp.readFile(path.join(ROOT, 'README.md'), 'utf8') }),
   'GET /api/info': async () => ({
     app: APP_NAME, version: VERSION, platform: process.platform, sep: path.sep,
     home: os.homedir(), desktop: knownFolder('desktop'), documents: knownFolder('documents'),

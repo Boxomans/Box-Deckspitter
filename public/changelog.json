@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.0.20",
+    "date": "2026-10-12",
+    "notes": [
+      "New: a built-in web browser (globe button on the left). Tabs, find in page, search engine choice and unpacked Chrome extensions; your tabs come back next time.",
+      "Right-click a picture, video or sound on a web page to send it to the media dump, or save the whole page to the doc dump as a PDF.",
+      "Website logins are kept encrypted on this PC (switched on automatically after the first close). Camera, microphone, location and similar requests ask first.",
+      "Links that open other programs, like mod-manager buttons that open Vortex, ask before they do (with an \"Always for this site\" option).",
+      "The browser has its own 10-band equalizer for sound from web pages (browser menu → Equalizer).",
+      "Help → README opens the full guide in its own window.",
+      "The music player's song list and queue get more room when opened from the top bar.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.19",
     "date": "2026-10-12",
     "notes": [

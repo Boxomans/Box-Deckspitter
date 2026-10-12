@@ -10,16 +10,16 @@ import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal } from '
 import { pickOpen } from './files.js';
 
 // 10-band graphic EQ (±18 dB) between a low cut (high-pass) and a high cut (low-pass).
-const BANDS = [
+export const BANDS = [
   [31, 'lowshelf'], [62, 'peaking'], [125, 'peaking'], [250, 'peaking'], [500, 'peaking'],
   [1000, 'peaking'], [2000, 'peaking'], [4000, 'peaking'], [8000, 'peaking'], [16000, 'highshelf'],
 ];
 const NB = BANDS.length;
-const MIN_HZ = 20;
-const MAX_HZ = 20000;
+export const MIN_HZ = 20;
+export const MAX_HZ = 20000;
 const flat = () => Array(NB).fill(0);
 // eq: dB per band · low: low cut Hz (20 = off) · high: high cut Hz (20000 = off)
-const PRESETS = {
+export const PRESETS = {
   Flat: { eq: flat(), low: MIN_HZ, high: MAX_HZ },
   'Bass boost': { eq: [8, 7, 5, 2, 0, 0, 0, 0, 0, 0], low: MIN_HZ, high: MAX_HZ },
   'Bass cut': { eq: [-12, -10, -6, -2, 0, 0, 0, 0, 0, 0], low: 90, high: MAX_HZ },
@@ -34,9 +34,9 @@ const PRESETS = {
   'Lo-fi': { eq: [2, 3, 3, 2, 1, 0, -2, -4, -6, -8], low: 120, high: 5500 },
 };
 // cut-filter sliders work on a log scale (0..1000 ↔ 20 Hz..20 kHz)
-const hzToPos = (hz) => Math.round((Math.log(hz / MIN_HZ) / Math.log(MAX_HZ / MIN_HZ)) * 1000);
-const posToHz = (pos) => Math.round(MIN_HZ * Math.pow(MAX_HZ / MIN_HZ, pos / 1000));
-const hzLabel = (hz) => (hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)}k` : String(hz));
+export const hzToPos = (hz) => Math.round((Math.log(hz / MIN_HZ) / Math.log(MAX_HZ / MIN_HZ)) * 1000);
+export const posToHz = (pos) => Math.round(MIN_HZ * Math.pow(MAX_HZ / MIN_HZ, pos / 1000));
+export const hzLabel = (hz) => (hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)}k` : String(hz));
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|weba)$/i;
 const fmt = (t) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00');
 
