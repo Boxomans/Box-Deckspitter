@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.0.6",
+    "date": "2026-10-11",
+    "notes": [
+      "The music player remembers the song, the spot in it, the volume and whether it was playing: close the app, restart or update, and it picks up right there.",
+      "A queue, separate from the library: right-click a song → Play next / Add to queue, hover it and click +, or drag it onto the Queue tab. Drag queued songs to reorder them. When the queue runs out, the library carries on where it was.",
+      "Drag or flick the ♪ button into the right sidebar to dock the player there as its own tab; drag or flick the tab back to the top bar to undock it."
+    ]
+  },
+  {
     "version": "1.0.5",
     "date": "2026-10-11",
     "notes": [

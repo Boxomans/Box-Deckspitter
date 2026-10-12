@@ -68,6 +68,79 @@ console.log('spit it out');
 \`\`\`
 `;
 
+/**
+ * Drag `el` and drop it on `zone()`, or flick it toward the zone and let go: either way `onMove()` runs.
+ * A plain click (no drag) is left alone. A ghost copy follows the pointer and flies to where it lands.
+ */
+function flingable(el, zone, onMove) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const pts = [];
+    let ghost = null;
+    try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const inside = (z, x, y, pad = 0) => { const r = z.getBoundingClientRect(); return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad; };
+    const move = (ev) => {
+      pts.push({ x: ev.clientX, y: ev.clientY, t: performance.now() });
+      if (pts.length > 6) pts.shift();
+      if (!ghost && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 8) return;
+      if (!ghost) {
+        ghost = el.cloneNode(true);
+        ghost.removeAttribute('id');
+        ghost.classList.add('fling-ghost');
+        document.body.append(ghost);
+        el.classList.add('fling-source');
+        zone().classList.add('fling-target');
+      }
+      ghost.style.left = `${ev.clientX - ghost.offsetWidth / 2}px`;
+      ghost.style.top = `${ev.clientY - ghost.offsetHeight / 2}px`;
+      zone().classList.toggle('fling-hot', inside(zone(), ev.clientX, ev.clientY, 20));
+    };
+    const up = (ev) => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      if (!ghost) return; // just a click
+      // the click that follows a drag shouldn't also toggle the player
+      const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); };
+      el.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => el.removeEventListener('click', swallow, { capture: true }), 50);
+      const z = zone();
+      z.classList.remove('fling-target', 'fling-hot');
+      el.classList.remove('fling-source');
+      const r = z.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      // a flick: fast enough, and heading roughly toward the zone (within about 40 degrees)
+      let vx = 0;
+      let vy = 0;
+      if (pts.length > 1) { const a = pts[0]; const b = pts[pts.length - 1]; const dt = Math.max(1, b.t - a.t); vx = (b.x - a.x) / dt; vy = (b.y - a.y) / dt; }
+      const speed = Math.hypot(vx, vy);
+      const tx = cx - ev.clientX;
+      const ty = cy - ev.clientY;
+      const aimed = speed > 0.5 && (vx * tx + vy * ty) / (speed * (Math.hypot(tx, ty) || 1)) > 0.75;
+      const go = inside(z, ev.clientX, ev.clientY, 20) || aimed;
+      const home = el.getBoundingClientRect();
+      const toX = go ? cx : home.left + home.width / 2;
+      const toY = go ? cy : home.top + home.height / 2;
+      ghost.style.transition = 'left 0.22s cubic-bezier(.2,.8,.2,1), top 0.22s cubic-bezier(.2,.8,.2,1), opacity 0.22s, transform 0.22s';
+      requestAnimationFrame(() => {
+        ghost.style.left = `${toX - ghost.offsetWidth / 2}px`;
+        ghost.style.top = `${toY - ghost.offsetHeight / 2}px`;
+        ghost.style.opacity = '0';
+        ghost.style.transform = 'scale(0.7)';
+      });
+      const g = ghost;
+      setTimeout(() => g.remove(), 260);
+      if (go) setTimeout(onMove, 120);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  });
+}
+
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, text & code — (almost) nothing leaves this machine';
 
@@ -119,7 +192,8 @@ class App {
     this.startHeartbeat();
     this.startDraftLoop();
     if (this.settings.sidebar) this.showPanel(this.settings.sidebar);
-    if (this.settings.rightPanel) this.toggleRightPanel(this.settings.rightPanel);
+    if (this.settings.musicDock === 'side') this.setMusicDock(true, { animate: false });
+    if (this.settings.rightPanel && !(this.settings.rightPanel === 'music' && this.rightPanel === 'music')) this.toggleRightPanel(this.settings.rightPanel);
     // the app is up: confirm a just-installed update (otherwise the boot file rolls it back), then say how it went
     window.bdsShell?.appReady?.();
     this.afterStartup();
@@ -142,7 +216,9 @@ class App {
     this.syncSoundButton();
     this.wireSoundVolume();
     $('#btn-music').append(icon('music'));
+    $('#btn-music').title = 'Music player (audio-dump) · drag or flick it to the right sidebar to dock it there';
     $('#btn-music').addEventListener('click', () => this.music.toggleOpen());
+    this.wireMusicDock();
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
     const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'clock', settings: 'settings' };
@@ -159,9 +235,47 @@ class App {
     });
   }
 
-  toggleRightPanel(name) {
+  // ---- the ♪ player can sit under its top-bar button or dock as a right-sidebar tab; drag or flick to move it
+  musicRailTab() {
+    if (!this._musicTab) {
+      const b = h('button', { class: 'rrail-tab rrail-music', dataset: { rpanel: 'music' }, title: 'Music player · drag or flick it to the top bar to undock it' },
+        h('span', { class: 'rrail-glyph' }, '\u266a'), h('span', { class: 'rrail-label' }, 'music'));
+      b.addEventListener('click', () => this.toggleRightPanel('music'));
+      this._musicTab = b;
+    }
+    return this._musicTab;
+  }
+
+  setMusicDock(side, { animate = true } = {}) {
+    const btn = $('#btn-music');
+    const tab = this.musicRailTab();
+    if ((this.settings.musicDock === 'side') !== side) this.saveSettings({ musicDock: side ? 'side' : 'top' });
+    if (side) {
+      $('#rightrail').append(tab);
+      btn.hidden = true;
+      // dragged in: open it there; at startup: only if it was open when the app closed
+      if (animate || this.settings.rightPanel === 'music') this.toggleRightPanel('music', { force: true });
+    } else {
+      if (this.rightPanel === 'music') this.toggleRightPanel(null);
+      this.music.dockInto(null);
+      if (this.rightPanels?.music) { this.rightPanels.music.el.remove(); delete this.rightPanels.music; }
+      tab.remove();
+      btn.hidden = false;
+    }
+    tab.classList.toggle('playing', !!this.music.playing);
+  }
+
+  wireMusicDock() {
+    const topZone = () => $('.titlebar-actions');
+    const sideZone = () => $('#rightrail');
+    flingable($('#btn-music'), sideZone, () => this.setMusicDock(true));
+    flingable(this.musicRailTab(), topZone, () => this.setMusicDock(false));
+  }
+
+  toggleRightPanel(name, { force = false } = {}) {
     const host = $('#rightpanel');
-    const next = name && this.rightPanel !== name ? name : null;
+    if (name === 'music' && !this.music?.docked && this.settings.musicDock !== 'side') name = null;
+    const next = name && (force || this.rightPanel !== name) ? name : null;
     this.rightPanel = next;
     host.hidden = !next;
     host.dataset.panel = next || '';
@@ -173,7 +287,9 @@ class App {
       const el = h('div', { class: 'rp-container' });
       host.append(el);
       this.rightPanels[next] = { el, panel: null };
-      const load = next === 'chars'
+      const load = next === 'music'
+        ? Promise.resolve(this.music.dockInto(el))
+        : next === 'chars'
         ? import('./core/chars-panel.js').then(({ CharsPanel }) => new CharsPanel(this, el))
         : next === 'clip'
           ? import('./core/clips-panel.js').then(({ ClipsPanel }) => new ClipsPanel(this, el))
@@ -195,7 +311,7 @@ class App {
     return false;
   }
 
-  syncMusicButton(playing) { $('#btn-music')?.classList.toggle('playing', !!playing); }
+  syncMusicButton(playing) { $('#btn-music')?.classList.toggle('playing', !!playing); this._musicTab?.classList.toggle('playing', !!playing); }
 
   /** Hovering the speaker button pops out a volume slider for the UI sounds. */
   wireSoundVolume() {
@@ -399,6 +515,7 @@ class App {
       { label: 'Recent panel', icon: 'clock', checked: this.panel === 'recent', action: () => this.togglePanel('recent') },
       { label: 'Special characters', icon: 'omega', checked: this.rightPanel === 'chars', action: () => this.toggleRightPanel('chars') },
       { label: 'Clipboard & snippets', icon: 'copy', checked: this.rightPanel === 'clip', action: () => this.toggleRightPanel('clip') },
+      { label: 'Music player in the sidebar', icon: 'music', checked: this.settings.musicDock === 'side', action: () => this.setMusicDock(this.settings.musicDock !== 'side') },
       { label: 'Focus mode', icon: 'focus', shortcut: 'F11', checked: document.body.classList.contains('focus-mode'), action: () => this.toggleFocus() },
       { sep: true },
       { label: 'Dark theme', icon: 'moon', checked: this.settings.theme === 'dark', action: () => this.applyTheme('dark') },
