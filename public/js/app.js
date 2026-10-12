@@ -1996,7 +1996,8 @@ class App {
         h('div', { class: 'row' }, h('img', { src: '/assets/icon.svg', style: { width: '44px' } }), h('div', {}, h('div', { class: 'brand-name', style: { fontSize: '15px' } }, 'BOX//DOCSPITTER'), h('div', { class: 'faint mono' }, 'v' + window.BDS?.version))),
         h('p', {}, 'A self-hosted document workstation. Everything runs on this PC at 127.0.0.1. Your files never leave it.'),
         h('p', { class: 'dim' }, 'Built with pdf.js, pdf-lib, Monaco, SheetJS, docx and JSZip, all served from your own disk.'),
-        h('p', { class: 'dim mono', style: { fontSize: '11.5px' } }, 'Backups of every save: Box-DocSpitter\\data\\backups')),
+        h('p', { class: 'dim mono', style: { fontSize: '11.5px' } }, 'Backups of every save: Box-DocSpitter\\data\\backups'),
+        h('p', { class: 'dim' }, 'Made by boxbind · Discord: @boxbind')),
     });
   }
 }

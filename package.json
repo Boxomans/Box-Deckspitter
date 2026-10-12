@@ -9,6 +9,7 @@
     "app": "electron electron/main.js",
     "browser": "node server.js --open"
   },
+  "author": "boxbind (Discord: @boxbind)",
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",

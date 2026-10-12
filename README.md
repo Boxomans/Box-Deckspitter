@@ -54,6 +54,7 @@ new. **Download** fetches it and checks every file for errors first; **Restart &
 
 ## Credits
 
+- Made by **boxbind** (Discord: `@boxbind`).
 - UI sound effects are from [Pixabay](https://pixabay.com), used under the Pixabay Content License. They
   aren't covered by the code's license. See `public/assets/sounds/SOUNDS-LICENSE.txt`.
 - Built on pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, tesseract.js, Electron,
