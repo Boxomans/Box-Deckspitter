@@ -9,4 +9,5 @@ contextBridge.exposeInMainWorld('bdsShell', {
   startDrag: (file) => ipcRenderer.send('bds:drag', file),
   copyImage: (pngDataUrl) => ipcRenderer.invoke('bds:copyImage', pngDataUrl),
   createShortcuts: () => ipcRenderer.invoke('bds:shortcuts'),
+  appReady: () => ipcRenderer.send('bds:ready'), // tells the boot file an update started fine
 });

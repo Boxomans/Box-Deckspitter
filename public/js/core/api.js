@@ -97,6 +97,7 @@ export const api = {
   dumpAdd: (name, bytes, kind = 'image') => request('POST', `/api/dump/add?name=${enc(name)}&kind=${enc(kind)}`, { body: bytes }),
   dumpRemove: (name, kind = 'image') => request('POST', '/api/dump/remove', { json: { name, kind } }),
   dumpRename: (name, to, kind = 'image') => request('POST', '/api/dump/rename', { json: { name, to, kind } }),
+  dumpIdentical: (kind = 'image') => request('GET', `/api/dump/identical?kind=${enc(kind)}`),
   dumpReveal: (kind = 'image', name) => request('POST', '/api/dump/reveal', { json: { kind, name } }),
   dumpClip: (name, kind = 'image') => request('POST', '/api/dump/clip', { json: { name, kind } }),
   quit: () => request('POST', '/api/quit', { json: {} }),

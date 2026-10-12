@@ -1,10 +1,11 @@
 // BoxTape — paste a YouTube playlist (or any yt-dlp playlist / single video link), pick the tracks,
 // and they're saved as MP3s (title, artist and cover art included) into the audio dump for the ♪ player.
+// Spotify playlist / album / song links work too: each song is matched to the same recording on YouTube.
 
 import { BaseEditor } from './base.js';
-import { h, clear } from '../core/dom.js';
+import { h, clear, stripExt } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { toast, errorToast } from '../core/ui.js';
+import { toast, errorToast, modal } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { fmtTime } from './video.js';
 
@@ -12,13 +13,22 @@ const post = (url, body) => fetch(url, { method: 'POST', headers: { 'X-BDS-Token
   .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`); return d; });
 const get = (url) => fetch(url, { headers: { 'X-BDS-Token': api.token } }).then((r) => r.json());
 
+// same idea as the music player's duplicate check: "Artist - Song (Official Video) (1)" ≈ "artist song"
+function songKey(s) {
+  return String(s).toLowerCase()
+    .replace(/[([](?:official(?: music)?(?: video| audio| visualizer| lyric video)?|music video|lyric video|lyrics?|audio|video|visualizer|hd|hq|4k|explicit|clean)[)\]]/gi, ' ')
+    .replace(/\s*\(\d+\)\s*$/, '')
+    .replace(/[^a-z0-9\u00c0-\uffff]+/g, ' ')
+    .trim();
+}
+
 export class TapeEditor extends BaseEditor {
   static mode = 'tape';
 
   async load() {
     this.tools = await get('/api/tools').catch(() => ({}));
     this.items = [];
-    this.input = h('input', { type: 'url', class: 'klep-url', placeholder: 'paste a YouTube playlist link (or a single video / album link)…', spellcheck: 'false' });
+    this.input = h('input', { type: 'url', class: 'klep-url', placeholder: 'paste a YouTube or Spotify playlist / album / song link…', spellcheck: 'false' });
     this.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.fetch(); });
     this.goBtn = h('button', { class: 'btn primary klep-go', onclick: () => this.fetch() }, icon('music', 'sm'), 'Get tracks');
     this.results = h('div', { class: 'tape-results' });
@@ -31,7 +41,7 @@ export class TapeEditor extends BaseEditor {
         h('div', { class: 'klep-bar' }, this.input, this.goBtn),
         need.length
           ? h('div', { class: 'klep-note error' }, icon('info', 'sm'), `BoxTape needs ${need.join(' and ')}. Install, then restart Box-DocSpitter.`)
-          : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, 'Saves to Box-DocSpitter\\audio-dump with the song title, artist and cover art. Only download music you have the right to keep.')),
+          : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, 'Saves to Box-DocSpitter\\audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.')),
       this.progress,
       this.results)));
     setTimeout(() => this.input.focus(), 50);
@@ -43,7 +53,7 @@ export class TapeEditor extends BaseEditor {
     this.goBtn.disabled = true;
     clear(this.results).append(h('div', { class: 'klep-loading' }, h('div', { class: 'spinner' }), h('span', { class: 'faint' }, 'reading the playlist… (big playlists take a few seconds)')));
     try {
-      const res = await post('/api/klep/scan', { url, mode: 'ytdlp', playlist: 'on' });
+      const res = /^spotify:|^https?:\/\/(open\.spotify\.com|spotify\.link)\//i.test(url) ? await this.fromSpotify(url) : await post('/api/klep/scan', { url, mode: 'ytdlp', playlist: 'on' });
       this.items = (res.items || []).filter((x) => x.url);
       this.title = res.title || '';
       this.render(res);
@@ -54,11 +64,55 @@ export class TapeEditor extends BaseEditor {
     }
   }
 
+  /** Spotify → the song list (YouTube matching happens per song while downloading). */
+  async fromSpotify(url) {
+    const res = await post('/api/spotify/tracks', { url });
+    // songs already in the audio dump start unticked
+    let have = new Set();
+    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.name)))); } catch { /* ignore */ }
+    const items = res.items.map((t) => {
+      const artist = String(t.artist || '').split(',')[0].trim();
+      return {
+        type: 'spotify', url: t.id ? `https://open.spotify.com/track/${t.id}` : 'https://open.spotify.com/',
+        title: t.title, artist: t.artist, duration: t.duration, label: `${artist} - ${t.title}`,
+        uploader: t.artist, already: have.has(songKey(`${artist} - ${t.title}`)),
+      };
+    });
+    const notes = [];
+    if (res.maybeMore && !res.hasKey) notes.push(h('span', {}, 'Spotify only shows the first 100 songs of a playlist without a key. ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); this.spotifyKey(); } }, 'Add a free Spotify key'), ' to get all of them.'));
+    const n = items.filter((x) => x.already).length;
+    if (n) notes.push(`${n} song${n === 1 ? ' is' : 's are'} already in your audio dump, so ${n === 1 ? 'it starts' : 'they start'} unticked.`);
+    return { title: res.title, items, notes, spotify: true };
+  }
+
+  async spotifyKey() {
+    const id = h('input', { type: 'text', placeholder: 'Client ID', spellcheck: 'false', autocomplete: 'off' });
+    const secret = h('input', { type: 'password', placeholder: 'Client Secret', spellcheck: 'false', autocomplete: 'off' });
+    const ok = await modal({
+      title: 'Spotify key (optional)',
+      body: h('div', { class: 'col', style: { gap: '10px' } },
+        h('p', { class: 'dim', style: { margin: 0 } }, 'Only needed for playlists with more than 100 songs. It’s free:'),
+        h('ol', { class: 'dim', style: { margin: 0, paddingLeft: '18px', fontSize: '12.5px' } },
+          h('li', {}, 'Go to developer.spotify.com/dashboard and log in.'),
+          h('li', {}, 'Create app → any name, Redirect URI http://127.0.0.1, tick “Web API”.'),
+          h('li', {}, 'Open the app’s Settings and copy the Client ID and Client Secret here.')),
+        id, secret,
+        h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Kept in Box-DocSpitter\\data\\secrets.json on this PC; it’s only ever sent to Spotify.')),
+      buttons: [{ label: 'Remove key', value: 'remove', ghost: true }, { label: 'Cancel', value: null, ghost: true }, { label: 'Save', value: 'save', primary: true }],
+    });
+    if (!ok) return;
+    try {
+      await post('/api/spotify/key', ok === 'remove' ? {} : { clientId: id.value.trim(), clientSecret: secret.value.trim() });
+      toast(ok === 'remove' ? 'Spotify key removed' : 'Spotify key saved — fetching the whole playlist', { type: 'ok' });
+      if (ok === 'save' && this.input.value.trim()) this.fetch();
+    } catch (e) { errorToast(e); }
+  }
+
   render(res) {
     const R = clear(this.results);
-    for (const n of res.notes || []) R.append(h('div', { class: 'klep-note' }, icon('info', 'sm'), n));
+    for (const n of res.notes || []) R.append(h('div', { class: 'klep-note' }, icon('info', 'sm'), h('span', {}, n)));
     if (!this.items.length) { R.append(h('div', { class: 'klep-note' }, 'No tracks found at that link.')); return; }
-    const all = h('input', { type: 'checkbox', checked: true });
+    const all = h('input', { type: 'checkbox', checked: !this.items.some((x) => x.already) });
     const count = h('span', {});
     const goBtn = h('button', { class: 'btn primary', onclick: () => this.download() }, icon('download', 'sm'), h('span', {}));
     const update = () => {
@@ -72,13 +126,13 @@ export class TapeEditor extends BaseEditor {
     this.boxes = [];
     const list = h('div', { class: 'tape-list' });
     this.items.forEach((it, i) => {
-      const cb = h('input', { type: 'checkbox', checked: true });
+      const cb = h('input', { type: 'checkbox', checked: !it.already });
       cb.addEventListener('change', update);
       cb._item = it;
       this.boxes.push(cb);
       list.append(h('label', { class: 'tape-row' }, cb,
         h('span', { class: 'tape-n mono faint' }, String(i + 1)),
-        h('span', { class: 'tape-title' }, it.title || it.url),
+        h('span', { class: 'tape-title' }, it.type === 'spotify' ? it.title : it.title || it.url, it.already ? h('span', { class: 'tape-have' }, 'in your dump') : null),
         h('span', { class: 'tape-meta mono faint' }, [it.uploader, it.duration ? fmtTime(it.duration, false) : null].filter(Boolean).join(' · '))));
     });
     this.lanes = h('select', { class: 'tape-lanes', title: 'How many tracks download at the same time' }, [1, 2, 3, 4, 5, 6].map((n) => h('option', { value: String(n) }, `${n} at a time`)));
@@ -103,7 +157,12 @@ export class TapeEditor extends BaseEditor {
     this.progress.scrollIntoView({ block: 'nearest' });
     try {
       const parallel = Number(this.lanes?.value) || this.app.settings.tapeParallel || 3;
-      const { id } = await post('/api/audio/grab', { items: picked.map((it) => ({ url: it.url, type: 'ytdlp', title: it.title })), parallel });
+      const { id } = await post('/api/audio/grab', {
+        items: picked.map((it) => (it.type === 'spotify'
+          ? { url: it.url, type: 'spotify', title: it.title, artist: it.artist, duration: it.duration, label: it.label }
+          : { url: it.url, type: 'ytdlp', title: it.title })),
+        parallel,
+      });
       cancel.onclick = () => post('/api/job/cancel', { id });
       let refreshed = 0;
       for (;;) {
@@ -115,7 +174,7 @@ export class TapeEditor extends BaseEditor {
         clear(rows).append(...(j.tracks || []).map((t) => h('div', { class: `tape-prog-row ${t.status}` },
           h('span', { class: 'tape-state' }, { waiting: '·', working: '♪', done: '✓', failed: '✕', cancelled: '–' }[t.status] || '·'),
           h('span', { class: 'tape-title' }, t.title),
-          h('span', { class: 'mono faint' }, t.status === 'working' ? `${Math.round((t.progress || 0) * 100)}%` : t.status === 'failed' ? (t.error || 'failed').slice(0, 80) : t.status))));
+          h('span', { class: 'mono faint', title: t.note || '' }, t.status === 'working' ? (t.progress ? `${Math.round(t.progress * 100)}%` : t.note || '…') : t.status === 'failed' ? (t.error || 'failed').slice(0, 80) : t.status))));
         // songs appear in the player as they finish
         if ((j.done || 0) > refreshed) { refreshed = j.done; this.app.music?.refresh(); }
         if (j.status !== 'running') {

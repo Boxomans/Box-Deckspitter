@@ -1,0 +1,37 @@
+[
+  {
+    "version": "1.0.3",
+    "date": "2026-10-11",
+    "notes": [
+      "Updates from inside the app: Settings → Updates checks GitHub, downloads, checks the new version and installs it on restart. If it doesn't start, the previous version comes back on its own.",
+      "Go back to the previous version any time from Settings → Updates (or run “Restore previous version.bat”).",
+      "What's new (this window) after every update, and a welcome note the first time the app opens.",
+      "Hover a home screen card, the big title, the line under it or the logo and press F2 to change it; Ctrl+F2 puts the original back.",
+      "Mouse back / forward buttons move between folders and tabs.",
+      "BoxTape takes Spotify playlist, album and song links: each song is matched to the same recording on YouTube and saved as “Artist - Title.mp3”. Songs you already have start unticked.",
+      "The music player spots duplicate songs (same file, or “Song (1)”, “Song (Official Video)”…) and can clear the extra copies."
+    ]
+  },
+  {
+    "version": "1.0.2",
+    "date": "2026-10-11",
+    "notes": ["New home screen tagline."]
+  },
+  {
+    "version": "1.0.1",
+    "date": "2026-10-11",
+    "notes": [
+      "BoxDiff: compare two files side by side — added lines in green, removed in red. Works with text, code, Word, PDF, spreadsheets and pictures.",
+      "Menus: hold the mouse on a menu, drag to an item and let go to pick it.",
+      "A sharper, more angular logo."
+    ]
+  },
+  {
+    "version": "1.0.0",
+    "date": "2026-10-11",
+    "notes": [
+      "BoxPaint (images with layers) and BoxScribe (offline picture-to-text).",
+      "F2 to rename and Del to remove whatever's under the mouse: dump items, layers, songs and files."
+    ]
+  }
+]

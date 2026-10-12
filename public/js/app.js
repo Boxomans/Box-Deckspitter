@@ -68,6 +68,9 @@ console.log('spit it out');
 \`\`\`
 `;
 
+const HOME_TITLE = 'BOX//DOCSPITTER';
+const HOME_TAGLINE = 'local docs, pdfs, video, text & code — (almost) nothing leaves this machine';
+
 class App {
   constructor() {
     this.tabs = [];
@@ -75,7 +78,8 @@ class App {
     this.info = null;
     this.settings = { ...DEFAULT_SETTINGS };
     this.clientId = uid('c');
-    this.explorer = { dir: null, entries: [], filter: '', selected: null };
+    this.explorer = { dir: null, entries: [], filter: '', selected: null, back: [], fwd: [] };
+    this.tabHist = { list: [], pos: -1, moving: false }; // mouse back / forward between tabs
     this.draftHashes = new Map();
     this.menubarOpen = null;
   }
@@ -110,11 +114,15 @@ class App {
     this.buildHome();
     this.activate(null);
     this.wireKeys();
+    this.wireMouseNav();
     this.wireDragDrop();
     this.startHeartbeat();
     this.startDraftLoop();
     if (this.settings.sidebar) this.showPanel(this.settings.sidebar);
     if (this.settings.rightPanel) this.toggleRightPanel(this.settings.rightPanel);
+    // the app is up: confirm a just-installed update (otherwise the boot file rolls it back), then say how it went
+    window.bdsShell?.appReady?.();
+    this.afterStartup();
 
     const params = new URLSearchParams(location.search);
     const opens = params.getAll('open');
@@ -487,6 +495,8 @@ class App {
   }
 
   activate(tab) {
+    const th = this.tabHist;
+    if (th && !th.moving && th.list[th.pos] !== tab) { th.list = th.list.slice(0, th.pos + 1); th.list.push(tab); if (th.list.length > 100) th.list.shift(); th.pos = th.list.length - 1; }
     if (this.active && this.active !== tab) this.active.editor?.onHide?.();
     this.active = tab;
     this.homeEl.hidden = !!tab;
@@ -934,6 +944,85 @@ class App {
     this.workspace.append(this.homeEl);
   }
 
+  /** F2 on the home logo: pick a picture (file, image dump or paste) — shrunk to 256 px and kept in settings. */
+  async changeHomeLogo(img) {
+    const set = (url) => { this.saveSettings({ homeLogo: url }); img.src = url || '/assets/icon.svg'; };
+    const shrink = async (blob) => {
+      const bmp = await createImageBitmap(blob);
+      const k = Math.min(1, 256 / Math.max(bmp.width, bmp.height));
+      const c = h('canvas', { width: Math.max(1, Math.round(bmp.width * k)), height: Math.max(1, Math.round(bmp.height * k)) });
+      const x = c.getContext('2d');
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(bmp, 0, 0, c.width, c.height);
+      return c.toDataURL('image/png');
+    };
+    const use = async (blob) => { try { set(await shrink(blob)); ctx?.close(null); } catch (e) { errorToast(e, 'Couldn’t use that picture'); } };
+    let ctx = null;
+    const preview = h('img', { src: this.settings.homeLogo || '/assets/icon.svg', alt: '', class: 'logo-pick-preview' });
+    const grid = h('div', { class: 'mail-dumppick image logo-pick-dump' });
+    api.dump('image').then(({ items }) => {
+      if (!items.length) grid.append(h('div', { class: 'faint' }, 'The image dump is empty.'));
+      for (const it of items) {
+        const b = h('button', { class: 'mail-dumpitem', title: it.name }, h('img', { src: it.url, alt: '' }), h('span', { class: 'mail-dumpname' }, it.name));
+        b.addEventListener('click', async () => use(await (await fetch(it.url)).blob()));
+        grid.append(b);
+      }
+    }).catch(() => {});
+    const pasteHint = h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Tip: you can also paste a picture (Ctrl+V) while this is open.');
+    const onPaste = (e) => { const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/')); if (f) { e.preventDefault(); use(f); } };
+    document.addEventListener('paste', onPaste);
+    await modal({
+      title: 'Change the logo', wide: true,
+      body: h('div', { class: 'logo-pick' },
+        h('div', { class: 'row' }, preview,
+          h('div', { class: 'logo-pick-btns' },
+            h('button', { class: 'btn primary', onclick: async () => {
+              const paths = await pickOpen({ title: 'Choose a logo picture', filters: [{ name: 'Pictures', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'ico'] }] });
+              if (!paths?.length) return;
+              try { const { bytes } = await api.read(paths[0]); use(new Blob([bytes], { type: /\.svg$/i.test(paths[0]) ? 'image/svg+xml' : '' })); } catch (e) { errorToast(e); }
+            } }, icon('folder-open', 'sm'), 'Choose a picture…'),
+            h('button', { class: 'btn ghost', onclick: () => { set(null); ctx?.close(null); } }, icon('undo', 'sm'), 'Back to the original'),
+            pasteHint)),
+        h('div', { class: 'home-section-title' }, 'from the image dump'),
+        grid),
+      buttons: [{ label: 'Close', value: null, ghost: true }],
+      onOpen: (c) => { ctx = c; },
+    });
+    document.removeEventListener('paste', onPaste);
+  }
+
+  /** A home screen card. Hover + F2 renames it (saved in settings); Ctrl+F2 puts the original name back. */
+  homeCard(ic, title, sub) {
+    const names = this.settings.cardNames || {};
+    const nameEl = h('span', { class: 'nc-title' }, names[title] || title);
+    const subs = this.settings.cardSubs || {};
+    const subEl = h('span', { class: 'nc-sub' }, subs[title] || sub);
+    const card = h('button', { class: 'new-card', title: 'F2 to rename · Ctrl+F2 to reset (hover the small line to change that instead)' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), nameEl, subEl);
+    hoverKeys(subEl, {
+      nameEl: subEl,
+      value: () => (this.settings.cardSubs || {})[title] || sub,
+      commit: (n) => {
+        const next = { ...(this.settings.cardSubs || {}) };
+        if (!n.trim() || n.trim() === sub) delete next[title]; else next[title] = n.trim();
+        this.saveSettings({ cardSubs: next });
+        subEl.textContent = next[title] || sub;
+      },
+      reset: () => { const next = { ...(this.settings.cardSubs || {}) }; delete next[title]; this.saveSettings({ cardSubs: next }); subEl.textContent = sub; },
+    });
+    hoverKeys(card, {
+      nameEl,
+      value: () => (this.settings.cardNames || {})[title] || title,
+      commit: (n) => {
+        const next = { ...(this.settings.cardNames || {}) };
+        if (!n.trim() || n.trim() === title) delete next[title]; else next[title] = n.trim();
+        this.saveSettings({ cardNames: next });
+        nameEl.textContent = next[title] || title;
+      },
+      reset: () => { const next = { ...(this.settings.cardNames || {}) }; delete next[title]; this.saveSettings({ cardNames: next }); nameEl.textContent = title; },
+    });
+    return card;
+  }
+
   async refreshHome() {
     const el = clear(this.homeEl);
     const cards = [
@@ -947,13 +1036,26 @@ class App {
       ['paint', 'brush', 'Image', 'paint · layers · .png'],
     ];
     const inner = h('div', { class: 'home-inner' });
+    // the big title and the line under it can be renamed with F2 (the user@127.0.0.1 part always stays)
+    const editable = (el, key, def) => hoverKeys(el, {
+      nameEl: el,
+      value: () => this.settings[key] || def,
+      commit: (n) => { const v = n.trim() && n.trim() !== def ? n.trim() : null; this.saveSettings({ [key]: v }); el.textContent = v || def; },
+      reset: () => { this.saveSettings({ [key]: null }); el.textContent = def; },
+    });
+    const heroTitle = h('span', { class: 'g' }, this.settings.homeTitle || HOME_TITLE);
+    const heroTag = h('span', {}, this.settings.homeTagline || HOME_TAGLINE);
+    editable(heroTitle, 'homeTitle', HOME_TITLE);
+    const heroLogo = h('img', { src: this.settings.homeLogo || '/assets/icon.svg', alt: '', title: 'F2 to change the logo' });
+    hoverKeys(heroLogo, { f2: () => this.changeHomeLogo(heroLogo), reset: () => { this.saveSettings({ homeLogo: null }); heroLogo.src = '/assets/icon.svg'; } });
+    editable(heroTag, 'homeTagline', HOME_TAGLINE);
     el.append(h('div', { class: 'home-grid' }), inner);
     inner.append(
       h('div', { class: 'home-hero' },
-        h('img', { src: '/assets/icon.svg', alt: '' }),
+        heroLogo,
         h('div', {},
-          h('h1', { class: 'home-title' }, h('span', { class: 'g' }, 'BOX//DOCSPITTER'), h('span', { class: 'cursor' })),
-          h('p', { class: 'home-sub' }, `> local docs, pdfs, video, text & code — (almost) nothing leaves this machine  ·  ${this.info?.user || ''}@127.0.0.1`))),
+          h('h1', { class: 'home-title', title: 'F2 to rename' }, heroTitle, h('span', { class: 'cursor' })),
+          h('p', { class: 'home-sub', title: 'F2 to change this line' }, '> ', heroTag, `  ·  ${this.info?.user || ''}@127.0.0.1`))),
     );
 
     const draftsHost = h('div');
@@ -962,7 +1064,7 @@ class App {
     inner.append(h('div', { class: 'home-section-title' }, 'start something'));
     const grid = h('div', { class: 'new-cards' });
     for (const [kind, ic, title, sub] of cards) {
-      const card = h('button', { class: 'new-card' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), h('span', { class: 'nc-title' }, title), h('span', { class: 'nc-sub' }, sub));
+      const card = this.homeCard(ic, title, sub);
       card.addEventListener('click', (e) => {
         if (kind === 'code') showMenu(LANGUAGES.map(([id, name]) => ({ label: name, action: () => this.newDocument('code', { lang: id }) })), { x: e.clientX, y: e.clientY });
         else this.newDocument(kind);
@@ -983,7 +1085,7 @@ class App {
       ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
       ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
     ]) {
-      const card = h('button', { class: 'new-card' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), h('span', { class: 'nc-title' }, title), h('span', { class: 'nc-sub' }, sub));
+      const card = this.homeCard(ic, title, sub);
       card.addEventListener('click', fn);
       toolGrid.append(card);
     }
@@ -1093,11 +1195,12 @@ class App {
     this.active?.editor?.onShow?.();
   }
 
-  async renderExplorer(dir) {
+  async renderExplorer(dir, { history = true } = {}) {
     const ex = this.explorer;
     const target = dir || ex.dir || this.settings.explorerDir || this.info.desktop || this.info.home;
     try {
       const res = await api.list(target);
+      if (history && ex.dir && res.path !== ex.dir) { ex.back.push(ex.dir); ex.fwd = []; if (ex.back.length > 100) ex.back.shift(); }
       ex.dir = res.path;
       ex.entries = res.entries;
       ex.parent = res.parent;
@@ -1276,6 +1379,7 @@ class App {
           check('nativeDialogs', 'Use Windows open/save dialogs'),
           check('showHidden', 'Show hidden & dot files', () => this.panel === 'explorer' && this.renderExplorer()),
           check('drafts', 'Keep crash-recovery drafts of unsaved work')),
+        this.updateSettings(),
         this.windowsSettings(),
         this.mailSettings(),
         this.discordSettings(),
@@ -1322,6 +1426,159 @@ class App {
   }
 
   // ======================================================================= Windows file types
+
+  // ======================================================================= startup notes, updates
+
+  /** After the app is up: say how an update/rollback went, then the first-run welcome or "what's new". */
+  async afterStartup() {
+    const H = { 'X-BDS-Token': api.token };
+    const version = window.BDS?.version || '';
+    try {
+      const st = await fetch('/api/update/status', { headers: H }).then((r) => r.json());
+      const r = st?.result;
+      if (r && !r.seen) {
+        fetch('/api/update/seen', { method: 'POST', headers: H }).catch(() => {});
+        if (r.manualRollback) toast(`Went back to ${r.version}.`, { type: 'ok', timeout: 6000 });
+        else if (!r.ok) toast(`The update to ${r.version} didn’t work (${r.reason}), so Box-DocSpitter is still on ${r.from || 'the previous version'}. Nothing of yours was touched.`, { type: 'warn', timeout: 14000 });
+      }
+    } catch { /* browser mode or old server */ }
+    const last = this.settings.lastSeenVersion;
+    if (!this.settings.welcomed) {
+      this.saveSettings({ welcomed: true, lastSeenVersion: version });
+      return this.showWelcome();
+    }
+    if (last !== version) {
+      this.saveSettings({ lastSeenVersion: version });
+      if (last) this.showWhatsNew(last);
+    }
+  }
+
+  async changelog() {
+    try { return await fetch('/changelog.json', { cache: 'no-store' }).then((r) => r.json()); } catch { return []; }
+  }
+
+  /** "What's new": every release after `since` (or the latest few when since is null). */
+  async showWhatsNew(since = null) {
+    const all = await this.changelog();
+    const newer = (a, b) => { const pa = String(a).split('.').map(Number); const pb = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0); return false; };
+    const list = since ? all.filter((e) => newer(e.version, since)) : all.slice(0, 6);
+    if (!list.length) return since ? null : toast('No release notes yet.', { timeout: 2000 });
+    modal({
+      title: since ? `What’s new in ${list[0].version}` : 'What’s new',
+      wide: true,
+      body: h('div', { class: 'whatsnew' }, list.map((e) => h('div', {},
+        h('h5', {}, `v${e.version}`, e.date ? h('span', { class: 'faint' }, `  ·  ${e.date}`) : null),
+        h('ul', {}, (e.notes || []).map((n) => h('li', {}, n)))))),
+      buttons: [{ label: 'Nice', value: true, primary: true }],
+    });
+  }
+
+  showWelcome() {
+    modal({
+      title: 'Welcome',
+      body: h('div', { class: 'welcome' },
+        h('div', { class: 'welcome-head' }, h('img', { src: '/assets/icon.svg', alt: '' }), h('div', {}, h('b', {}, 'BOX//DOCSPITTER'), h('span', { class: 'faint mono' }, `v${window.BDS?.version}`))),
+        h('p', {}, 'Your own document workstation. Everything runs on this PC; your files stay here.'),
+        h('ul', {},
+          h('li', {}, h('b', {}, 'Start something'), ' on the home screen makes a new doc, PDF, sheet or picture. ', h('b', {}, 'Tools'), ' has the form filler, BoxMail, BoxDiff and the rest.'),
+          h('li', {}, 'Drop any file on the window to open it.'),
+          h('li', {}, 'The ', h('b', {}, 'dumps'), ' at the bottom of editors hold pictures and documents you use a lot: click to use, right-click to copy, drag them anywhere.'),
+          h('li', {}, 'Hover a name and press ', h('kbd', {}, 'F2'), ' to rename it, ', h('kbd', {}, 'Del'), ' to remove it.'),
+          h('li', {}, h('kbd', {}, 'F1'), ' lists every shortcut. ', h('b', {}, 'Settings'), ' (bottom left) has the theme, sounds, updates and more.'))),
+      buttons: [{ label: 'Let’s go', value: true, primary: true }],
+    });
+  }
+
+  updateSettings() {
+    const H = { 'X-BDS-Token': api.token };
+    const call = (method, url, body) => fetch(url, { method, headers: { ...H, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+      .then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Request failed'); return d; });
+    const line = h('span', { class: 'dim mono', style: { fontSize: '11px' } }, `v${window.BDS?.version}`);
+    const note = h('div', { class: 'dim', style: { fontSize: '12px' } });
+    const out = h('div', { class: 'update-out' });
+    const actions = h('div', { class: 'row', style: { flexWrap: 'wrap' } });
+    const tokenRow = h('div', { class: 'row', style: { flexWrap: 'wrap' } });
+    let st = null;
+
+    const restartBtn = (v) => h('button', { class: 'btn sm primary', onclick: async () => {
+      if (this.tabs.some((t) => t.dirty) && !(await confirmDialog('Restart now?', 'Some tabs have unsaved changes. Save them first, or they’ll be lost when the app restarts.', { okLabel: 'Restart anyway', danger: true }))) return;
+      try { await call('POST', '/api/update/apply'); toast(`Restarting to install ${v}…`, { timeout: 5000 }); } catch (e) { errorToast(e); }
+    } }, icon('refresh', 'sm'), `Restart & install ${v}`);
+
+    const download = async (info) => {
+      clear(actions).append(h('span', { class: 'dim' }, 'Downloading…'));
+      try {
+        const { id } = await call('POST', '/api/update/download');
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 400));
+          const j = await fetch(`/api/job?id=${id}`, { headers: H }).then((r) => r.json());
+          if (j.status === 'running') { clear(actions).append(h('span', { class: 'dim' }, `${j.label}${j.bytes ? ' · ' + formatBytes(j.bytes) : ''}…`)); continue; }
+          if (j.status !== 'done') throw new Error(j.error || 'The download failed');
+          break;
+        }
+        clear(actions).append(restartBtn(info.latest), h('button', { class: 'btn sm ghost', onclick: async () => { await call('POST', '/api/update/cancel').catch(() => {}); refresh(); } }, 'Not now'));
+        note.textContent = 'Downloaded and checked. Restarting installs it; your files, settings and dumps aren’t touched. If the new version doesn’t start, the old one comes back on its own.';
+      } catch (e) {
+        clear(actions).append(h('button', { class: 'btn sm', onclick: () => check() }, 'Try again'));
+        note.textContent = e.message;
+      }
+    };
+
+    const check = async () => {
+      clear(out);
+      clear(actions).append(h('span', { class: 'dim' }, 'Checking GitHub…'));
+      let info;
+      try { info = await call('POST', '/api/update/check'); } catch (e) { note.textContent = e.message; clear(actions).append(h('button', { class: 'btn sm', onclick: () => check() }, 'Check again')); return; }
+      if (!info.newer) {
+        note.textContent = `You’re up to date (${info.current}).`;
+        clear(actions).append(h('button', { class: 'btn sm', onclick: () => check() }, icon('refresh', 'sm'), 'Check again'));
+        return;
+      }
+      note.textContent = `${info.latest} is available (you have ${info.current}).`;
+      if (info.notes?.length) out.append(h('ul', { class: 'update-notes' }, info.notes.map((n) => h('li', {}, n))));
+      for (const w of info.warnings || []) out.append(h('div', { class: 'update-warn' }, icon('alert', 'sm'), w));
+      clear(actions);
+      if (st?.blocked) { out.append(h('div', { class: 'update-warn' }, icon('info', 'sm'), st.blocked)); return; }
+      if (info.warnings?.length) return;
+      actions.append(h('button', { class: 'btn sm primary', onclick: () => download(info) }, icon('download', 'sm'), `Download ${info.latest}`));
+    };
+
+    const renderToken = () => {
+      clear(tokenRow);
+      if (st?.hasToken) {
+        tokenRow.append(h('span', { class: 'dim', style: { fontSize: '12px' } }, '● GitHub token saved (only used to reach a private repo)'),
+          h('button', { class: 'btn sm ghost', onclick: async () => { try { await call('POST', '/api/update/token', { token: null }); st.hasToken = false; renderToken(); } catch (e) { errorToast(e); } } }, 'Remove'));
+        return;
+      }
+      const input = h('input', { type: 'password', placeholder: 'GitHub token, only if the repo is private', autocomplete: 'off', spellcheck: 'false', style: { flex: '1', minWidth: '220px' } });
+      tokenRow.append(input, h('button', { class: 'btn sm', onclick: async () => {
+        try { await call('POST', '/api/update/token', { token: input.value }); st.hasToken = true; renderToken(); toast('Token saved', { type: 'ok' }); } catch (e) { errorToast(e); }
+      } }, 'Save'));
+    };
+
+    const refresh = async () => {
+      try { st = await fetch('/api/update/status', { headers: H }).then((r) => r.json()); } catch { line.textContent = 'Couldn’t read the update status.'; return; }
+      line.textContent = `v${st.version} · updates from github.com/${st.repo}`;
+      note.textContent = st.blocked || '';
+      clear(out);
+      clear(actions);
+      if (st.pending && !st.blocked) {
+        note.textContent = `${st.pending.version} is downloaded and ready.`;
+        actions.append(restartBtn(st.pending.version), h('button', { class: 'btn sm ghost', onclick: async () => { await call('POST', '/api/update/cancel').catch(() => {}); refresh(); } }, 'Discard it'));
+      } else {
+        actions.append(h('button', { class: 'btn sm', onclick: () => check() }, icon('refresh', 'sm'), 'Check for updates'));
+      }
+      actions.append(h('button', { class: 'btn sm ghost', onclick: () => this.showWhatsNew() }, 'What’s new'));
+      const last = st.backups?.[0];
+      if (last && !st.blocked) actions.append(h('button', { class: 'btn sm ghost', 'data-tip': 'Puts back the version from before the last update', onclick: async () => {
+        if (!(await confirmDialog(`Go back to ${last.from}?`, `Box-DocSpitter restarts on ${last.from}, the version you had before updating to ${last.version}. Your files, settings and dumps aren’t touched.`, { okLabel: `Go back to ${last.from}` }))) return;
+        try { await call('POST', '/api/update/rollback'); toast('Restarting…', { timeout: 4000 }); } catch (e) { errorToast(e); }
+      } }, icon('undo', 'sm'), `Go back to ${last.from}`));
+      renderToken();
+    };
+    refresh();
+    return h('div', { class: 'settings-group' }, h('h4', {}, 'Updates'), line, note, out, actions, tokenRow);
+  }
 
   windowsSettings() {
     const status = h('span', { class: 'dim mono', style: { fontSize: '11px' } }, 'checking…');
@@ -1579,6 +1836,37 @@ class App {
 
   // ======================================================================= keys, dnd, lifecycle
 
+  /** Mouse back / forward (buttons 4 and 5): folders when over the file explorer, otherwise tabs. */
+  wireMouseNav() {
+    const go = async (dir, overExplorer) => {
+      const ex = this.explorer;
+      if (overExplorer && this.panel === 'explorer') {
+        const from = dir < 0 ? ex.back : ex.fwd;
+        const to = dir < 0 ? ex.fwd : ex.back;
+        const target = from.pop();
+        if (!target) return;
+        to.push(ex.dir);
+        return this.renderExplorer(target, { history: false });
+      }
+      const th = this.tabHist;
+      let i = th.pos + dir;
+      // skip tabs that have been closed since
+      while (i >= 0 && i < th.list.length && th.list[i] !== null && !this.tabs.includes(th.list[i])) i += dir;
+      if (i < 0 || i >= th.list.length) return;
+      th.pos = i;
+      th.moving = true;
+      try { this.activate(th.list[i]); } finally { th.moving = false; }
+    };
+    // stop the page itself from navigating on these buttons
+    for (const ev of ['mousedown', 'auxclick']) window.addEventListener(ev, (e) => { if (e.button === 3 || e.button === 4) e.preventDefault(); }, true);
+    window.addEventListener('mouseup', (e) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      if (document.querySelector('.modal-backdrop')) return;
+      go(e.button === 3 ? -1 : 1, !!e.target.closest?.('#sidepanel'));
+    }, true);
+  }
+
   wireKeys() {
     window.addEventListener('keydown', (e) => {
       if (modalOpen() || menusOpen()) return;
@@ -1678,6 +1966,13 @@ class App {
       ['Next / previous tab', 'Ctrl+Alt+→ / ←'], ['Jump to tab 1–9', 'Alt+1…9'], ['Print', 'Ctrl+P'], ['Find', 'Ctrl+F'], ['Find & replace', 'Ctrl+H'],
       ['Zoom in / out / reset', 'Ctrl+= / - / 0'], ['Focus mode', 'F11'], ['Shortcuts', 'F1'],
     ];
+    const hoverRows = [
+      ['Rename what’s under the mouse', 'F2'], ['Put the original name back', 'Ctrl+F2'], ['Remove what’s under the mouse', 'Del'],
+      ['Change the home logo (hover it)', 'F2'], ['Pick from a menu', 'Hold, drag, release'],
+    ];
+    const mouseRows = [
+      ['Back / forward between tabs', 'Mouse 4 / Mouse 5'], ['Back / forward between folders (over the file panel)', 'Mouse 4 / Mouse 5'],
+    ];
     const docRows = [
       ['Bold / italic / underline', 'Ctrl+B / I / U'], ['Strikethrough', 'Alt+Shift+5'], ['Insert link', 'Ctrl+K'], ['Heading 1–3', 'Ctrl+Alt+1…3'],
       ['Normal text', 'Ctrl+Alt+0'], ['Bulleted / numbered list', 'Ctrl+Shift+8 / 7'], ['Align left / center / right', 'Ctrl+Shift+L / E / R'],
@@ -1687,7 +1982,10 @@ class App {
     modal({
       title: 'Keyboard shortcuts', wide: true,
       body: h('div', { class: 'cols-2' }, h('div', {}, h('div', { class: 'menu-heading' }, 'Everywhere'), table(rows)), h('div', {}, h('div', { class: 'menu-heading' }, 'Documents'), table(docRows),
-        h('div', { class: 'menu-heading' }, 'PDF'), table([['Select / Text / Draw', 'V / T / D'], ['Highlight / Rectangle', 'H / R'], ['Delete selection', 'Del'], ['Undo / redo', 'Ctrl+Z / Y']]))),
+        h('div', { class: 'menu-heading' }, 'PDF'), table([['Select / Text / Draw', 'V / T / D'], ['Highlight / Rectangle', 'H / R'], ['Delete selection', 'Del'], ['Undo / redo', 'Ctrl+Z / Y']]),
+        h('div', { class: 'menu-heading' }, 'Hover a name (dumps, layers, songs, files, home cards)'), table(hoverRows),
+        h('div', { class: 'menu-heading' }, 'Mouse'), table(mouseRows),
+        h('div', { class: 'menu-heading' }, 'BoxDiff'), table([['Next / previous change', 'F7 / Shift+F7']]))),
     });
   }
 

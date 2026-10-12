@@ -866,14 +866,14 @@ function downloadYtdlp(job, url, dir, selector) {
 // ---- audio grabbing: links → MP3s in the audio dump (BoxVidKlep's "MP3 → audio dump" and BoxTape)
 
 /** One link (YouTube, SoundCloud, any yt-dlp site) → MP3 with title/artist/cover art. Resolves to the file path. */
-function ytdlpToMp3(track, url, dir, onProgress, onChild) {
+function ytdlpToMp3(track, url, dir, onProgress, onChild, outName = null) {
   return new Promise((resolve, reject) => {
     const t = tools();
     if (!t.ytdlp) return reject(new Error('yt-dlp is not installed (winget install yt-dlp)'));
     if (!t.ffmpeg) return reject(new Error('Making MP3s needs ffmpeg (winget install Gyan.FFmpeg)'));
     const args = ['-f', 'ba/b', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '--embed-metadata', '--embed-thumbnail', '--convert-thumbnails', 'jpg',
       '--no-playlist', '--newline', '--no-warnings', '--no-mtime', '--windows-filenames', '--ffmpeg-location', t.ffmpeg,
-      '-o', path.join(dir, '%(title).120B.%(ext)s'), '--print', 'after_move:filepath', '--', url];
+      '-o', path.join(dir, outName ? outName.replace(/%/g, '%%') + '.%(ext)s' : '%(title).120B.%(ext)s'), '--print', 'after_move:filepath', '--', url];
     const child = spawn(t.ytdlp, args, { windowsHide: true });
     onChild(child);
     let last = '';
@@ -918,11 +918,30 @@ function ffmpegToMp3(url, dest, referer, onProgress, onChild) {
   });
 }
 
+/** Rewrite an MP3's title/artist tags in place (cover art and audio are copied untouched). */
+function retagMp3(file, { title, artist }) {
+  return new Promise((resolve, reject) => {
+    const ff = tools().ffmpeg;
+    if (!ff) return resolve();
+    const tmp = file.replace(/\.mp3$/i, '') + '.tag.mp3';
+    const args = ['-hide_banner', '-y', '-i', file, '-map', '0', '-c', 'copy', '-id3v2_version', '3'];
+    if (title) args.push('-metadata', `title=${title}`);
+    if (artist) args.push('-metadata', `artist=${artist}`);
+    args.push(tmp);
+    const child = spawn(ff, args, { windowsHide: true });
+    child.on('error', reject);
+    child.on('close', async (code) => {
+      if (code !== 0) { await fsp.rm(tmp, { force: true }).catch(() => {}); return reject(new Error('retag failed')); }
+      try { await fsp.rename(tmp, file); resolve(); } catch (e) { reject(e); }
+    });
+  });
+}
+
 async function grabAudio(job, items, parallel = 3) {
   const children = new Set();
   let cancelled = false;
   job.cancel = () => { cancelled = true; for (const c of children) { try { c.kill(); } catch { /* gone */ } } };
-  job.tracks = items.map((it) => ({ title: it.title || it.name || it.url, status: 'waiting', file: null, error: null, progress: 0 }));
+  job.tracks = items.map((it) => ({ title: it.label || it.title || it.name || it.url, status: 'waiting', file: null, error: null, progress: 0, note: null }));
   job.done = 0;
   job.failed = 0;
   job.parallel = parallel;
@@ -931,7 +950,7 @@ async function grabAudio(job, items, parallel = 3) {
   async function worker() {
     while (!cancelled && next < items.length) {
       const i = next++;
-      const it = items[i];
+      let it = items[i];
       const tr = job.tracks[i];
       tr.status = 'working';
       job.current = job.tracks.filter((t) => t.status === 'working').map((t) => t.title).join(' · ');
@@ -939,6 +958,15 @@ async function grabAudio(job, items, parallel = 3) {
       const onChild = (c) => { child = c; children.add(c); };
       const onProgress = (p) => { tr.progress = p; overall(); };
       try {
+        if (it.type === 'spotify') {
+          // Spotify only gives us the song; find the same recording on YouTube and download that
+          tr.note = 'finding it on YouTube';
+          const match = await spotify.findOnYouTube(it);
+          if (cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
+          tr.note = `from: ${match.title}`;
+          const firstArtist = String(it.artist || '').split(',')[0].trim();
+          it = { ...it, type: 'ytdlp', url: match.url, outName: safeFileName(firstArtist ? `${firstArtist} - ${it.title}` : it.title, 'song'), tags: { title: it.title, artist: it.artist } };
+        }
         checkUrl(it.url);
         if (it.type === 'ytdlp' || !it.type) {
           // each track downloads into its own temp folder, then moves in under a unique name
@@ -946,7 +974,8 @@ async function grabAudio(job, items, parallel = 3) {
           const tmp = path.join(AUDIO_DUMP, '.incoming', crypto.randomBytes(6).toString('hex'));
           await fsp.mkdir(tmp, { recursive: true });
           try {
-            const made = await ytdlpToMp3(tr, it.url, tmp, onProgress, onChild);
+            const made = await ytdlpToMp3(tr, it.url, tmp, onProgress, onChild, it.outName);
+            if (it.tags) await retagMp3(made, it.tags).catch(() => {}); // Spotify's title/artist, not the YouTube upload's
             const dest = await uniquePath(AUDIO_DUMP, path.basename(made));
             await fsp.rename(made, dest);
             tr.file = dest;
@@ -1915,6 +1944,34 @@ const routes = {
     }
     return { dir: d.dir, items: out.sort((a, b) => b.mtime - a.mtime) };
   },
+  // Identical files in a dump: same size first (cheap), then a SHA-1 of the contents to be sure.
+  'GET /api/dump/identical': async (req, q) => {
+    const d = dumpOf(q.get('kind') || 'image');
+    const bySize = new Map();
+    for (const e of await fsp.readdir(d.dir, { withFileTypes: true }).catch(() => [])) {
+      if (!e.isFile() || e.name.startsWith('.') || !d.exts.has(path.extname(e.name).toLowerCase())) continue;
+      const st = await fsp.stat(path.join(d.dir, e.name)).catch(() => null);
+      if (!st || !st.size) continue;
+      if (!bySize.has(st.size)) bySize.set(st.size, []);
+      bySize.get(st.size).push(e.name);
+    }
+    const groups = [];
+    for (const names of bySize.values()) {
+      if (names.length < 2) continue;
+      const byHash = new Map();
+      for (const n of names) {
+        const hash = await new Promise((resolve) => {
+          const hh = crypto.createHash('sha1');
+          fs.createReadStream(path.join(d.dir, n)).on('data', (c) => hh.update(c)).on('end', () => resolve(hh.digest('hex'))).on('error', () => resolve(null));
+        });
+        if (!hash) continue;
+        if (!byHash.has(hash)) byHash.set(hash, []);
+        byHash.get(hash).push(n);
+      }
+      for (const g of byHash.values()) if (g.length > 1) groups.push(g);
+    }
+    return { groups };
+  },
   'POST /api/dump/add': async (req, q) => {
     const kind = q.get('kind') || 'image';
     const name = dumpName(q.get('name') || (kind === 'image' ? 'image.png' : 'document.pdf'), kind);
@@ -2015,8 +2072,14 @@ const routes = {
     anthropicClient = null;
     const removed = [];
     for (const name of await fsp.readdir(DATA).catch(() => [])) {
-      if (name === 'session.json') continue;
+      if (name === 'session.json' || name === 'update') continue; // update bookkeeping isn't user data
       const full = path.join(DATA, name);
+      if (name === 'backups') {
+        // keep backups of earlier app versions (so "go back" still works); everything else in there goes
+        for (const n of await fsp.readdir(full).catch(() => [])) if (n !== 'app') await fsp.rm(path.join(full, n), { recursive: true, force: true }).catch(() => {});
+        removed.push('backups');
+        continue;
+      }
       if (name === 'electron' && SHELL_MODE) {
         // In use by the open window: the shell deletes it on the next start.
         await fsp.writeFile(path.join(DATA, '.reset-electron'), '').catch(() => {});
@@ -2052,6 +2115,24 @@ const routes = {
 
 // Windows file associations ("open .pdf with Box-DocSpitter").
 Object.assign(routes, require('./file-assoc')({ root: ROOT, isWin: IS_WIN, readJSONBody }));
+
+// Spotify links in BoxTape: read the track list, match each song on YouTube.
+const spotify = require('./spotify-server')({
+  secrets: () => readJSON(SECRETS_FILE, {}),
+  saveSecrets: (value) => writeJSON(SECRETS_FILE, value),
+  readJSONBody, runCapture, tools,
+});
+Object.assign(routes, spotify.routes);
+
+// In-app updates (check / download / verify / stage; the boot file installs and can roll back).
+Object.assign(routes, require('./update-server')({
+  root: ROOT, data: DATA, version: VERSION, shellMode: SHELL_MODE,
+  secrets: () => readJSON(SECRETS_FILE, {}),
+  saveSecrets: (value) => writeJSON(SECRETS_FILE, value),
+  readJSONBody, newJob, startJob,
+  relaunch: () => process.send?.({ type: 'relaunch' }),
+  log: (msg) => console.log(`[${APP_NAME}] ${msg}`),
+}));
 
 // BoxMail (Gmail over IMAP/SMTP) lives in its own module.
 Object.assign(routes, require('./mail-server')({

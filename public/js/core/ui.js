@@ -522,7 +522,8 @@ const hoverTargets = new WeakMap();
 const pointer = { x: -1, y: -1 };
 let inlineEditing = false;
 
-/** el: the hover area. o.nameEl + o.value() + o.commit(newName) enable F2; o.remove() enables Delete. */
+/** el: the hover area. o.nameEl + o.value() + o.commit(newName) enable F2 rename (or o.f2() for anything else);
+ *  o.reset() enables Ctrl+F2 (back to the original); o.remove() enables Delete. */
 export function hoverKeys(el, o) {
   hoverTargets.set(el, o);
   return el;
@@ -572,16 +573,21 @@ export function editInline(nameEl, value, { selectBase = false } = {}) {
 document.addEventListener('pointermove', (e) => { pointer.x = e.clientX; pointer.y = e.clientY; }, { capture: true, passive: true });
 document.documentElement.addEventListener('mouseleave', () => { pointer.x = -1; pointer.y = -1; });
 document.addEventListener('keydown', (e) => {
-  if ((e.key !== 'F2' && e.key !== 'Delete') || e.repeat || inlineEditing || e.ctrlKey || e.altKey || e.metaKey || pointer.x < 0) return;
+  if ((e.key !== 'F2' && e.key !== 'Delete') || e.repeat || inlineEditing || e.altKey || e.metaKey || pointer.x < 0) return;
+  if (e.ctrlKey && e.key !== 'F2') return;
   if (menusOpen() || document.querySelector('.modal-backdrop')) return;
   let el = document.elementFromPoint(pointer.x, pointer.y);
   while (el && !hoverTargets.has(el)) el = el.parentElement;
   if (!el) return;
   const o = hoverTargets.get(el);
-  if (e.key === 'F2') {
-    if (!o.nameEl) return;
+  if (e.key === 'F2' && e.ctrlKey) {
+    if (!o.reset) return;
     e.preventDefault(); e.stopPropagation();
-    renameInline(el);
+    o.reset();
+  } else if (e.key === 'F2') {
+    if (!o.nameEl && !o.f2) return;
+    e.preventDefault(); e.stopPropagation();
+    if (o.f2) o.f2(); else renameInline(el);
   } else {
     // don't let Delete meant for a text box remove whatever the mouse happens to rest on
     const t = document.activeElement;

@@ -1079,3 +1079,36 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 
 /* F2 rename box (floats over the name being renamed) */
 .inline-rename { position: fixed; z-index: 1200; transform: translateY(-50%); height: 24px; padding: 0 6px; font: inherit; font-size: 12px; color: var(--text); background: var(--bg-0); border: 1px solid var(--accent); border-radius: 5px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent), 0 8px 20px rgba(0, 0, 0, 0.4); outline: none; }
+
+/* F2 logo picker */
+.logo-pick { display: flex; flex-direction: column; gap: 12px; }
+.logo-pick .row { display: flex; gap: 16px; align-items: center; }
+.logo-pick-preview { width: 96px; height: 96px; object-fit: contain; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-2); padding: 6px; }
+.logo-pick-btns { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.logo-pick-dump { max-height: 40vh; }
+
+/* Settings -> Updates, what's new, welcome */
+.update-out:empty { display: none; }
+.update-out { display: flex; flex-direction: column; gap: 6px; }
+.update-notes { margin: 0; padding-left: 18px; max-height: 150px; overflow-y: auto; font-size: 12px; color: var(--text-2); }
+.update-warn { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; color: var(--warn); }
+.whatsnew { display: flex; flex-direction: column; gap: 14px; max-height: 60vh; overflow-y: auto; }
+.whatsnew h5 { margin: 0 0 4px; font: 600 12px var(--mono, monospace); color: var(--accent); letter-spacing: 0.04em; }
+.whatsnew h5 .faint { font-weight: 400; }
+.whatsnew ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--text-2); }
+.welcome { display: flex; flex-direction: column; gap: 12px; font-size: 13px; color: var(--text-2); }
+.welcome-head { display: flex; gap: 14px; align-items: center; }
+.welcome-head img { width: 54px; height: 54px; }
+.welcome-head b { display: block; font: 600 16px var(--mono, monospace); color: var(--text); letter-spacing: 0.06em; }
+.welcome ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.welcome kbd { font-size: 11px; }
+
+/* music player: duplicates */
+.music-dupes { border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer; }
+.music-dupe-list { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; }
+.music-dupe-group { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-2); font-size: 12.5px; }
+.music-dupe-keep { display: flex; gap: 8px; align-items: center; color: var(--text); }
+.music-dupe-tag { font: 600 9.5px var(--mono, monospace); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 50%, transparent); border-radius: 4px; padding: 1px 5px; }
+.music-dupe-extra { display: flex; gap: 8px; align-items: center; color: var(--text-2); cursor: pointer; }
+.music-dupe-extra span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-pop.behind { z-index: 700; }

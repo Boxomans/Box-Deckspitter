@@ -4,7 +4,7 @@
 import { api } from './api.js';
 import { h, clear, formatBytes, stripExt, extOf } from './dom.js';
 import { icon } from './icons.js';
-import { toast, errorToast, contextMenu, hoverKeys, renameInline } from './ui.js';
+import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal } from './ui.js';
 import { pickOpen } from './files.js';
 
 // 10-band graphic EQ (±18 dB) between a low cut (high-pass) and a high cut (low-pass).
@@ -102,6 +102,82 @@ export function createMusic(app) {
     state.idx = current ? state.tracks.findIndex((t) => t.name === current) : state.tracks.findIndex((t) => t.name === s.musicLast);
     reshuffle();
     render();
+    findDuplicates().then(showDupeCount);
+  }
+
+  // ---------------------------------------------------------------- duplicates
+  // Two ways a song can be in twice: the very same file under another name (checked byte for byte), or the same
+  // title with download junk around it — "Song (2).mp3", "Song (Official Video).mp3", "song - copy.mp3".
+  const JUNK = /[([](?:official(?: music)?(?: video| audio| visualizer| lyric video)?|music video|lyric video|lyrics?|audio|video|visualizer|hd|hq|4k|explicit|clean|mv|m\/v)[)\]]/gi;
+  function songKey(name) {
+    return stripExt(name).toLowerCase()
+      .replace(JUNK, ' ')
+      .replace(/\s*\(\d+\)\s*$/, '')
+      .replace(/\s*-\s*copy(\s*\(\d+\))?\s*$/, '')
+      .replace(/[^a-z0-9\u00c0-\uffff]+/g, ' ')
+      .trim();
+  }
+
+  /** -> [[track, track, …], …]: the first of each group is the one to keep. */
+  async function findDuplicates() {
+    const byName = new Map(state.tracks.map((t) => [t.name, t]));
+    const parent = new Map();
+    const find = (n) => { while (parent.get(n) !== n) n = parent.get(n); return n; };
+    const join = (a, b) => { parent.set(find(b), find(a)); };
+    for (const t of state.tracks) parent.set(t.name, t.name);
+    const byKey = new Map();
+    for (const t of state.tracks) {
+      const k = songKey(t.name);
+      if (!k) continue;
+      if (byKey.has(k)) join(byKey.get(k), t.name); else byKey.set(k, t.name);
+    }
+    try {
+      const { groups } = await api.dumpIdentical('audio');
+      for (const g of groups) for (const n of g.slice(1)) if (byName.has(n) && byName.has(g[0])) join(g[0], n);
+    } catch { /* names only */ }
+    const sets = new Map();
+    for (const t of state.tracks) { const r = find(t.name); if (!sets.has(r)) sets.set(r, []); sets.get(r).push(t); }
+    // keep the cleanest name (shortest, no "(2)" or "copy"), then the oldest file
+    const score = (t) => (/\(\d+\)|copy/i.test(stripExt(t.name)) ? 1000 : 0) + stripExt(t.name).length;
+    return [...sets.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => score(a) - score(b) || a.mtime - b.mtime));
+  }
+
+  function showDupeCount(groups) {
+    if (!ui) return;
+    const extra = groups.reduce((n, g) => n + g.length - 1, 0);
+    ui.dupeBtn.hidden = !extra;
+    ui.dupeBtn.textContent = `${extra} duplicate${extra === 1 ? '' : 's'}`;
+  }
+
+  async function showDuplicates() {
+    const groups = await findDuplicates();
+    if (!groups.length) { showDupeCount(groups); return toast('No duplicate songs.', { type: 'ok', timeout: 1800 }); }
+    // each extra copy has a checkbox (ticked); the first of each group is kept
+    const picks = [];
+    const body = h('div', { class: 'music-dupe-list' }, groups.map((g) => h('div', { class: 'music-dupe-group' },
+      g.map((t, i) => {
+        if (i === 0) return h('div', { class: 'music-dupe-keep' }, h('span', { class: 'music-dupe-tag' }, 'keep'), t.name);
+        const cb = h('input', { type: 'checkbox', checked: true });
+        picks.push({ cb, t });
+        return h('label', { class: 'music-dupe-extra' }, cb, h('span', {}, t.name), h('span', { class: 'faint mono' }, formatBytes(t.size)));
+      }))));
+    ui.el.classList.add('behind'); // the player floats above everything; let the dialog show on top
+    const go = await modal({
+      title: `Duplicate songs (${picks.length})`, wide: true,
+      body: h('div', {}, h('p', { class: 'dim', style: { marginTop: 0 } }, 'Ticked copies move to audio-dump\\.removed (nothing is deleted for good). The top song in each group stays.'), body),
+      buttons: [{ label: 'Cancel', value: false, ghost: true }, { label: 'Remove ticked copies', value: true, primary: true }],
+    });
+    ui.el.classList.remove('behind');
+    if (!go) return;
+    let n = 0;
+    for (const { cb, t } of picks) {
+      if (!cb.checked) continue;
+      const i = state.tracks.indexOf(t);
+      if (i === state.idx) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
+      try { await api.dumpRemove(t.name, 'audio'); n++; } catch (e) { errorToast(e, t.name); }
+    }
+    if (n) toast(`Moved ${n} duplicate${n === 1 ? '' : 's'} to audio-dump\\.removed`, { type: 'ok', timeout: 3500 });
+    refresh();
   }
 
   function reshuffle() {
@@ -316,9 +392,11 @@ export function createMusic(app) {
     const mixerB = h('button', { class: `chip music-mixer-btn ${s.musicMixerOpen ? 'on' : ''}`, onclick: () => { eqWrap.hidden = !eqWrap.hidden; mixerB.classList.toggle('on', !eqWrap.hidden); app.saveSettings({ musicMixerOpen: !eqWrap.hidden }); if (!eqWrap.hidden) requestAnimationFrame(drawCurve); } }, icon('sliders', 'sm'), 'Mixer');
     requestAnimationFrame(drawCurve);
     const list = h('div', { class: 'music-list' });
+    const dupeBtn = h('button', { class: 'music-dupes', hidden: true, 'data-tip': 'Songs that are in the audio dump more than once', onclick: () => showDuplicates() });
     el.append(
       h('div', { class: 'music-head' }, h('span', { class: 'music-note' }, '♪'), h('span', { class: 'mono' }, 'audio-dump/'), h('div', { class: 'grow' }),
         h('button', { class: 'icon-btn', 'data-tip': 'Add songs', onclick: () => addFromDisk() }, icon('plus', 'sm')),
+        dupeBtn,
         h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => refresh() }, icon('refresh', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio') }, icon('external', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': 'Close (music keeps playing)', onclick: () => setOpen(false) }, icon('x', 'sm'))),
@@ -329,7 +407,7 @@ export function createMusic(app) {
       eqWrap,
       list);
     document.body.append(el);
-    ui = { el, title, sub, seek, cur, dur, playB, shuffleB, loopB, list, isSeeking: () => seeking };
+    ui = { el, title, sub, seek, cur, dur, playB, shuffleB, loopB, list, dupeBtn, isSeeking: () => seeking };
     document.addEventListener('pointerdown', (e) => { if (state.open && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music')) setOpen(false); }, true);
     document.addEventListener('keydown', (e) => {
       if (!state.open) return;

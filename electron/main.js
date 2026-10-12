@@ -1,282 +1,220 @@
-// Box-DocSpitter desktop shell: runs server.js as a child process and shows the UI in its own window
-// (own icon, own taskbar entry, no browser chrome). Everything still talks to 127.0.0.1 with the per-launch token.
+// Box-DocSpitter boot file. It does three small jobs and then loads the real app window (shell.js):
+//   1. installs an update the app downloaded (data/update/pending.json), backing up every file it replaces;
+//   2. watches that the updated version actually starts (the page reports "ready") and, if it doesn't,
+//      puts the previous version back and restarts it;
+//   3. "--rollback" on the command line restores the most recent backup by hand.
+// The in-app updater never replaces this file, so a broken update can't break the way back.
+// Only Node's own fs/path are used here: nothing that an update could change.
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeImage, clipboard, ClipboardItem } = require('electron');
-const { fork } = require('child_process');
+'use strict';
+
+const { app, ipcMain, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const ICON = path.join(ROOT, 'public', 'assets', 'icon.ico');
-const BG = { dark: '#0b0910', light: '#f6f3fb' };
+const DATA = path.join(ROOT, 'data');
+const UPD = path.join(DATA, 'update');
+const BACKUPS = path.join(DATA, 'backups', 'app');
+const PENDING = path.join(UPD, 'pending.json');
+const TRIAL = path.join(UPD, 'trial.json');
+const RESULT = path.join(UPD, 'result.json');
+const INSTALLED = path.join(UPD, 'installed.json');
+const ROLLBACK_FLAG = path.join(UPD, 'rollback.flag'); // written by Settings → Updates → "Go back"
+const READY_TIMEOUT = 90 * 1000;
 
+// Paths an update may never touch, whatever the download says.
+const PROTECTED = [/^data(\/|$)/i, /^(image|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-docspitter\.exe$/i];
+const isSafeRel = (rel) => typeof rel === 'string' && rel.length > 0 && rel.length < 400 && !rel.includes('\0') && !path.isAbsolute(rel)
+  && !/^[a-z]:/i.test(rel) && !rel.split(/[\\/]/).includes('..') && !PROTECTED.some((re) => re.test(rel.replace(/\\/g, '/')));
+const abs = (rel) => path.join(ROOT, ...rel.split(/[\\/]/));
+
+const readJSON = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+function writeJSON(f, v) {
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 2));
+  fs.renameSync(f + '.tmp', f);
+}
+const rm = (f) => { try { fs.rmSync(f, { recursive: true, force: true }); } catch { /* ignore */ } };
+const log = (m) => { try { console.log(`[Box-DocSpitter boot] ${m}`); } catch { /* no console */ } };
+
+/** Replace one file without ever leaving it half-written. */
+function putFile(src, rel) {
+  const dest = abs(rel);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = dest + '.bds-new';
+  fs.copyFileSync(src, tmp);
+  fs.renameSync(tmp, dest);
+}
+
+/** Put a backup back: restore every saved file and delete the files the update added. */
+function restore(backupDir) {
+  const man = readJSON(path.join(backupDir, 'manifest.json'));
+  if (!man) throw new Error('backup manifest missing');
+  for (const rel of man.saved || []) if (isSafeRel(rel)) putFile(path.join(backupDir, 'files', ...rel.split('/')), rel);
+  for (const rel of man.added || []) if (isSafeRel(rel)) rm(abs(rel));
+  return man;
+}
+
+/** Install a staged update. Any failure restores what was already replaced. */
+function apply(pending) {
+  const staging = pending.staging;
+  const files = (pending.files || []).filter(isSafeRel);
+  const removed = (pending.removed || []).filter(isSafeRel);
+  if (!staging || !fs.existsSync(staging) || !files.length) throw new Error('the downloaded update is incomplete');
+  for (const rel of files) if (!fs.existsSync(path.join(staging, ...rel.split('/')))) throw new Error(`the download is missing ${rel}`);
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupDir = path.join(BACKUPS, `${pending.from}-to-${pending.version}-${stamp}`);
+  const man = { from: pending.from, version: pending.version, at: Date.now(), saved: [], added: [] };
+  fs.mkdirSync(path.join(backupDir, 'files'), { recursive: true });
+  // back up everything first, before changing anything
+  for (const rel of [...files, ...removed]) {
+    const cur = abs(rel);
+    if (fs.existsSync(cur) && fs.statSync(cur).isFile()) {
+      const b = path.join(backupDir, 'files', ...rel.split('/'));
+      fs.mkdirSync(path.dirname(b), { recursive: true });
+      fs.copyFileSync(cur, b);
+      man.saved.push(rel);
+    } else if (files.includes(rel)) man.added.push(rel);
+  }
+  writeJSON(path.join(backupDir, 'manifest.json'), man);
+  // a plain list for "Restore previous version.bat", which works even if nothing else does
+  fs.writeFileSync(path.join(backupDir, 'added.txt'), man.added.map((r) => r.replace(/\//g, '\\')).join('\r\n'));
+  try {
+    for (const rel of files) putFile(path.join(staging, ...rel.split('/')), rel);
+    for (const rel of removed) rm(abs(rel));
+  } catch (e) {
+    try { restore(backupDir); rm(backupDir); } catch (e2) { log('restore after a failed install also failed: ' + e2.message); }
+    throw e;
+  }
+  return { backupDir, files };
+}
+
+function latestBackup() {
+  try {
+    return fs.readdirSync(BACKUPS).map((n) => path.join(BACKUPS, n))
+      .filter((d) => fs.existsSync(path.join(d, 'manifest.json')))
+      .sort((a, b) => (readJSON(path.join(b, 'manifest.json')).at || 0) - (readJSON(path.join(a, 'manifest.json')).at || 0))[0] || null;
+  } catch { return null; }
+}
+
+function pruneBackups(keep = 3) {
+  try {
+    const all = fs.readdirSync(BACKUPS).map((n) => path.join(BACKUPS, n)).filter((d) => fs.existsSync(path.join(d, 'manifest.json')))
+      .sort((a, b) => (readJSON(path.join(b, 'manifest.json')).at || 0) - (readJSON(path.join(a, 'manifest.json')).at || 0));
+    for (const d of all.slice(keep)) rm(d);
+  } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------- startup
+
+// The single-instance lock lives in Electron's data folder, so that has to point inside the app folder first
+// (portable: nothing in %APPDATA%). A factory reset can't delete that folder while it's in use, so it finishes here.
 app.setName('Box-DocSpitter');
-// Keep Electron's own cache and window state inside the app folder (portable: nothing left in %APPDATA%).
-const USER_DATA = path.join(ROOT, 'data', 'electron');
-// A factory reset can't delete the cache while the window is using it, so it's finished here, before startup.
-const RESET_FLAG = path.join(ROOT, 'data', '.reset-electron');
+const USER_DATA = path.join(DATA, 'electron');
+const RESET_FLAG = path.join(DATA, '.reset-electron');
 if (fs.existsSync(RESET_FLAG)) {
-  try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* still locked: try next time */ }
-  try { if (!fs.existsSync(USER_DATA)) fs.unlinkSync(RESET_FLAG); } catch { /* ignore */ }
+  rm(USER_DATA);
+  if (!fs.existsSync(USER_DATA)) rm(RESET_FLAG);
 }
 app.setPath('userData', USER_DATA);
-app.setAppUserModelId('BoxDocSpitter.App');
-Menu.setApplicationMenu(null);
-// UI sounds (hover etc.) should work before the first click; this is our own app window, not a website.
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+const gotLock = app.requestSingleInstanceLock();
+let trial = null;
 
-/** Files passed on the command line (drag-and-drop onto the shortcut). */
-function fileArgs(argv) {
-  const self = path.resolve(__filename).toLowerCase();
-  return argv.slice(1).filter((a) => {
-    if (!a || a.startsWith('-')) return false;
-    const p = path.resolve(a);
-    if (p.toLowerCase() === self || p.toLowerCase() === path.resolve(ROOT).toLowerCase()) return false;
-    if (p.toLowerCase().endsWith('.exe')) return false;
-    try { return fs.statSync(p).isFile() || fs.statSync(p).isDirectory(); } catch { return false; }
-  }).map((a) => path.resolve(a));
+function rollBack(reason, relaunch) {
+  const t = trial || readJSON(TRIAL);
+  trial = null;
+  rm(TRIAL);
+  try {
+    const man = restore(t.backup);
+    rm(t.backup); // that backup is the version we're back on now; "Go back" should reach the one before
+    writeJSON(RESULT, { ok: false, rolledBack: true, version: t.version, from: man.from, reason, at: Date.now(), seen: false });
+    log(`update to ${t.version} didn't start (${reason}); back on ${man.from}`);
+  } catch (e) {
+    writeJSON(RESULT, { ok: false, rolledBack: false, version: t.version, reason: `${reason}; restoring the backup also failed: ${e.message}`, at: Date.now(), seen: false });
+    dialog.showErrorBox('Box-DocSpitter', `The update didn't start and the previous version couldn't be put back automatically.\n\nRun "Restore previous version.bat" in the Box-DocSpitter folder.\n\n${e.message}`);
+  }
+  if (relaunch) { app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--rollback') }); app.exit(0); }
 }
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-} else {
-  let server = null;
-  let origin = null;
-  let quitting = false;
-  let attached = false; // another Box-DocSpitter server was already running; we just use it
-
-  const urlFor = (files) => {
-    const qs = files.map((p) => 'open=' + encodeURIComponent(p)).join('&');
-    return `${origin}/${qs ? '?' + qs : ''}`;
-  };
-
-  app.on('second-instance', (_e, argv) => {
-    if (!origin) return;
-    const files = fileArgs(argv);
-    const existing = BrowserWindow.getAllWindows()[0];
-    if (!files.length && existing) {
-      if (existing.isMinimized()) existing.restore();
-      existing.focus();
-      return;
+if (gotLock) {
+  try {
+    if (process.argv.includes('--rollback') || fs.existsSync(ROLLBACK_FLAG)) {
+      rm(ROLLBACK_FLAG);
+      // manual: put the most recent backup back
+      const b = latestBackup();
+      rm(TRIAL); rm(PENDING);
+      if (b) {
+        const man = restore(b);
+        rm(b);
+        writeJSON(RESULT, { ok: true, manualRollback: true, version: man.from, from: man.version, at: Date.now(), seen: false });
+      }
     }
-    createWindow(urlFor(files));
-  });
-
-  function startServer() {
-    server = fork(path.join(ROOT, 'server.js'), ['--shell', ...fileArgs(process.argv)], {
-      cwd: ROOT,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-      windowsHide: true,
-    });
-    server.on('message', (m) => {
-      if (m && m.type === 'attached') attached = true;
-      if (m && m.type === 'pdf') renderPdf(m);
-      if (m && m.type === 'relaunch') {
-        quitting = true;
-        try { server?.kill(); } catch { /* gone */ }
-        app.relaunch({ args: process.argv.slice(1).filter((a) => !fileArgs([process.argv[0], a]).length) });
-        app.exit(0);
-      }
-      if (m && m.type === 'open' && typeof m.url === 'string') {
-        origin = new URL(m.url).origin;
-        createWindow(m.url);
-      }
-    });
-    server.on('exit', (code) => {
-      server = null;
-      if (quitting || (attached && origin)) return;
-      if (!origin) {
-        dialog.showErrorBox('Box-DocSpitter', `The local server failed to start (exit code ${code}).\n\nTry "Box-DocSpitter (with console).bat" to see the error.`);
-      }
-      quitting = true;
-      app.quit();
-    });
-  }
-
-  // PDF export without Edge: render the page in a hidden window and print it with Chromium's PDF engine.
-  async function renderPdf({ id, file, out }) {
-    const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, javascript: false } });
-    try {
-      await win.loadFile(file);
-      await new Promise((r) => setTimeout(r, 300)); // let fonts and images settle
-      const data = await win.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true });
-      fs.writeFileSync(out, data);
-      server?.send({ type: 'pdf-done', id });
-    } catch (e) {
-      server?.send({ type: 'pdf-done', id, error: e.message });
-    } finally {
-      win.destroy();
-    }
-  }
-
-  function isLocal(url) {
-    try { return origin && new URL(url).origin === origin; } catch { return false; }
-  }
-
-  function openExternal(url) {
-    if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
-  }
-
-  function createWindow(url) {
-    const win = new BrowserWindow({
-      width: 1480, height: 940, minWidth: 720, minHeight: 460,
-      show: false,
-      title: 'Box-DocSpitter',
-      icon: nativeImage.createFromPath(ICON),
-      backgroundColor: BG.dark,
-      titleBarStyle: 'hidden',
-      titleBarOverlay: { color: '#120f19', symbolColor: '#bfb2d9', height: 40 },
-      webPreferences: {
-        preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: true,
-        sandbox: true,
-        spellcheck: true,
-        plugins: true, // built-in PDF viewer for print previews
-      },
-    });
-    // Pinning the window to the taskbar should pin Box-DocSpitter, not bare electron.exe: tell Windows how
-    // to relaunch it (same app id as the shortcuts, so the pinned button and the open window are one icon).
-    if (process.platform === 'win32') {
+    const pending = readJSON(PENDING);
+    if (pending) {
+      rm(PENDING);
       try {
-        win.setAppDetails({
-          appId: 'BoxDocSpitter.App',
-          appIconPath: ICON,
-          appIconIndex: 0,
-          relaunchCommand: `"${process.execPath}" "${path.join(__dirname, 'main.js')}"`,
-          relaunchDisplayName: 'Box-DocSpitter',
-        });
-      } catch { /* older Windows: pinning just won't carry the details */ }
-    }
-    win.once('ready-to-show', () => win.show());
-    win.loadURL(url);
-
-    // Popups: same-origin/blank ones (print previews, PDF view) get a plain window; web links go to the default browser.
-    win.webContents.setWindowOpenHandler(({ url: target }) => {
-      if (!target || target === 'about:blank' || target.startsWith('blob:') || isLocal(target)) {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            icon: nativeImage.createFromPath(ICON), backgroundColor: '#ffffff', autoHideMenuBar: true,
-            webPreferences: { sandbox: true, contextIsolation: true, plugins: true },
-          },
-        };
+        const done = apply(pending);
+        trial = { version: pending.version, from: pending.from, backup: done.backupDir, files: pending.all || done.files, launches: 0, at: Date.now() };
+        writeJSON(TRIAL, trial);
+        rm(pending.staging);
+        log(`installed ${pending.version}; waiting for it to start`);
+      } catch (e) {
+        writeJSON(RESULT, { ok: false, rolledBack: true, version: pending.version, from: pending.from, reason: 'install failed: ' + e.message, at: Date.now(), seen: false });
+        rm(pending.staging);
       }
-      openExternal(target);
-      return { action: 'deny' };
-    });
-    win.webContents.on('will-navigate', (e, target) => {
-      if (!isLocal(target)) { e.preventDefault(); openExternal(target); }
-    });
-
-    // The page asks before closing with unsaved tabs; Electron needs us to show that question ourselves.
-    win.webContents.on('will-prevent-unload', (e) => {
-      const choice = dialog.showMessageBoxSync(win, {
-        type: 'warning', title: 'Box-DocSpitter', buttons: ['Close anyway', 'Keep editing'], defaultId: 1, cancelId: 1,
-        message: 'You have unsaved changes.', detail: 'Close this window and lose them?',
-      });
-      if (choice === 0) e.preventDefault();
-    });
-
-    win.webContents.on('before-input-event', (_e, input) => {
-      if (input.type !== 'keyDown') return;
-      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) win.webContents.toggleDevTools();
-    });
-    return win;
+    }
+    trial = trial || readJSON(TRIAL);
+    if (trial) {
+      trial.launches = (trial.launches || 0) + 1;
+      // a previous start of this version never reported "ready": don't try again, go back
+      if (trial.launches > 1) rollBack('it didn’t finish starting last time', false);
+      else writeJSON(TRIAL, trial);
+    }
+  } catch (e) {
+    log('update step failed: ' + e.message);
   }
+}
 
-  // Bridge for the page (see preload.js).
-  const winOf = (e) => BrowserWindow.fromWebContents(e.sender);
-
-  ipcMain.handle('bds:titlebar', (e, { color, symbolColor, theme }) => {
-    const win = winOf(e);
-    if (!win) return;
-    try { win.setTitleBarOverlay({ color, symbolColor }); } catch { /* not supported */ }
-    if (theme && BG[theme]) win.setBackgroundColor(BG[theme]);
-  });
-
-  // Drag a dump file out of the window as a real file (to Explorer, the desktop, Discord…).
-  const DRAG_DIRS = [path.join(ROOT, 'image-dump'), path.join(ROOT, 'doc-dump')].map((d) => d.toLowerCase() + path.sep);
-  const DRAG_ICON = path.join(ROOT, 'public', 'assets', 'icon-256.png');
-  ipcMain.on('bds:drag', (e, file) => {
-    const full = path.resolve(String(file || ''));
-    if (!DRAG_DIRS.some((d) => full.toLowerCase().startsWith(d)) || !fs.existsSync(full)) return;
-    let img = /\.(png|jpe?g|gif|bmp)$/i.test(full) ? nativeImage.createFromPath(full) : null;
-    if (!img || img.isEmpty()) img = nativeImage.createFromPath(DRAG_ICON);
-    const size = img.getSize();
-    if (size.width > 96) img = img.resize({ width: 96 });
-    e.sender.startDrag({ file: full, icon: img });
-  });
-
-  // Copy a picture to the system clipboard (doesn't depend on the page's clipboard permission).
-  ipcMain.handle('bds:copyImage', async (_e, dataUrl) => {
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) return false;
-    const png = Buffer.from(dataUrl.slice('data:image/png;base64,'.length), 'base64');
-    if (!png.length) return false;
-    if (typeof clipboard.writeImage === 'function') {
-      clipboard.writeImage(nativeImage.createFromBuffer(png)); // older Electron
-    } else {
-      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) })]);
-    }
+global.bdsBoot = {
+  gotLock,
+  inTrial: () => !!trial,
+  /** Called by shell.js when the server dies during startup. Returns true if the boot handled it. */
+  fail(reason) {
+    if (!trial) return false;
+    rollBack(reason, true);
     return true;
-  });
+  },
+};
 
-  // Desktop + Start menu shortcuts carrying the app id, so a pinned shortcut and the open window are one icon.
-  ipcMain.handle('bds:shortcuts', () => {
-    const made = [];
-    const targets = [path.join(app.getPath('desktop'), 'Box-DocSpitter.lnk'), path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Box-DocSpitter.lnk')];
-    for (const lnk of targets) {
-      const ok = shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', {
-        target: process.execPath,
-        args: `"${path.join(__dirname, 'main.js')}"`,
-        cwd: ROOT,
-        icon: ICON,
-        iconIndex: 0,
-        appUserModelId: 'BoxDocSpitter.App',
-        description: 'Box-DocSpitter - local docs, PDFs, forms, text and code',
-      });
-      if (ok) made.push(lnk);
-    }
-    return made;
-  });
+ipcMain.on('bds:ready', () => {
+  if (!trial) return;
+  const t = trial;
+  trial = null;
+  clearTimeout(readyTimer);
+  rm(TRIAL);
+  writeJSON(INSTALLED, { version: t.version, files: t.files, at: Date.now() });
+  writeJSON(RESULT, { ok: true, version: t.version, from: t.from, at: Date.now(), seen: false });
+  pruneBackups(3);
+  log(`${t.version} started fine`);
+});
 
-  ipcMain.handle('bds:fullscreen', (e, on) => {
-    const win = winOf(e);
-    if (win) win.setFullScreen(!!on);
+let readyTimer = null;
+if (trial) {
+  app.whenReady().then(() => {
+    readyTimer = setTimeout(() => { if (trial) rollBack('it didn’t start within 90 seconds', true); }, READY_TIMEOUT);
   });
+}
 
-  ipcMain.handle('bds:dialog', async (e, opts) => {
-    const win = winOf(e);
-    const filters = (opts.filters || []).map((f) => ({ name: f.name, extensions: f.extensions || ['*'] }));
-    const defaultPath = opts.kind === 'save' && opts.defaultName
-      ? path.join(opts.initialDir || app.getPath('documents'), opts.defaultName)
-      : opts.initialDir || undefined;
-    if (opts.kind === 'save') {
-      const r = await dialog.showSaveDialog(win, { title: opts.title, defaultPath, filters });
-      if (r.canceled || !r.filePath) return { cancelled: true };
-      let filePath = r.filePath;
-      const ext = path.extname(filePath).slice(1).toLowerCase();
-      let filterIndex = filters.findIndex((f) => f.extensions.includes(ext)) + 1;
-      if (!ext && opts.defaultExt) filePath += '.' + opts.defaultExt;
-      if (filterIndex < 1) filterIndex = 1;
-      return { paths: [filePath], filterIndex };
-    }
-    const properties = opts.kind === 'folder' ? ['openDirectory', 'createDirectory'] : ['openFile'];
-    if (opts.multi) properties.push('multiSelections');
-    const r = await dialog.showOpenDialog(win, { title: opts.title, defaultPath, filters: opts.kind === 'folder' ? undefined : filters, properties });
-    if (r.canceled || !r.filePaths.length) return { cancelled: true };
-    return { paths: r.filePaths };
-  });
-
-  app.whenReady().then(startServer);
-
-  app.on('window-all-closed', () => {
-    quitting = true;
-    app.quit();
-  });
-
-  app.on('will-quit', () => {
-    quitting = true;
-    if (server) { try { server.disconnect(); } catch { /* gone */ } try { server.kill(); } catch { /* gone */ } }
-  });
+try {
+  require('./shell.js');
+} catch (e) {
+  if (trial) rollBack('the app window code failed to load: ' + e.message, true);
+  else {
+    app.whenReady().then(() => {
+      dialog.showErrorBox('Box-DocSpitter', `Box-DocSpitter couldn't start.\n\n${e.stack || e.message}\n\nIf this started after an update, run "Restore previous version.bat".`);
+      app.exit(1);
+    });
+  }
 }

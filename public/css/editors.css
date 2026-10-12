@@ -737,3 +737,5 @@ audio.vid-media { display: none; }
 .diff-imgbox .diff-mask { position: absolute; inset: 0; mix-blend-mode: normal; }
 .tb-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
 @media (max-width: 760px) { .diff-slots { grid-template-columns: 1fr; } .diff-swap { justify-self: center; } .diff-images { grid-template-columns: 1fr; } }
+
+.tape-have { margin-left: 8px; font: 600 9.5px var(--mono, monospace); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); border-radius: 4px; padding: 1px 5px; vertical-align: 1px; }
