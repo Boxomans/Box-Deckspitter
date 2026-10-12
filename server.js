@@ -18,11 +18,16 @@ const { StringDecoder } = require('string_decoder');
 const { pathToFileURL } = require('url');
 
 const APP_NAME = 'Box-DocSpitter';
+// Which copy of the app this is (from its folder, same as the taskbar app id): a starting copy only joins a
+// running server that is the same install, never another copy's (which would show that copy's files and music).
 const VERSION = require('./package.json').version;
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const MODULES = path.join(ROOT, 'node_modules');
-const DATA = path.join(ROOT, 'data');
+// --data=<folder> keeps settings, keys and history somewhere else (used for test runs, so they never touch yours)
+const INSTALL_ID = crypto.createHash('sha1').update(path.resolve(ROOT).toLowerCase()).digest('hex').slice(0, 10);
+const DATA_ARG = process.argv.find((a) => a.startsWith('--data='));
+const DATA = DATA_ARG ? path.resolve(DATA_ARG.slice('--data='.length)) : path.join(ROOT, 'data');
 const DUMP = path.join(ROOT, 'image-dump');
 const DUMP_REMOVED = path.join(DUMP, '.removed');
 const DOC_DUMP = path.join(ROOT, 'doc-dump');
@@ -2152,7 +2157,7 @@ async function handleApi(req, res, urlObj) {
   const q = urlObj.searchParams;
   const key = `${req.method} ${urlObj.pathname}`;
 
-  if (key === 'GET /api/ping') return ok(res, { app: APP_NAME, version: VERSION, pid: process.pid });
+  if (key === 'GET /api/ping') return ok(res, { app: APP_NAME, version: VERSION, pid: process.pid, install: INSTALL_ID, data: DATA_ARG ? 'custom' : 'default' });
 
   // sendBeacon can't set headers, so /api/bye carries the token in the query string.
   if (key === 'POST /api/bye') {
@@ -2297,7 +2302,8 @@ function ping(port) {
     const r = http.get({ host: HOST, port, path: '/api/ping', timeout: 1200, headers: { host: `${HOST}:${port}` } }, (res) => {
       let data = '';
       res.on('data', (c) => (data += c));
-      res.on('end', () => { try { resolve(JSON.parse(data).app === APP_NAME); } catch { resolve(false); } });
+      // the same install with the same data folder; anything else (another copy, a test run) isn't ours to join
+      res.on('end', () => { try { const j = JSON.parse(data); resolve(j.app === APP_NAME && j.install === INSTALL_ID && j.data === (DATA_ARG ? 'custom' : 'default')); } catch { resolve(false); } });
     });
     r.on('error', () => resolve(false));
     r.on('timeout', () => { r.destroy(); resolve(false); });

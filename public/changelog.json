@@ -1,5 +1,20 @@
 [
   {
+    "version": "1.0.8",
+    "date": "2026-10-11",
+    "notes": [
+      "With shuffle on, the Queue tab always shows what's coming: your queued songs, then the shuffled library in the order it will play.",
+      "Drag songs in the shuffled list to rearrange it. The shuffle order now stays put (it used to re-roll whenever the song list refreshed); Reshuffle deals a new one.",
+      "Drag or flick the chars, claude and clip tabs to the top bar and they become buttons there that drop their panel down; drag them back to the right sidebar any time. Each one remembers where you put it.",
+      "Right-click the theme button to go back a theme (left-click still goes forward).",
+      "The sound, theme and shortcuts buttons can be dragged or flicked into the right sidebar (and back), styled like the other sidebar tabs.",
+      "Drag to select: drag a box over the home page's recent files, the Recent panel, the Files panel or the BoxSpaces tree. Ctrl+click adds one, Shift+click picks a range. Then Del, Enter, or right-click for Open all, Copy paths, Compare (two files) and Delete (Recycle Bin, one question for all).",
+      "Drag the home page's Start something and Tools cards into any order you like.",
+      "Fixed: two copies of the app (another folder or drive) could open each other's window, settings and music when both were running. Each install now only ever joins its own server.",
+      "Fixed: with chars and claude both in the top bar, opening one after the other showed both in the same drop-down, and a docked music player showed through it."
+    ]
+  },
+  {
     "version": "1.0.7",
     "date": "2026-10-11",
     "notes": [

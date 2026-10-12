@@ -3,7 +3,7 @@
 import { h, clear, basename, dirname, joinPath, extOf, debounce, formatBytes } from './dom.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
-import { contextMenu, promptDialog, confirmDialog, toast, errorToast, hoverKeys } from './ui.js';
+import { contextMenu, promptDialog, confirmDialog, toast, errorToast, hoverKeys, rubberSelect } from './ui.js';
 import { iconForName, MODE_ICON } from './filetypes.js';
 
 const GIT_CLASS = { M: 'mod', ' M': 'mod', MM: 'mod', AM: 'add', A: 'add', '??': 'new', D: 'del', R: 'mod', U: 'conflict', UU: 'conflict' };
@@ -70,7 +70,14 @@ export class Spaces {
     host.append(head, tabs);
     if (this.view === 'search') return this.renderSearch(host);
     const tree = h('div', { class: 'spaces-tree', tabindex: '0' });
-    host.append(h('div', { class: 'panel-body' }, tree));
+    const body = h('div', { class: 'panel-body' }, tree);
+    host.append(body);
+    this.picker = rubberSelect(tree, {
+      rows: '.tree-row', scroller: body,
+      menu: (items) => this.app.fileManyMenu(items, () => this.refresh()),
+      onDelete: (items) => this.app.trashMany(items, () => this.refresh()),
+      onOpen: (items) => this.app.openMany(items),
+    });
     await this.renderDir(this.root, tree, 0);
     tree.addEventListener('contextmenu', (e) => { if (e.target === tree) contextMenu(e, this.dirMenu(this.root)); });
   }
@@ -137,7 +144,8 @@ export class Spaces {
         } else this.app.openPath(e.path);
       });
       row.addEventListener('contextmenu', (ev) => contextMenu(ev, e.isDir ? this.dirMenu(e.path) : this.fileMenu(e)));
-      hoverKeys(row, { nameEl, value: () => e.name, selectBase: !e.isDir, commit: (n) => this.rename(e.path, n), remove: () => this.trash(e.path) });
+      hoverKeys(row, { nameEl, value: () => e.name, selectBase: !e.isDir, commit: (n) => this.rename(e.path, n), remove: () => (row.classList.contains('picked') && this.picker?.picked().length > 1 ? this.app.trashMany(this.picker.picked(), () => this.refresh()) : this.trash(e.path)) });
+      row._item = e;
       container.append(row);
       if (open) await this.renderDir(e.path, container, depth + 1);
     }

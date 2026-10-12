@@ -596,3 +596,115 @@ document.addEventListener('keydown', (e) => {
     o.remove();
   }
 }, true);
+
+// ===================================================================== drag-to-select lists
+// Press on a row or empty space and drag: a box picks every row it touches. Ctrl+click adds/removes one row,
+// Shift+click picks a range, a plain click works as before (and clears the picks). With rows picked:
+// right-click a picked row for actions on all of them, Del removes, Enter opens, Esc clears.
+// Each row carries its data in row._item. Returns { picked() } → the picked rows' items.
+
+export function rubberSelect(container, { rows = '.file-row', scroller = container, menu, onDelete, onOpen } = {}) {
+  const all = () => [...container.querySelectorAll(rows)].filter((r) => r._item !== undefined);
+  // scroller may be given as a function, for lists that aren't on the page yet
+  const sc = () => (typeof scroller === 'function' ? scroller() : scroller) || container;
+  const picked = () => all().filter((r) => r.classList.contains('picked'));
+  let anchor = null;
+  let justDragged = false;
+  const setPicked = (list) => { const s = new Set(list); for (const r of all()) r.classList.toggle('picked', s.has(r)); };
+
+  container.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('input, textarea, select, [contenteditable]')) return;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const scrollEl = sc();
+    const sTop = scrollEl.scrollTop;
+    const keep = e.ctrlKey || e.metaKey ? picked() : [];
+    let box = null;
+    let lastY = sy;
+    let raf = 0;
+    const update = (x, y) => {
+      const top0 = sy - (scrollEl.scrollTop - sTop);
+      const L = Math.min(sx, x);
+      const T = Math.min(top0, y);
+      const R = Math.max(sx, x);
+      const B = Math.max(top0, y);
+      Object.assign(box.style, { left: `${L}px`, top: `${T}px`, width: `${R - L}px`, height: `${B - T}px` });
+      setPicked([...keep, ...all().filter((r) => { const b = r.getBoundingClientRect(); return b.bottom > T && b.top < B && b.right > L && b.left < R; })]);
+    };
+    // scroll the list while dragging near its top or bottom edge
+    const autoScroll = () => {
+      const r = scrollEl.getBoundingClientRect();
+      const d = lastY < r.top + 24 ? -12 : lastY > r.bottom - 24 ? 12 : 0;
+      if (d) { scrollEl.scrollTop += d; update(lastX, lastY); }
+      raf = requestAnimationFrame(autoScroll);
+    };
+    let lastX = sx;
+    const move = (ev) => {
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      if (!box) {
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+        box = h('div', { class: 'rubber-box' });
+        document.body.append(box);
+        try { container.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        raf = requestAnimationFrame(autoScroll);
+      }
+      update(ev.clientX, ev.clientY);
+    };
+    const up = () => {
+      removeEventListener('pointermove', move, true);
+      removeEventListener('pointerup', up, true);
+      cancelAnimationFrame(raf);
+      if (!box) return;
+      box.remove();
+      // the click that ends a drag shouldn't open anything (or clear what was just picked)
+      justDragged = true;
+      setTimeout(() => { justDragged = false; }, 60);
+      const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); };
+      container.addEventListener('click', swallow, { capture: true, once: true });
+      setTimeout(() => container.removeEventListener('click', swallow, { capture: true }), 60);
+    };
+    addEventListener('pointermove', move, true);
+    addEventListener('pointerup', up, true);
+  });
+
+  container.addEventListener('click', (e) => {
+    if (justDragged) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+    const row = e.target.closest(rows);
+    if (!row || row._item === undefined || !container.contains(row)) return;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault(); e.stopPropagation();
+      row.classList.toggle('picked');
+      anchor = row;
+    } else if (e.shiftKey && anchor && anchor.isConnected) {
+      e.preventDefault(); e.stopPropagation();
+      const list = all();
+      const [a, b] = [list.indexOf(anchor), list.indexOf(row)].sort((x, y) => x - y);
+      setPicked(list.slice(a, b + 1));
+    } else {
+      setPicked([]);
+      anchor = row;
+    }
+  }, true);
+
+  container.addEventListener('contextmenu', (e) => {
+    const row = e.target.closest(rows);
+    const sel = picked();
+    if (!row || !row.classList.contains('picked') || sel.length < 2 || !menu) return;
+    e.preventDefault(); e.stopPropagation();
+    contextMenu(e, menu(sel.map((r) => r._item)));
+  }, true);
+
+  const onKey = (e) => {
+    if (!container.isConnected) { removeEventListener('keydown', onKey, true); return; }
+    const sel = picked();
+    if (!sel.length || e.ctrlKey || e.altKey || inlineEditing || menusOpen() || document.querySelector('.modal-backdrop')) return;
+    const t = document.activeElement;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.closest?.('.cm-editor, .monaco-editor'))) return;
+    if (e.key === 'Escape') { setPicked([]); return; }
+    if (e.key === 'Delete' && onDelete) { e.preventDefault(); e.stopImmediatePropagation(); onDelete(sel.map((r) => r._item)); }
+    else if (e.key === 'Enter' && onOpen) { e.preventDefault(); e.stopImmediatePropagation(); onOpen(sel.map((r) => r._item)); }
+  };
+  addEventListener('keydown', onKey, true);
+  return { picked: () => picked().map((r) => r._item), clear: () => setPicked([]) };
+}

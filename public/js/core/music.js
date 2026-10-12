@@ -242,14 +242,32 @@ export function createMusic(app) {
     refresh();
   }
 
-  function reshuffle() {
+  /**
+   * The play order. With shuffle on it's a saved random order that stays put: refreshing the song list keeps it
+   * (new songs slot in at random places), and you can rearrange it in the Queue tab. `fresh` deals a new one.
+   */
+  function reshuffle(fresh = false) {
     const n = state.tracks.length;
-    state.order = [...Array(n).keys()];
-    if (state.shuffle) {
+    if (!state.shuffle) { state.order = [...Array(n).keys()]; return; }
+    const at = new Map(state.tracks.map((t, i) => [t.name, i]));
+    const kept = fresh ? [] : (state.orderNames || s.musicShuffleOrder || []).filter((nm) => at.has(nm)).map((nm) => at.get(nm));
+    const seen = new Set(kept);
+    if (kept.length) {
+      state.order = kept;
+      for (let i = 0; i < n; i++) if (!seen.has(i)) state.order.splice(Math.floor(Math.random() * (state.order.length + 1)), 0, i);
+    } else {
+      state.order = [...Array(n).keys()];
       for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [state.order[i], state.order[j]] = [state.order[j], state.order[i]]; }
       // keep the current song first so shuffle doesn't jump away from it
       if (state.idx >= 0) state.order = [state.idx, ...state.order.filter((x) => x !== state.idx)];
     }
+    saveOrder();
+  }
+  function saveOrder() {
+    const names = state.order.map((i) => state.tracks[i]?.name).filter(Boolean);
+    const changed = names.join('\n') !== (state.orderNames || []).join('\n');
+    state.orderNames = names;
+    if (changed && state.shuffle) app.saveSettings({ musicShuffleOrder: names });
   }
 
   function setSource(t) {
@@ -332,7 +350,7 @@ export function createMusic(app) {
     applyCuts();
     if (save) app.saveSettings({ musicLowCut: state.low, musicHighCut: state.high });
   }
-  function setShuffle(on) { state.shuffle = on; reshuffle(); app.saveSettings({ musicShuffle: on }); render(); }
+  function setShuffle(on) { state.shuffle = on; reshuffle(true); app.saveSettings({ musicShuffle: on }); render(); }
   function cycleLoop() { state.loop = { off: 'all', all: 'one', one: 'off' }[state.loop]; app.saveSettings({ musicLoop: state.loop }); render(); }
   audio.volume = state.volume;
 
@@ -567,58 +585,102 @@ export function createMusic(app) {
     updateTime();
   }
 
-  /** The queue view: drag rows to reorder, × to drop one, click to play it now. */
+  /** Drag-to-reorder for one list of rows. move(from, to) gets the new position (already adjusted for the removal). */
+  function sortable(rows, kind, move, { acceptSong = null } = {}) {
+    let from = -1;
+    rows.forEach((row, i) => {
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => { from = i; row.classList.add('dragging'); e.dataTransfer.setData(kind, String(i)); e.dataTransfer.effectAllowed = 'move'; });
+      row.addEventListener('dragend', () => { from = -1; row.classList.remove('dragging'); rows.forEach((r) => r.classList.remove('drop-before', 'drop-after')); });
+      row.addEventListener('dragover', (e) => {
+        if (!e.dataTransfer.types.includes(kind) && !(acceptSong && e.dataTransfer.types.includes('text/bds-song'))) return;
+        e.preventDefault();
+        const r = row.getBoundingClientRect();
+        rows.forEach((o) => o.classList.remove('drop-before', 'drop-after'));
+        row.classList.add(e.clientY > r.top + r.height / 2 ? 'drop-after' : 'drop-before');
+      });
+      row.addEventListener('drop', (e) => {
+        const after = row.classList.contains('drop-after');
+        rows.forEach((o) => o.classList.remove('drop-before', 'drop-after'));
+        let to = i + (after ? 1 : 0);
+        if (e.dataTransfer.types.includes(kind) && from >= 0) {
+          e.preventDefault();
+          if (from < to) to--;
+          if (from !== to) move(from, to);
+        } else if (acceptSong) {
+          const song = e.dataTransfer.getData('text/bds-song');
+          if (song) { e.preventDefault(); acceptSong(song, to); }
+        }
+        from = -1;
+      });
+    });
+  }
+
+  const qRow = (n, name, extra = null) => h('div', { class: 'music-q-row', title: name },
+    h('span', { class: 'music-q-grip' }, icon('grip', 'sm')),
+    h('span', { class: 'music-track-n mono' }, String(n)),
+    h('span', { class: 'music-track-name' }, stripExt(name)), extra);
+
+  /** The Queue tab: what's playing, songs you queued, then (with shuffle on) the shuffled library. All draggable. */
   function renderQueue() {
     const L = ui.list;
     const now = state.tracks[state.idx];
     if (now) L.append(h('div', { class: 'music-q-now' }, h('span', { class: 'faint' }, audio.paused ? 'Paused' : 'Now playing'), h('span', {}, stripExt(now.name))));
-    if (!state.queue.length) {
+
+    // songs you queued
+    if (state.queue.length) {
+      L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, 'Up next · drag to reorder'), h('div', { class: 'grow' }),
+        h('button', { class: 'chip', onclick: () => { state.queue = []; saveQueue(); } }, 'Clear')));
+      const rows = state.queue.map((name, qi) => {
+        const x = h('span', { class: 'music-q-x', role: 'button', title: 'Remove from the queue' }, icon('x', 'sm'));
+        x.addEventListener('click', (e) => { e.stopPropagation(); state.queue.splice(qi, 1); saveQueue(); });
+        const row = qRow(qi + 1, name, x);
+        row.addEventListener('click', () => {
+          const i = state.tracks.findIndex((t) => t.name === name);
+          state.queue.splice(qi, 1);
+          saveQueue();
+          if (i >= 0) play(i, { fromQueue: true });
+        });
+        return row;
+      });
+      sortable(rows, 'text/bds-queue', (from, to) => { const [m] = state.queue.splice(from, 1); state.queue.splice(to, 0, m); saveQueue(); },
+        { acceptSong: (song, to) => { state.queue.splice(to, 0, song); saveQueue(); } });
+      L.append(...rows);
+    } else if (!state.shuffle) {
       L.append(h('div', { class: 'music-empty' }, 'The queue is empty. In the library, right-click a song → ', h('b', {}, 'Add to queue'), ' or ', h('b', {}, 'Play next'), ', hover it and click ', h('b', {}, '+'), ', or drag it onto the Queue tab. After the queue, the library carries on.'));
       return;
     }
-    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, 'Up next · drag to reorder'), h('div', { class: 'grow' }),
-      h('button', { class: 'chip', onclick: () => { state.queue = []; saveQueue(); } }, 'Clear')));
-    let dragFrom = -1;
-    const rows = state.queue.map((name, qi) => {
-      const x = h('span', { class: 'music-q-x', role: 'button', title: 'Remove from the queue' }, icon('x', 'sm'));
-      const row = h('div', { class: 'music-q-row', draggable: 'true', title: name },
-        h('span', { class: 'music-q-grip' }, icon('grip', 'sm')),
-        h('span', { class: 'music-track-n mono' }, String(qi + 1)),
-        h('span', { class: 'music-track-name' }, stripExt(name)), x);
-      x.addEventListener('click', (e) => { e.stopPropagation(); state.queue.splice(qi, 1); saveQueue(); });
-      row.addEventListener('click', () => {
-        const i = state.tracks.findIndex((t) => t.name === name);
-        state.queue.splice(qi, 1);
-        saveQueue();
-        if (i >= 0) play(i, { fromQueue: true });
-      });
-      row.addEventListener('dragstart', (e) => { dragFrom = qi; row.classList.add('dragging'); e.dataTransfer.setData('text/bds-queue', String(qi)); e.dataTransfer.effectAllowed = 'move'; });
-      row.addEventListener('dragend', () => { row.classList.remove('dragging'); rows.forEach((r) => r.classList.remove('drop-before', 'drop-after')); });
-      row.addEventListener('dragover', (e) => {
-        if (dragFrom < 0 && !e.dataTransfer.types.includes('text/bds-song')) return;
-        e.preventDefault();
-        const r = row.getBoundingClientRect();
-        const after = e.clientY > r.top + r.height / 2;
-        rows.forEach((o) => o.classList.remove('drop-before', 'drop-after'));
-        row.classList.add(after ? 'drop-after' : 'drop-before');
-      });
-      row.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const after = row.classList.contains('drop-after');
-        rows.forEach((o) => o.classList.remove('drop-before', 'drop-after'));
-        let to = qi + (after ? 1 : 0);
-        const song = e.dataTransfer.getData('text/bds-song');
-        if (dragFrom >= 0) {
-          const [moved] = state.queue.splice(dragFrom, 1);
-          if (dragFrom < to) to--;
-          state.queue.splice(to, 0, moved);
-        } else if (song) state.queue.splice(to, 0, song);
-        dragFrom = -1;
-        saveQueue();
-      });
+
+    // with shuffle on: the order the library will play in, which you can rearrange
+    if (!state.shuffle || !state.tracks.length) return;
+    const base = state.order.indexOf(state.libIdx >= 0 ? state.libIdx : state.idx);
+    const upcoming = [...state.order.slice(base + 1), ...(state.loop === 'all' ? state.order.slice(0, Math.max(0, base)) : [])];
+    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, `${state.queue.length ? 'Then from' : 'Up next from'} the library (shuffled) · drag to reorder`), h('div', { class: 'grow' }),
+      h('button', { class: 'chip', title: 'Deal a new random order', onclick: () => { reshuffle(true); render(); } }, icon('shuffle', 'sm'), 'Reshuffle')));
+    if (!upcoming.length) { L.append(h('div', { class: 'music-empty' }, state.loop === 'off' ? 'That’s the last song — turn on Loop to keep going.' : 'Nothing else to play.')); return; }
+    const shown = upcoming.slice(0, 300);
+    const rows = shown.map((ti, k) => {
+      const row = qRow(state.queue.length + k + 1, state.tracks[ti].name);
+      row.classList.add('shuffled');
+      row.addEventListener('click', () => play(ti)); // jump there; the shuffle carries on from it
       return row;
     });
+    sortable(rows, 'text/bds-shuffle', (from, to) => {
+      // move within the upcoming list, then write it back into the full play order
+      const up = [...shown];
+      const [m] = up.splice(from, 1);
+      up.splice(to, 0, m);
+      const rest = upcoming.slice(shown.length);
+      const head = state.order.slice(0, base + 1).filter((x) => !upcoming.includes(x));
+      state.order = [...head, ...up, ...rest];
+      // songs that wrapped around (loop all) now come after the current one; keep the current song where it is
+      const cur = state.libIdx >= 0 ? state.libIdx : state.idx;
+      if (cur >= 0 && !state.order.includes(cur)) state.order.unshift(cur);
+      saveOrder();
+      render();
+    }, { acceptSong: null });
     L.append(...rows);
+    if (upcoming.length > shown.length) L.append(h('div', { class: 'music-empty' }, `…and ${upcoming.length - shown.length} more`));
   }
 
   async function renameTrack(i, name) {

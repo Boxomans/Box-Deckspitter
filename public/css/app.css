@@ -1179,7 +1179,7 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 
 /* ♪ player docked in the right sidebar */
 #rightpanel[data-panel="music"] { width: 330px; }
-.music-pop.docked { position: static; width: auto; max-height: none; height: 100%; min-height: 0; border: 0; border-radius: 0; box-shadow: none; padding: 10px 12px; overflow-y: auto; background: transparent; }
+.music-pop.docked { z-index: auto; position: static; width: auto; max-height: none; height: 100%; min-height: 0; border: 0; border-radius: 0; box-shadow: none; padding: 10px 12px; overflow-y: auto; background: transparent; }
 .music-pop.docked:has(.music-eq:not([hidden])) { width: auto; }
 .music-pop.docked .music-list { max-height: none; flex: 1 1 auto; min-height: 120px; }
 .music-pop.docked:has(.music-eq:not([hidden])) .music-list { max-height: none; }
@@ -1216,3 +1216,38 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 [data-theme="pbj"] .btn.primary { color: #fff; }
 [data-theme="pbj"] a { color: #00a8fc; }
 [data-theme="pbj"] .home-hero img { filter: drop-shadow(0 0 18px rgba(240, 178, 50, 0.2)); }
+
+.music-q-row.shuffled .music-track-n { color: var(--text-3); opacity: 0.7; }
+.music-q-head + .music-q-row.shuffled, .music-q-row + .music-q-head { margin-top: 6px; }
+.music-q-head .chip .i { width: 12px; height: 12px; }
+
+/* chars / claude / clip moved to the top bar: a button there, the panel drops down under it */
+.top-panel-btn .top-panel-glyph { font-family: var(--font-mono); font-size: 14px; line-height: 1; }
+.top-panel-btn.on { color: var(--accent-strong); background: var(--accent-soft); }
+.panel-pop { position: fixed; z-index: 890; width: 320px; height: min(560px, calc(100vh - 70px)); display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 14px; background: var(--bg-1); box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5); overflow: hidden; -webkit-app-region: no-drag; }
+.panel-pop[data-panel="ai"] { width: 380px; }
+.panel-pop[hidden] { display: none; }
+.panel-pop > .rp-container { flex: 1; min-height: 0; }
+
+/* sound / theme / shortcuts moved into the right sidebar: same look as the chars / claude / clip tabs */
+.rrail-spacer { flex: 1; }
+.rrail-tools { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.rrail-tools:empty { display: none; }
+.icon-btn.in-rail {
+  width: 24px; height: auto; flex-direction: column; gap: 6px; padding: 8px 0 10px;
+  border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-2); color: var(--text-3);
+}
+.icon-btn.in-rail:hover { color: var(--text); border-color: var(--accent-line); background: var(--bg-3); }
+.icon-btn.in-rail .i { width: 13px; height: 13px; }
+.icon-btn.in-rail::after { content: attr(data-rlabel); writing-mode: vertical-rl; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; }
+.icon-btn.in-rail.muted { color: var(--text-3); opacity: 0.75; }
+[data-theme="pbj"] .icon-btn.in-rail { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.1); }
+
+/* drag-to-select */
+.rubber-box { position: fixed; z-index: 2500; pointer-events: none; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 3px; }
+.picked, .file-row.picked, .recent-row.picked, .tree-row.picked { background: var(--accent-soft-2) !important; color: var(--text) !important; box-shadow: inset 2px 0 0 var(--accent); }
+
+/* home cards: drag to reorder */
+.new-card.dragging { opacity: 0.4; }
+.new-card.drop-before { box-shadow: -3px 0 0 var(--accent), var(--focus); }
+.new-card.drop-after { box-shadow: 3px 0 0 var(--accent), var(--focus); }

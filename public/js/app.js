@@ -5,7 +5,7 @@ import { icon } from './core/icons.js';
 import { api } from './core/api.js';
 import {
   showMenu, closeMenus, menusOpen, contextMenu, modal, modalOpen, alertDialog, confirmDialog, promptDialog,
-  choiceDialog, toast, errorToast, hoverKeys,
+  choiceDialog, toast, errorToast, hoverKeys, rubberSelect,
 } from './core/ui.js';
 import { detectMode, extForLang, LANGUAGES, MODE_ICON, MODE_LABEL, iconForName, OPEN_FILTERS, VIDEO_FILTERS } from './core/filetypes.js';
 import { pickOpen, pickSave, configureFiles, setLastDir, getLastDir } from './core/files.js';
@@ -143,6 +143,12 @@ function flingable(el, zone, onMove) {
 
 const THEME_NEXT = { dark: 'light', light: 'pbj', pbj: 'dark' };
 const THEME_NAME = { dark: 'Dark', light: 'Light', pbj: 'PB&J' };
+const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) => [b, a]));
+// side panels that can move between the right sidebar and the top bar
+const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
+// top-bar buttons that can move to the right sidebar (in their top-bar order)
+const TOP_TOOLS = ['btn-music', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
+const TOOL_LABEL = { 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, text & code — (almost) nothing leaves this machine';
 
@@ -195,7 +201,7 @@ class App {
     this.startDraftLoop();
     if (this.settings.sidebar) this.showPanel(this.settings.sidebar);
     if (this.settings.musicDock === 'side') this.setMusicDock(true, { animate: false });
-    if (this.settings.rightPanel && !(this.settings.rightPanel === 'music' && this.rightPanel === 'music')) this.toggleRightPanel(this.settings.rightPanel);
+    if (this.settings.rightPanel && !(this.settings.rightPanel === 'music' && this.rightPanel === 'music') && !this.panelOnTop(this.settings.rightPanel)) this.toggleRightPanel(this.settings.rightPanel);
     // the app is up: confirm a just-installed update (otherwise the boot file rolls it back), then say how it went
     window.bdsShell?.appReady?.();
     this.afterStartup();
@@ -215,6 +221,7 @@ class App {
     $('#btn-new-tab').addEventListener('click', (e) => showMenu(this.newMenuItems(), { anchor: e.currentTarget }));
     // the top-bar button cycles Dark → Light → PB&J
     $('#btn-theme').addEventListener('click', () => this.applyTheme(THEME_NEXT[this.settings.theme] || 'dark'));
+    $('#btn-theme').addEventListener('contextmenu', (e) => { e.preventDefault(); this.applyTheme(THEME_PREV[this.settings.theme] || 'dark'); });
     $('#btn-sound').addEventListener('click', () => { this.sounds.toggle(); this.syncSoundButton(); });
     this.syncSoundButton();
     this.wireSoundVolume();
@@ -254,7 +261,8 @@ class App {
     const tab = this.musicRailTab();
     if ((this.settings.musicDock === 'side') !== side) this.saveSettings({ musicDock: side ? 'side' : 'top' });
     if (side) {
-      $('#rightrail').append(tab);
+      const spacer = $('#rightrail .rrail-spacer');
+      if (spacer) spacer.before(tab); else $('#rightrail').append(tab);
       btn.hidden = true;
       // dragged in: open it there; at startup: only if it was open when the app closed
       if (animate || this.settings.rightPanel === 'music') this.toggleRightPanel('music', { force: true });
@@ -273,10 +281,135 @@ class App {
     const sideZone = () => $('#rightrail');
     flingable($('#btn-music'), sideZone, () => this.setMusicDock(true));
     flingable(this.musicRailTab(), topZone, () => this.setMusicDock(false));
+    // chars, claude and clip can move to the top bar too (and back): there they open as a drop-down
+    for (const tab of $$('.rrail-tab[data-rpanel]')) {
+      const name = tab.dataset.rpanel;
+      if (!SIDE_PANELS[name]) continue;
+      const btn = h('button', { class: 'icon-btn top-panel-btn', hidden: true, dataset: { tpanel: name }, title: `${SIDE_PANELS[name]} · drag or flick it to the right sidebar to put it back` },
+        h('span', { class: 'top-panel-glyph' }, tab.querySelector('.rrail-glyph')?.textContent || '•'));
+      btn.addEventListener('click', () => this.toggleTopPanel(name));
+      $('#btn-music').before(btn);
+      flingable(tab, topZone, () => this.setPanelDock(name, 'top'));
+      flingable(btn, sideZone, () => this.setPanelDock(name, 'side'));
+      tab.title = `${tab.title} · drag or flick it to the top bar to move it there`;
+    }
+    for (const [name, where] of Object.entries(this.settings.panelDock || {})) if (where === 'top' && SIDE_PANELS[name]) this.setPanelDock(name, 'top', { save: false });
+    this.wireToolDock();
+  }
+
+  // ---- the sound, theme and shortcuts buttons can move from the top bar to the bottom of the right sidebar (and back)
+  railTools() {
+    if (!this._railTools) {
+      this._railTools = h('div', { class: 'rrail-tools' });
+      $('#rightrail').append(h('div', { class: 'rrail-spacer' }), this._railTools);
+    }
+    return this._railTools;
+  }
+
+  setToolDock(id, side, { save = true } = {}) {
+    const el = $(`#${id}`);
+    if (!el) return;
+    if (side) {
+      this.railTools().append(el);
+      // keep the same order as in the top bar
+      [...this._railTools.children].sort((a, b) => TOP_TOOLS.indexOf(a.id) - TOP_TOOLS.indexOf(b.id)).forEach((c) => this._railTools.append(c));
+    } else {
+      const bar = $('.titlebar-actions');
+      const after = TOP_TOOLS.slice(TOP_TOOLS.indexOf(id) + 1).map((x) => $(`#${x}`)).find((x) => x && x.parentElement === bar);
+      if (after) bar.insertBefore(el, after); else bar.append(el);
+    }
+    el.classList.toggle('in-rail', side);
+    if (save) this.saveSettings({ toolDock: { ...(this.settings.toolDock || {}), [id]: side ? 'side' : 'top' } });
+  }
+
+  wireToolDock() {
+    for (const id of TOP_TOOLS.slice(1)) {
+      const el = $(`#${id}`);
+      if (!el) continue;
+      el.dataset.rlabel = TOOL_LABEL[id];
+      // drag or flick it to the other place
+      flingable(el, () => (el.closest('#rightrail') ? $('.titlebar-actions') : $('#rightrail')), () => this.setToolDock(id, !el.closest('#rightrail')));
+      if ((this.settings.toolDock || {})[id] === 'side') this.setToolDock(id, true, { save: false });
+    }
+  }
+
+  /** Move chars / claude / clip between the right sidebar ('side') and the top bar ('top'). */
+  setPanelDock(name, where, { save = true } = {}) {
+    const tab = $(`.rrail-tab[data-rpanel="${name}"]`);
+    const btn = $(`.top-panel-btn[data-tpanel="${name}"]`);
+    if (!tab || !btn) return;
+    const top = where === 'top';
+    if (top && this.rightPanel === name) this.toggleRightPanel(null);
+    if (!top && this.topPanel === name) this.closeTopPanel();
+    tab.hidden = top;
+    btn.hidden = !top;
+    if (save) this.saveSettings({ panelDock: { ...(this.settings.panelDock || {}), [name]: top ? 'top' : 'side' } });
+    if (save && top) this.toggleTopPanel(name); // show where it went
+    else if (save) this.toggleRightPanel(name, { force: true });
+  }
+  panelOnTop(name) { return (this.settings.panelDock || {})[name] === 'top'; }
+
+  /** The chars / claude / clip panel element, created the first time it's needed. */
+  ensureSidePanel(name) {
+    this.rightPanels = this.rightPanels || {};
+    if (this.rightPanels[name]) return this.rightPanels[name];
+    const el = h('div', { class: 'rp-container' });
+    this.rightPanels[name] = { el, panel: null };
+    const load = name === 'chars'
+      ? import('./core/chars-panel.js').then(({ CharsPanel }) => new CharsPanel(this, el))
+      : name === 'clip'
+        ? import('./core/clips-panel.js').then(({ ClipsPanel }) => new ClipsPanel(this, el))
+        : import('./core/ai-panel.js').then(({ AiPanel }) => new AiPanel(this, el));
+    load.then((panel) => { this.rightPanels[name].panel = panel; });
+    return this.rightPanels[name];
+  }
+
+  /** Top-bar mode: the panel drops down under its button (click again, Esc or click elsewhere to close). */
+  toggleTopPanel(name) {
+    if (this.topPanel === name) return this.closeTopPanel();
+    this.closeTopPanel();
+    const btn = $(`.top-panel-btn[data-tpanel="${name}"]`);
+    if (!btn || btn.hidden) return;
+    if (!this.topPop) {
+      this.topPop = h('div', { class: 'panel-pop' });
+      document.body.append(this.topPop);
+      document.addEventListener('pointerdown', (e) => {
+        if (!this.topPanel || performance.now() - this.topPopAt < 250) return;
+        if (this.topPop.contains(e.target) || e.target.closest?.('.top-panel-btn') || e.target.closest?.('.menu, .modal-backdrop')) return;
+        this.closeTopPanel();
+      }, true);
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.topPanel && !document.querySelector('.modal-backdrop')) this.closeTopPanel(); });
+      addEventListener('resize', () => this.topPanel && this.placeTopPanel());
+    }
+    const p = this.ensureSidePanel(name);
+    this.topPop.dataset.panel = name;
+    // only one panel at a time in the drop-down
+    for (const c of this.topPop.children) if (c !== p.el) c.hidden = true;
+    this.topPop.append(p.el);
+    p.el.hidden = false;
+    this.topPop.hidden = false;
+    this.topPanel = name;
+    this.topPopAt = performance.now();
+    btn.classList.add('on');
+    if (name === 'ai') p.panel?.render();
+    this.placeTopPanel();
+  }
+  placeTopPanel() {
+    const b = $(`.top-panel-btn[data-tpanel="${this.topPanel}"]`)?.getBoundingClientRect();
+    if (!b) return;
+    this.topPop.style.top = `${Math.round(b.bottom + 6)}px`;
+    this.topPop.style.right = `${Math.max(8, Math.round(innerWidth - b.right - 8))}px`;
+  }
+  closeTopPanel() {
+    if (!this.topPanel) return;
+    $(`.top-panel-btn[data-tpanel="${this.topPanel}"]`)?.classList.remove('on');
+    this.topPop.hidden = true;
+    this.topPanel = null;
   }
 
   toggleRightPanel(name, { force = false } = {}) {
     const host = $('#rightpanel');
+    if (name && SIDE_PANELS[name] && this.panelOnTop(name)) return this.toggleTopPanel(name);
     if (name === 'music' && !this.music?.docked && this.settings.musicDock !== 'side') name = null;
     const next = name && (force || this.rightPanel !== name) ? name : null;
     this.rightPanel = next;
@@ -285,20 +418,19 @@ class App {
     $$('.rrail-tab').forEach((b) => b.classList.toggle('active', b.dataset.rpanel === next));
     this.saveSettings({ rightPanel: next });
     this.rightPanels = this.rightPanels || {};
-    for (const [k, p] of Object.entries(this.rightPanels)) p.el.hidden = k !== next;
-    if (next && !this.rightPanels[next]) {
+    for (const [k, p] of Object.entries(this.rightPanels)) if (p.el.parentElement === host) p.el.hidden = k !== next;
+    if (next === 'music' && !this.rightPanels.music) {
       const el = h('div', { class: 'rp-container' });
       host.append(el);
-      this.rightPanels[next] = { el, panel: null };
-      const load = next === 'music'
-        ? Promise.resolve(this.music.dockInto(el))
-        : next === 'chars'
-        ? import('./core/chars-panel.js').then(({ CharsPanel }) => new CharsPanel(this, el))
-        : next === 'clip'
-          ? import('./core/clips-panel.js').then(({ ClipsPanel }) => new ClipsPanel(this, el))
-          : import('./core/ai-panel.js').then(({ AiPanel }) => new AiPanel(this, el));
-      load.then((panel) => { this.rightPanels[next].panel = panel; });
-    } else if (next === 'ai') this.rightPanels.ai.panel?.render();
+      this.rightPanels.music = { el, panel: null };
+      this.music.dockInto(el);
+    } else if (next && next !== 'music') {
+      const fresh = !this.rightPanels[next];
+      const p = this.ensureSidePanel(next);
+      if (p.el.parentElement !== host) host.append(p.el); // coming back from the top bar
+      p.el.hidden = false;
+      if (!fresh && next === 'ai') p.panel?.render();
+    }
     this.active?.editor?.onShow?.();
   }
 
@@ -333,8 +465,13 @@ class App {
       show();
       const r = btn.getBoundingClientRect();
       pop.hidden = false;
-      pop.style.top = Math.round(r.bottom + 6) + 'px';
-      pop.style.left = Math.round(r.left + r.width / 2 - pop.offsetWidth / 2) + 'px';
+      if (btn.closest('#rightrail')) {
+        pop.style.top = Math.round(r.top + r.height / 2 - pop.offsetHeight / 2) + 'px';
+        pop.style.left = Math.round(r.left - pop.offsetWidth - 8) + 'px';
+      } else {
+        pop.style.top = Math.round(r.bottom + 6) + 'px';
+        pop.style.left = Math.round(r.left + r.width / 2 - pop.offsetWidth / 2) + 'px';
+      }
     };
     const close = () => { hideT = setTimeout(() => { pop.hidden = true; }, 250); };
     for (const el of [btn, pop]) { el.addEventListener('mouseenter', open); el.addEventListener('mouseleave', close); }
@@ -355,7 +492,7 @@ class App {
     try { localStorage.setItem('bds-theme', theme); } catch { /* ignore */ }
     const b = $('#btn-theme');
     clear(b).append(icon(theme === 'dark' ? 'sun' : theme === 'light' ? 'star' : 'moon'));
-    b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[THEME_NEXT[theme] || 'dark']}`;
+    b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[THEME_NEXT[theme] || 'dark']}, right-click for ${THEME_NAME[THEME_PREV[theme] || 'dark']}`;
     if (persist) this.saveSettings({ theme });
     for (const t of this.tabs) t.editor?.onThemeChange?.(theme);
     if (window.bdsShell) {
@@ -517,8 +654,8 @@ class App {
       { sep: true },
       { label: 'Files panel', icon: 'folder', checked: this.panel === 'explorer', action: () => this.togglePanel('explorer') },
       { label: 'Recent panel', icon: 'clock', checked: this.panel === 'recent', action: () => this.togglePanel('recent') },
-      { label: 'Special characters', icon: 'omega', checked: this.rightPanel === 'chars', action: () => this.toggleRightPanel('chars') },
-      { label: 'Clipboard & snippets', icon: 'copy', checked: this.rightPanel === 'clip', action: () => this.toggleRightPanel('clip') },
+      { label: 'Special characters', icon: 'omega', checked: this.rightPanel === 'chars' || this.topPanel === 'chars', action: () => this.toggleRightPanel('chars') },
+      { label: 'Clipboard & snippets', icon: 'copy', checked: this.rightPanel === 'clip' || this.topPanel === 'clip', action: () => this.toggleRightPanel('clip') },
       { label: 'Music player in the sidebar', icon: 'music', checked: this.settings.musicDock === 'side', action: () => this.setMusicDock(this.settings.musicDock !== 'side') },
       { label: 'Focus mode', icon: 'focus', shortcut: 'F11', checked: document.body.classList.contains('focus-mode'), action: () => this.toggleFocus() },
       { sep: true },
@@ -1066,6 +1203,39 @@ class App {
     this.workspace.append(this.homeEl);
   }
 
+  /** Home cards in the order you dragged them into (new cards you haven't placed go at the end). */
+  ordered(group, list, keyOf) {
+    const saved = (this.settings.cardOrder || {})[group] || [];
+    const rank = new Map(saved.map((k, i) => [k, i]));
+    return [...list].sort((a, b) => (rank.get(keyOf(a)) ?? 1e6 + list.indexOf(a)) - (rank.get(keyOf(b)) ?? 1e6 + list.indexOf(b)));
+  }
+
+  /** Drag home cards to reorder them; the order is saved by each card's original name. */
+  sortableCards(grid, group) {
+    let dragged = null;
+    for (const card of grid.children) {
+      card.draggable = true;
+      card.addEventListener('dragstart', (e) => { dragged = card; card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/bds-card', card.dataset.key); });
+      card.addEventListener('dragend', () => { dragged = null; card.classList.remove('dragging'); for (const c of grid.children) c.classList.remove('drop-before', 'drop-after'); });
+      card.addEventListener('dragover', (e) => {
+        if (!dragged || dragged === card || dragged.parentElement !== grid) return;
+        e.preventDefault();
+        const r = card.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        for (const c of grid.children) c.classList.remove('drop-before', 'drop-after');
+        card.classList.add(after ? 'drop-after' : 'drop-before');
+      });
+      card.addEventListener('drop', (e) => {
+        if (!dragged || dragged === card) return;
+        e.preventDefault();
+        const after = card.classList.contains('drop-after');
+        card.classList.remove('drop-before', 'drop-after');
+        if (after) card.after(dragged); else card.before(dragged);
+        this.saveSettings({ cardOrder: { ...(this.settings.cardOrder || {}), [group]: [...grid.children].map((c) => c.dataset.key) } });
+      });
+    }
+  }
+
   /** F2 on the home logo: pick a picture (file, image dump or paste) — shrunk to 256 px and kept in settings. */
   async changeHomeLogo(img) {
     const set = (url) => { this.saveSettings({ homeLogo: url }); img.src = url || '/assets/icon.svg'; };
@@ -1119,7 +1289,7 @@ class App {
     const nameEl = h('span', { class: 'nc-title' }, names[title] || title);
     const subs = this.settings.cardSubs || {};
     const subEl = h('span', { class: 'nc-sub' }, subs[title] || sub);
-    const card = h('button', { class: 'new-card', title: 'F2 to rename · Ctrl+F2 to reset (hover the small line to change that instead)' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), nameEl, subEl);
+    const card = h('button', { class: 'new-card', dataset: { key: title }, title: 'F2 to rename · Ctrl+F2 to reset · drag to reorder (hover the small line to change that instead)' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), nameEl, subEl);
     hoverKeys(subEl, {
       nameEl: subEl,
       value: () => (this.settings.cardSubs || {})[title] || sub,
@@ -1185,7 +1355,7 @@ class App {
 
     inner.append(h('div', { class: 'home-section-title' }, 'start something'));
     const grid = h('div', { class: 'new-cards' });
-    for (const [kind, ic, title, sub] of cards) {
+    for (const [kind, ic, title, sub] of this.ordered('start', cards, (c) => c[2])) {
       const card = this.homeCard(ic, title, sub);
       card.addEventListener('click', (e) => {
         if (kind === 'code') showMenu(LANGUAGES.map(([id, name]) => ({ label: name, action: () => this.newDocument('code', { lang: id }) })), { x: e.clientX, y: e.clientY });
@@ -1193,10 +1363,11 @@ class App {
       });
       grid.append(card);
     }
+    this.sortableCards(grid, 'start');
     inner.append(grid);
     inner.append(h('div', { class: 'home-section-title' }, 'tools'));
     const toolGrid = h('div', { class: 'new-cards tool-cards' });
-    for (const [ic, title, sub, fn] of [
+    for (const [ic, title, sub, fn] of this.ordered('tools', [
       ['form-fill', 'Fill a form', 'gov pdfs · autofill · sign', () => this.fillForm()],
       ['video', 'Video trimmer', 'cut · gif · mp3 · frames', () => this.openVideoTrimmer()],
       ['magnet', 'BoxVidKlep', 'grab videos from a link', () => this.newDocument('klep')],
@@ -1206,11 +1377,12 @@ class App {
       ['music', 'BoxTape', 'youtube playlist → mp3s', () => this.newDocument('tape')],
       ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
       ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
-    ]) {
+    ], (c) => c[1])) {
       const card = this.homeCard(ic, title, sub);
       card.addEventListener('click', fn);
       toolGrid.append(card);
     }
+    this.sortableCards(toolGrid, 'tools');
     inner.append(toolGrid);
     inner.append(h('div', { class: 'home-actions' },
       h('button', { class: 'btn primary', onclick: () => this.openDialog() }, icon('folder-open'), 'Open a file…'),
@@ -1226,6 +1398,7 @@ class App {
       if (recent.length) {
         recentHost.append(h('div', { class: 'home-section-title' }, 'recent'));
         const list = h('div', { class: 'recent-list' });
+        rubberSelect(list, { rows: '.recent-row', menu: (items) => this.recentManyMenu(items, () => this.refreshHome()), onDelete: (items) => this.forgetRecents(items, () => this.refreshHome()), onOpen: (items) => this.openMany(items) });
         for (const r of recent) {
           const row = h('button', { class: `recent-row ${r.exists ? '' : 'missing'}`, title: r.exists ? r.path : 'File not found' },
             h('span', { class: 'rr-icon' }, icon(iconForName(r.name), 'sm')),
@@ -1238,6 +1411,7 @@ class App {
             { label: 'Show in folder', disabled: !r.exists, action: () => api.reveal(r.path) },
             { label: 'Remove from list', action: () => api.removeRecent(r.path).then(() => this.refreshHome()) },
           ]));
+          row._item = r;
           list.append(row);
         }
         recentHost.append(list);
@@ -1339,6 +1513,12 @@ class App {
     for (const [label, path] of places) if (path) quick.append(h('button', { class: 'chip', onclick: () => this.renderExplorer(path) }, label));
     const filter = h('input', { type: 'search', placeholder: 'Filter…', value: ex.filter });
     const list = h('div', { class: 'file-list' });
+    const picker = rubberSelect(list, {
+      scroller: () => list.parentElement,
+      menu: (items) => this.fileManyMenu(items, () => this.renderExplorer(ex.dir)),
+      onDelete: (items) => this.trashMany(items, () => this.renderExplorer(ex.dir)),
+      onOpen: (items) => this.openMany(items),
+    });
     const renderList = () => {
       clear(list);
       const q = ex.filter.toLowerCase();
@@ -1349,7 +1529,9 @@ class App {
           h('span', { class: 'fr-icon' }, icon(iconForName(e.name, e.isDir), 'sm')),
           h('span', { class: 'fr-name' }, e.name),
           e.isDir ? null : h('span', { class: 'fr-meta' }, formatBytes(e.size)));
-        if (!e.denied) hoverKeys(row, { nameEl: row.querySelector('.fr-name'), value: () => e.name, selectBase: !e.isDir, commit: (n) => this.explorerRename(e, n), remove: () => this.explorerTrash(e) });
+        // Del over a picked row removes every picked file (one confirm); otherwise just this one
+        if (!e.denied) hoverKeys(row, { nameEl: row.querySelector('.fr-name'), value: () => e.name, selectBase: !e.isDir, commit: (n) => this.explorerRename(e, n), remove: () => (row.classList.contains('picked') && picker.picked().length > 1 ? this.trashMany(picker.picked(), () => this.renderExplorer(ex.dir)) : this.explorerTrash(e)) });
+        if (!e.denied) row._item = e;
         row.addEventListener('click', () => {
           if (e.isDir) return this.renderExplorer(e.path);
           ex.selected = e.path;
@@ -1401,6 +1583,61 @@ class App {
   /** Open BoxDiff with this file on the left and ask for the file to compare it with. */
   compareWith(path) { return this.newDocument('diff', { diff: [{ path }], pickRight: true }); }
 
+  // ---- actions on several picked files / recent entries (drag-to-select)
+  openMany(items) {
+    const files = items.filter((x) => !x.isDir && x.exists !== false);
+    if (files.length > 12 && !confirm(`Open ${files.length} files?`)) return;
+    for (const f of files) this.openPath(f.path);
+  }
+
+  recentManyMenu(items, after) {
+    const ok = items.filter((x) => x.exists !== false);
+    return [
+      { heading: `${items.length} recent files` },
+      { label: `Open ${ok.length}`, icon: 'file', disabled: !ok.length, action: () => this.openMany(ok) },
+      { label: 'Copy paths', icon: 'copy', action: () => { navigator.clipboard.writeText(items.map((x) => x.path).join('\r\n')); toast('Paths copied', { timeout: 1200 }); } },
+      ...(items.length === 2 && ok.length === 2 ? [{ label: 'Compare these two', icon: 'diff', action: () => this.newDocument('diff', { diff: ok.map((x) => ({ path: x.path })) }) }] : []),
+      { sep: true },
+      { label: `Remove ${items.length} from the list`, icon: 'x', shortcut: 'Del', action: () => this.forgetRecents(items, after) },
+    ];
+  }
+
+  async forgetRecents(items, after) {
+    for (const x of items) await api.removeRecent(x.path).catch(() => {});
+    toast(`Removed ${items.length} from recent files`, { timeout: 1600 });
+    after?.();
+  }
+
+  fileManyMenu(items, after) {
+    const files = items.filter((x) => !x.isDir);
+    return [
+      { heading: `${items.length} selected` },
+      { label: `Open ${files.length} file${files.length === 1 ? '' : 's'}`, icon: 'file', disabled: !files.length, action: () => this.openMany(files) },
+      { label: 'Copy paths', icon: 'copy', action: () => { navigator.clipboard.writeText(items.map((x) => x.path).join('\r\n')); toast('Paths copied', { timeout: 1200 }); } },
+      ...(files.length === 2 && items.length === 2 ? [{ label: 'Compare these two', icon: 'diff', action: () => this.newDocument('diff', { diff: files.map((x) => ({ path: x.path })) }) }] : []),
+      { sep: true },
+      { label: `Delete ${items.length} (Recycle Bin)`, icon: 'trash', shortcut: 'Del', action: () => this.trashMany(items, after) },
+    ];
+  }
+
+  /** Several files/folders to the Recycle Bin with one question. */
+  async trashMany(items, after) {
+    if (!items.length) return;
+    const names = items.slice(0, 6).map((x) => `“${x.name || basename(x.path)}”`).join(', ') + (items.length > 6 ? ` and ${items.length - 6} more` : '');
+    if (!(await confirmDialog(`Move ${items.length} item${items.length === 1 ? '' : 's'} to the Recycle Bin?`, `${names} will be moved to the Recycle Bin. You can restore them from there.`, { okLabel: 'Move to Recycle Bin', danger: true }))) return;
+    let n = 0;
+    for (const x of items) {
+      try {
+        await api.trash(x.path);
+        n++;
+        const tab = this.tabs.find((t) => t.path && t.path.toLowerCase().startsWith(x.path.toLowerCase()));
+        if (tab) this.closeTab(tab, { force: !tab.dirty });
+      } catch (err) { errorToast(err, x.name || x.path); }
+    }
+    if (n) toast(`Moved ${n} item${n === 1 ? '' : 's'} to the Recycle Bin`, { type: 'ok' });
+    after?.();
+  }
+
   async explorerTrash(e) {
     if (!(await confirmDialog('Move to Recycle Bin?', `“${e.name}” will be moved to the Recycle Bin. You can restore it from there.`, { okLabel: 'Move to Recycle Bin', danger: true }))) return;
     try {
@@ -1437,6 +1674,7 @@ class App {
       h('button', { class: 'icon-btn', 'data-tip': 'Clear list', onclick: async () => { await api.removeRecent(null); this.renderRecentPanel(); } }, icon('trash', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
     h('div', { class: 'panel-body' }, list));
+    rubberSelect(list, { scroller: () => list.parentElement, menu: (items) => this.recentManyMenu(items, () => this.renderRecentPanel()), onDelete: (items) => this.forgetRecents(items, () => this.renderRecentPanel()), onOpen: (items) => this.openMany(items) });
     try {
       const recent = await api.recent();
       if (!recent.length) list.append(h('div', { class: 'empty-note' }, 'Nothing yet.'));
@@ -1450,6 +1688,7 @@ class App {
           { label: 'Show in folder', disabled: !r.exists, action: () => api.reveal(r.path) },
           { label: 'Remove from list', action: () => api.removeRecent(r.path).then(() => this.renderRecentPanel()) },
         ]));
+        row._item = r;
         list.append(row);
       }
     } catch (e) { list.append(h('div', { class: 'empty-note' }, e.message)); }
@@ -1840,7 +2079,7 @@ class App {
       h('div', { class: 'row' },
         h('button', { class: 'btn sm', onclick: async () => { const k = await promptDialog('Anthropic API key', 'Paste a key from console.anthropic.com', '', { type: 'password', placeholder: 'sk-ant-…' }); if (!k) return; try { await setKey(k); toast('Key saved', { type: 'ok' }); refresh(); } catch (e) { errorToast(e); } } }, 'Set key…'),
         h('button', { class: 'btn sm ghost', onclick: async () => { if (await confirmDialog('Remove API key?', 'Ask Claude will stop working until you add a key again.', { okLabel: 'Remove', danger: true })) { await setKey(''); refresh(); } } }, 'Remove'),
-        h('button', { class: 'btn sm ghost', onclick: () => this.toggleRightPanel(this.rightPanel === 'ai' ? null : 'ai') }, 'Open panel')),
+        h('button', { class: 'btn sm ghost', onclick: () => this.toggleRightPanel(this.rightPanel === 'ai' && !this.panelOnTop('ai') ? null : 'ai') }, 'Open panel')),
       h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Optional. Text goes to Anthropic only when you press send. Billed to your Anthropic account.'));
   }
 
