@@ -1,9 +1,11 @@
 # BOX//DOCSPITTER
 
+> local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to
+
 A self-hosted document workstation that runs entirely on your PC: a Word-style editor, a PDF editor and
 form filler, a notepad, a code/config editor, spreadsheets, a layered image editor, offline OCR, a file
-compare tool, a video trimmer, a video grabber, Gmail, a YouTube/Spotify-to-MP3 tool with a music player,
-folder workspaces and a disk-space explorer. Everything is served from `127.0.0.1`. Your files stay on
+compare tool, a multi-track video editor and a quick trimmer, a video grabber, Gmail, a YouTube/Spotify-to-MP3
+tool with a music player, encrypted Secure notes for passwords, folder workspaces and a disk-space explorer. Everything is served from `127.0.0.1`. Your files stay on
 this machine. The only exceptions are the ones you switch on yourself (Ask Claude, Discord status, BoxMail,
 downloads, update checks).
 
@@ -136,6 +138,15 @@ lossless copy, MP4, WebM, GIF, MP3 or WAV. Grab single frames as PNGs, or send t
 It runs with the built-in ffmpeg.wasm. If you install real ffmpeg (`winget install Gyan.FFmpeg`),
 big files export much faster.
 
+**Video editor** (Tools → Video editor, `.boxcut` projects) Video and audio tracks, pictures on the timeline
+(drag an edge to set how long they show), keyframes for position, size, rotation, opacity and volume, chroma
+key (green screen) with an eyedropper, and a properties panel for the selected clip. Clips snap to each other's
+edges and the playhead; press Shift mid-drag to place one freely. **Shift+click / Shift+drag** seeks on the
+timeline or across the preview. Sizes from 720p to 4K (including 1440p and vertical). A **Media dump** tab sits
+next to the media list: drag between the dump, the media list and the timeline, drop a clip on the dump to
+keep its file, and export straight into it. Exports MP4 through the PC's ffmpeg; formats the browser can't
+play get an editing copy automatically.
+
 **BoxVidKlep** Paste a web page or video link and it finds the videos on that page. You pick which
 ones to download, rename them, or send them straight to the trimmer. Direct video files work out of
 the box. YouTube and most social sites need **yt-dlp** (`winget install yt-dlp`), which BoxVidKlep uses
@@ -205,6 +216,11 @@ Removed lines are red, added lines green, and the exact changed words are highli
 RTF, PDF and spreadsheets compare by their text; two pictures compare pixel by pixel with the differences
 highlighted. Drop two files on it, one on each half, or pick an open tab or a dump file.
 
+**Secure notes** (Tools → Secure notes) Passwords and private notes, encrypted on this PC. Each note can
+hold a username, a password, a website and free text. Passwords show only while you hold the eye button, and
+copying one clears it from the clipboard after 20 seconds. Opening Secure notes always asks for your PIN. See
+[Secure notes: encryption and safeguards](#secure-notes-encryption-and-safeguards) below.
+
 **Binary files** A fast hex viewer that identifies the file type.
 
 ## Side tabs (right edge)
@@ -225,6 +241,63 @@ highlighted. Drop two files on it, one on each half, or pick an open tab or a du
     for pin, save as snippet, edit, reorder and delete. Everything is stored in `data/clips.json` and erased
     by the factory reset.
 
+## Secure notes: encryption and safeguards
+
+Everything below happens inside the app window's own process (`electron/secure-notes.js`). The local server
+never sees your notes, the page only gets what's on screen, and nothing is ever written to disk unencrypted.
+Secure notes don't open in a browser tab at all — only in the Box-DocSpitter window.
+
+**What you set up once**
+
+| | What it is | What it's for |
+|---|---|---|
+| Passphrase | 10+ characters you choose (a few random words is best) | Opening Secure notes after the app starts |
+| PIN | 4–32 letters, numbers or symbols | Asked every time you open Secure notes |
+| Secure key | `XXXX-XXXX-XXXX-XXXX-XXXX-XXXX`, made for you, shown once — a sticky note is fine | The 30-day check, and opening your notes on a new PC (with the PIN) |
+| Key file (optional) | a random file on a USB stick | Makes the passphrase useless without the stick |
+
+**Encryption**
+
+- The notes are encrypted with **AES-256-GCM** under a random 256-bit data key, with a fresh nonce on every
+  save. GCM is authenticated: if a single byte of the file is changed, it refuses to open.
+- The data key is stored *wrapped* (encrypted) in two slots, never in the clear:
+  - **Passphrase slot:** your passphrase goes through **scrypt** (N = 2¹⁸, r = 8: 256 MiB of memory and about
+    a second per guess), is combined with a random 256-bit **device key** (and the key file's SHA-256, if you
+    use one) through HKDF-SHA256, and that key wraps the data key with AES-256-GCM.
+  - **Secure key slot:** the secure key and your PIN go through the same scrypt + HKDF. The secure key is 24
+    characters from 32 symbols (no look-alikes), about **120 bits** of randomness.
+- The **device key** is sealed with **Windows DPAPI** under your Windows account. A copied vault file can't be
+  opened on any other PC or Windows account with the passphrase — only with the secure key + PIN.
+- Electron's crypto library has no Argon2, so scrypt (memory-hard, from the same audited library) is used
+  rather than adding third-party code to the most sensitive part of the app.
+
+**Safeguards**
+
+- **PIN never unlocks anything on disk.** After a passphrase unlock, the data key is kept in memory, wrapped
+  with scrypt(PIN) (64 MiB), while the notes are locked. Five wrong PINs throw it away and the passphrase is
+  needed. After the app restarts, the passphrase is always needed. So the PIN can't be guessed offline.
+- **Locks itself** when you leave the tab, after a few idle minutes (1–60, your choice), and when Windows
+  locks or the PC sleeps. The data key is wiped from memory on lock.
+- **30-day secure key check:** every 30 days the secure key has to be typed in before the notes open. The
+  date is stored inside the encrypted notes, a clock set backwards counts as due, and five wrong keys lock
+  everything.
+- **Slower guessing in the app:** after three wrong passphrases or keys, each try waits 1 s, 2 s, 4 s … up
+  to 30 s.
+- **Passwords stay out of the page** until you hold the eye. Copying goes straight from the window process
+  to the clipboard, which is cleared after 20 s and marked so Windows clipboard history (Win+V) and cloud
+  clipboard skip it.
+- **Screenshots and screen shares** show the window as black while Secure notes are open.
+- **Kept out of** Ask Claude, the clip history, crash-recovery drafts, Ctrl+right-click sends and Discord
+  status.
+- **Safe saving:** each save is written to a temporary file, flushed to disk and swapped in, and the last
+  10 versions are kept in `data/secure-notes/backups`. A vault file that's been swapped underneath the app is
+  detected and never written over.
+- Updates never touch `data/`, and a factory reset keeps Secure notes unless you tick the box to delete them.
+
+**What it can't protect against:** malware already running as you (a keylogger sees what you type, as with
+any password manager). And if you lose both the secure key and this PC, the notes can't be recovered — that's
+the point of the encryption. Keep the sticky note somewhere other than next to the PC.
+
 ## Other handy bits
 
 - **Ctrl+Shift+P** command palette · **Ctrl+E** quick open · **F1** all shortcuts · **F11** focus mode
@@ -236,6 +309,18 @@ highlighted. Drop two files on it, one on each half, or pick an open tab or a du
 - **Menus**: press on a menu, drag to an item and let go to pick it, submenus included.
 - **Mouse back / forward** (buttons 4 and 5) step between tabs, or between folders over the file panel.
 - **Version history**: every save keeps the previous version (File → Version history).
+- **App PIN lock** (Settings → Security, off unless you turn it on): asks for a PIN when the app starts, after
+  it's been idle, when Windows locks, or on **Ctrl+Alt+L**. The PIN is kept as a scrypt hash in
+  `data/applock.json`; after 5 wrong tries the waits grow from 30 s to 15 min. It hides the app — your files
+  on disk aren't encrypted by it (Secure notes are).
+- **Your setup** (Settings → Your setup): **Export** saves your settings, theme, renames and layout, plus your
+  Secure notes (still encrypted), as one `.zip`. **Import** puts them back on another copy or PC. Never the
+  dumps, recent files or saved keys.
+- **Moving files around the app**: in Files, BoxSpaces, Recent and the dump panels a plain drag picks several
+  files, **Shift+drag** carries them into another part of the app (the video editor's timeline, a dump
+  folder, a BoxMail email), and **Ctrl+right-click** sends them to the tool that's open.
+- **Media dump and Doc dump** buttons in the left sidebar, with folders: make one, click to open it, drop files
+  on it to put them inside, Mouse 4 to go back up.
 - **Discord status** (Settings → Discord): off by default. Choose automatic lines ("editing a .pdf",
   "changing a config") or write your own. File names are never sent.
 - Light and dark themes. Windows open/save dialogs, or the built-in file browser.
@@ -261,6 +346,8 @@ highlighted. Drop two files on it, one on each half, or pick an open tab or a du
 | `data/backups/app/` | the app's own files from before each update (kept for "Go back") |
 | `data/update/` | update downloads waiting to install, and how the last one went |
 | `data/drafts/` | crash-recovery copies of unsaved work |
+| `data/secure-notes/` | Secure notes, encrypted (`notes.bdsv`), this PC's DPAPI-sealed key (`device.key`) and the last 10 versions (`backups/`) |
+| `data/applock.json` | the app PIN lock (a scrypt hash); delete it to remove a forgotten app PIN |
 | `data/bin/` | the compiled StoragePeek scanner (rebuilt automatically if deleted) |
 | `doc-dump/` | the doc dump (removed files go to `doc-dump/.removed`) |
 | `audio-dump/` | songs for the ♪ player (removed songs go to `audio-dump/.removed`) |
@@ -275,4 +362,5 @@ pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, tesseract.js
 The desktop window is Electron. `electron/main.js` is a tiny boot file that installs updates and rolls them
 back; `electron/shell.js` is the window itself, which runs `server.js` as a child process. Server modules:
 `mail-server.js` (BoxMail), `update-server.js` (updates), `spotify-server.js` (Spotify links),
-`file-assoc.js` (Windows file types).
+`file-assoc.js` (Windows file types), `render-server.js` (video editor export), `settings-transfer.js` (setup
+export/import and the app PIN lock). `electron/secure-notes.js` runs in the window process, not the server.
