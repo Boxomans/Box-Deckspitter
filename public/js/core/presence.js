@@ -20,6 +20,7 @@ const LINES = {
   video: { plain: ['Trimming a video'], silly: ['trimming a video', 'cutting a clip', 'making a gif', 'finding the perfect frame'] },
   form: { plain: ['Filling out a form'], silly: ['filling out a form', 'doing paperwork', 'fighting a government pdf', 'checking boxes'] },
   klep: { plain: ['Grabbing a video'], silly: ['klepping a video', 'grepping videos off a page', 'saving a clip for later'] },
+  diff: { plain: ['Comparing two files'], silly: ['spot the difference', 'playing spot the difference', 'squinting at two versions'] },
   scribe: { plain: ['Reading text from an image'], silly: ['squinting at a scan', 'turning pictures into words', 'OCR-ing something'] },
   paint: { plain: ['Painting'], silly: ['painting something', 'making art (allegedly)', 'pushing pixels', 'using the paint bucket irresponsibly'] },
   tape: { plain: ['Making a mixtape'], silly: ['making a mixtape', 'turning a playlist into mp3s', 'curating the audio dump'] },

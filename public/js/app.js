@@ -29,6 +29,7 @@ const EDITORS = {
   mail: () => import('./editors/mail.js').then((m) => m.MailEditor),
   tape: () => import('./editors/tape.js').then((m) => m.TapeEditor),
   scribe: () => import('./editors/scribe.js').then((m) => m.ScribeEditor),
+  diff: () => import('./editors/diff.js').then((m) => m.DiffEditor),
   paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
 
@@ -303,6 +304,7 @@ class App {
       { label: 'BoxMail', icon: 'mail', action: () => this.newDocument('mail') },
       { label: 'BoxTape — playlist to MP3s', icon: 'music', action: () => this.newDocument('tape') },
       { label: 'BoxScribe — image to text (OCR)', icon: 'scan-text', action: () => this.newDocument('scribe') },
+      { label: 'BoxDiff — compare two files', icon: 'diff', action: () => this.newDocument('diff') },
       { label: 'Music player', icon: 'music', action: () => this.music.open() },
     ];
   }
@@ -558,7 +560,7 @@ class App {
     const t = this.active;
     document.title = t ? `${t.dirty ? '● ' : ''}${t.title} — Box-DocSpitter` : 'Box-DocSpitter';
     const el = clear($('#doc-title'));
-    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe'].includes(t?.mode) && !t.path;
+    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff'].includes(t?.mode) && !t.path;
     if (t) el.append(...[h('b', {}, t.title), t.path ? h('span', {}, '  ·  ' + dirname(t.path)) : tool ? null : h('span', {}, '  ·  not saved yet')].filter(Boolean));
   }
 
@@ -697,6 +699,7 @@ class App {
       mail: { mode: 'mail', ext: '', base: 'BoxMail' },
       tape: { mode: 'tape', ext: '', base: 'BoxTape' },
       scribe: { mode: 'scribe', ext: '', base: 'BoxScribe' },
+      diff: { mode: 'diff', ext: '', base: 'BoxDiff' },
       paint: { mode: 'paint', ext: 'png', base: 'Untitled image' },
     }[kind];
     if (!spec) return;
@@ -718,7 +721,7 @@ class App {
     this.activate(tab);
     try {
       const bytes = spec.content ? new TextEncoder().encode(spec.content) : null;
-      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images });
+      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images, diff: opts.diff, pickRight: opts.pickRight });
       if (images) this.setDirty(tab, true);
     } catch (e) {
       this.failOpen(tab, e, null);
@@ -978,6 +981,7 @@ class App {
       ['mail', 'BoxMail', 'gmail + the dumps + claude', () => this.newDocument('mail')],
       ['music', 'BoxTape', 'youtube playlist → mp3s', () => this.newDocument('tape')],
       ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
+      ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
     ]) {
       const card = h('button', { class: 'new-card' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), h('span', { class: 'nc-title' }, title), h('span', { class: 'nc-sub' }, sub));
       card.addEventListener('click', fn);
@@ -1163,10 +1167,14 @@ class App {
       { sep: true },
       { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
       { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
+      { label: 'Compare with…', icon: 'diff', action: () => this.compareWith(e.path) },
       { label: 'Rename…', shortcut: 'F2', action: () => this.explorerRename(e) },
       { label: 'Delete (Recycle Bin)', icon: 'trash', shortcut: 'Del', action: () => this.explorerTrash(e) },
     ];
   }
+
+  /** Open BoxDiff with this file on the left and ask for the file to compare it with. */
+  compareWith(path) { return this.newDocument('diff', { diff: [{ path }], pickRight: true }); }
 
   async explorerTrash(e) {
     if (!(await confirmDialog('Move to Recycle Bin?', `“${e.name}” will be moved to the Recycle Bin. You can restore it from there.`, { okLabel: 'Move to Recycle Bin', danger: true }))) return;

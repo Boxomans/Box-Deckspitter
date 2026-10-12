@@ -60,6 +60,7 @@ function defineThemes(monaco) {
     ],
     colors: {
       'editor.background': '#0d0a13',
+      'diffEditor.insertedLineBackground': '#3ddc841c', 'diffEditor.insertedTextBackground': '#3ddc8455', 'diffEditor.removedLineBackground': '#ff4d6d1f', 'diffEditor.removedTextBackground': '#ff4d6d5c', 'diffEditorGutter.insertedLineBackground': '#3ddc8430', 'diffEditorGutter.removedLineBackground': '#ff4d6d33', 'diffEditorOverview.insertedForeground': '#3ddc84aa', 'diffEditorOverview.removedForeground': '#ff4d6daa', 'diffEditor.diagonalFill': '#ffffff10',
       'editor.foreground': '#e7e1f3',
       'editorLineNumber.foreground': '#433a58',
       'editorLineNumber.activeForeground': '#b48cff',
@@ -106,6 +107,7 @@ function defineThemes(monaco) {
     ],
     colors: {
       'editor.background': '#fbf9fe',
+      'diffEditor.insertedLineBackground': '#16a34a17', 'diffEditor.insertedTextBackground': '#16a34a3d', 'diffEditor.removedLineBackground': '#e11d4817', 'diffEditor.removedTextBackground': '#e11d4840', 'diffEditorGutter.insertedLineBackground': '#16a34a26', 'diffEditorGutter.removedLineBackground': '#e11d4826', 'diffEditorOverview.insertedForeground': '#16a34aaa', 'diffEditorOverview.removedForeground': '#e11d48aa',
       'editorLineNumber.foreground': '#c0b6d2',
       'editorLineNumber.activeForeground': '#7a4fd6',
       'editorCursor.foreground': '#d6439a',

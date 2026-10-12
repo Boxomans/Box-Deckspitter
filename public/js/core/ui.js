@@ -9,6 +9,11 @@ const root = () => document.getElementById('overlay-root');
 
 let menuStack = [];
 let menuCloseCb = null;
+// press-drag-release: hold the mouse on a menu button, slide onto an item, let go to pick it
+let mouseHeld = false;
+let lastDown = { x: 0, y: 0 };
+let dragPick = null; // { x, y, t } while a menu opened by a held press is waiting for the release
+let swallowClickOn = null;
 
 export function closeMenus() {
   for (const m of menuStack) m.el.remove();
@@ -93,8 +98,13 @@ export function showMenu(items, pos, opts = {}) {
   el.style.left = x + 'px';
   el.style.top = y + 'px';
 
-  const entry = { el, buttons, level };
+  const entry = { el, buttons, level, anchor: level === 0 ? pos.anchor || null : null };
   menuStack.push(entry);
+  if (level === 0) {
+    dragPick = mouseHeld ? { x: lastDown.x, y: lastDown.y, t: performance.now() } : null;
+    // remember buttons that open menus, so the next press on them opens it straight away (and can be dragged)
+    if (pos.anchor && !pos.anchor.classList.contains('menubar-item')) pos.anchor.dataset.menuAnchor = '';
+  }
   return entry;
 }
 
@@ -118,6 +128,16 @@ function menuKey(e) {
 }
 
 document.addEventListener('mousedown', (e) => {
+  if (e.button === 0) { mouseHeld = true; lastDown = { x: e.clientX, y: e.clientY }; }
+  const anchor = e.button === 0 ? e.target.closest?.('[data-menu-anchor]') : null;
+  if (anchor && !anchor.disabled && !menuStack.some((m) => m.el.contains(e.target))) {
+    const wasOpen = menuStack[0]?.anchor === anchor;
+    closeMenus();
+    e.preventDefault();
+    if (!wasOpen) anchor.click();
+    swallowClickOn = anchor; // the click that follows this press shouldn't toggle it again
+    return;
+  }
   if (!menuStack.length) return;
   if (menuStack.some((m) => m.el.contains(e.target))) return;
   if (e.target.closest?.('.menubar-item')) return;
@@ -126,7 +146,25 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (menuKey(e)) { e.preventDefault(); e.stopPropagation(); }
 }, true);
-window.addEventListener('blur', () => closeMenus());
+document.addEventListener('mouseup', (e) => {
+  if (e.button !== 0) return;
+  mouseHeld = false;
+  setTimeout(() => { swallowClickOn = null; }, 0);
+  const pick = dragPick;
+  dragPick = null;
+  if (!pick || !menuStack.length) return;
+  const btn = e.target.closest?.('.menu-item');
+  if (!btn || !menuStack.some((m) => m.el.contains(btn))) return;
+  // a quick click in place just opens the menu; a drag (or a long press) picks what's under the mouse
+  if (Math.hypot(e.clientX - pick.x, e.clientY - pick.y) < 6 && performance.now() - pick.t < 300) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (!btn.disabled) btn.click();
+}, true);
+document.addEventListener('click', (e) => {
+  if (swallowClickOn && swallowClickOn.contains(e.target)) { e.preventDefault(); e.stopPropagation(); swallowClickOn = null; }
+}, true);
+window.addEventListener('blur', () => { mouseHeld = false; dragPick = null; closeMenus(); });
 window.addEventListener('resize', () => closeMenus());
 
 export function contextMenu(e, items) {

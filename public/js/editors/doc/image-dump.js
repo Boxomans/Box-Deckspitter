@@ -197,6 +197,7 @@ export class ImageDump {
     const common = [
       { label: 'Copy as file', icon: 'copy', action: () => this.copyFile(it) },
       { label: 'Copy path', icon: 'link', action: () => { navigator.clipboard.writeText(it.path); toast('Path copied', { timeout: 1200 }); } },
+      { label: 'Compare with…', icon: 'diff', action: () => this.app.compareWith(it.path) },
       { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { const c = [...this.grid.children].find((x) => x.querySelector('.dump-name')?.textContent === it.name); if (!c || !renameInline(c)) this.rename(it); } },
       { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(this.kind, it.name) },
       { sep: true },
