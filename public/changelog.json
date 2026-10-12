@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.23",
+    "date": "2026-10-12",
+    "notes": [
+      "Tool tabs (browser, BoxMail and the rest) no longer show a meaningless \"new\" save light in the status bar.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.22",
     "date": "2026-10-12",
     "notes": [

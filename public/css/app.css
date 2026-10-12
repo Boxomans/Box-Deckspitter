@@ -1313,6 +1313,13 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 #rightrail.rail-empty.peek { width: 30px; border-left-color: var(--line); box-shadow: inset 2px 0 0 var(--accent-line); }
 
 /* F-14F Super Tomcat (easter egg) */
+.tomcat-vol { position: absolute; z-index: 5; width: 250px; padding: 10px 12px; background: rgba(12,16,12,0.96); border: 2px solid #54ff6b; color: #ddd; font-family: ui-monospace, "IBM Plex Mono", Consolas, monospace; font-size: 12px; outline: none; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.tomcat-vol .tv-head { color: #b9ffc0; font-size: 14px; margin-bottom: 6px; }
+.tomcat-vol .tv-row { display: grid; grid-template-columns: 1fr 40px; align-items: center; gap: 2px 8px; padding: 4px 0; }
+.tomcat-vol .tv-name { grid-column: 1 / -1; color: #cfd8cf; }
+.tomcat-vol input[type=range] { width: 100%; accent-color: #54ff6b; }
+.tomcat-vol .tv-pct { text-align: right; color: #9ecf9f; }
+.tomcat-vol .tv-note { margin-top: 6px; color: #ffb36b; font-size: 11px; }
 .tomcat-root { flex: 1; min-height: 0; position: relative; background: #111; overflow: hidden; }
 .tomcat-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; outline: none; cursor: crosshair; }
 .tomcat-hangar { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); outline: none; font-family: ui-monospace, "IBM Plex Mono", Consolas, monospace; }

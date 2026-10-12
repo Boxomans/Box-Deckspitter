@@ -76,7 +76,7 @@ function shortCode(name) { const m = /AIM-(\d+)([A-Z]+)/.exec(name); return m ? 
 export function clock(t) { const m = Math.floor(t / 60); const s = Math.floor(t % 60); const cs = Math.floor((t - Math.floor(t)) * 100); return `${pad2(m)}:${pad2(s)}.${pad2(cs)}`; }
 
 class TomcatGame {
-  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare, speed = 1, onSpeed, onStart } = {}) {
+  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare, onFire, onVolume, speed = 1, onSpeed, onStart } = {}) {
     this.canvas = null;
     this.ctx = null;
     this.onGameOver = onGameOver;
@@ -85,6 +85,8 @@ class TomcatGame {
     this.onEarn = onEarn;
     this.onHangar = onHangar;
     this.onFlare = onFlare;
+    this.onFire = onFire;
+    this.onVolume = onVolume;
     this.auto = auto;
     this.speed = SPEEDS.includes(speed) ? speed : 1;
     this.onSpeed = onSpeed;
@@ -104,11 +106,15 @@ class TomcatGame {
     this.flareBtn = { w: 92, h: 36 };
     this.notchBtn = { w: 92, h: 36 };
     this.flareRect = {};
-    this.restartBtn = { x: 10, y: 10, w: 120, h: 40 };
-    this.pauseBtn = { x: 140, y: 10, w: 96, h: 40 };
-    this.autoBtn = { x: 246, y: 10, w: 96, h: 40 };
-    this.hangarBtn = { x: 352, y: 10, w: 106, h: 40 };
-    this.speedBtn = { x: 468, y: 10, w: 64, h: 40 };
+    // the top row, left to right at full width (layout() squeezes it to fit a narrow window)
+    this.restartBtn = { w: 120, h: 40, size: 18 };
+    this.pauseBtn = { w: 96, h: 40, size: 16 };
+    this.autoBtn = { w: 96, h: 40, size: 15 };
+    this.hangarBtn = { w: 106, h: 40, size: 15 };
+    this.speedBtn = { w: 64, h: 40, size: 16 };
+    this.volBtn = { w: 60, h: 40, size: 14 };
+    this.topRow = [this.restartBtn, this.pauseBtn, this.autoBtn, this.hangarBtn, this.speedBtn, this.volBtn];
+    this.hudLow = false; // score readout moved under the buttons (no room beside them)
     this.contactRegions = [];
     this.reset();
     if (canvas) this.attach(canvas);
@@ -248,6 +254,7 @@ class TomcatGame {
       targetId: sel.obj.id, targetKind: sel.kind, killRadiusKm: card.killRadiusKm, dud: card.dud,
     });
     this.shots++;
+    this.onFire?.();
     inv.count--;
     if (inv.count <= 0 && !inv.regenActive) { inv.regenActive = true; inv.regenT = card.regen; }
     // in range if the missile meets it head-on before running out: it only has to fly d·vm/(vm+vt)
@@ -574,6 +581,13 @@ class TomcatGame {
   }
 
   layout() {
+    const leftW0 = this.W - PANEL_W;
+    const tg = 10, natural = this.topRow.reduce((n, b) => n + (b.nw ?? b.w), 0) + tg * (this.topRow.length - 1);
+    const k = clamp((leftW0 - 20) / natural, 0.45, 1);
+    let bxl = 10;
+    for (const b of this.topRow) { b.nw ??= b.w; b.w = Math.round(b.nw * k); Object.assign(b, { x: bxl, y: 10 }); bxl += b.w + tg * k; }
+    this.topScale = k;
+    this.topEnd = bxl - tg * k;
     const { x, bx, by } = this.scope();
     const sx = Math.max(x + 8, bx - this.selBtns.up.w - 10);
     Object.assign(this.selBtns.up, { x: sx, y: by + 8 });
@@ -606,11 +620,13 @@ class TomcatGame {
     this.drawOwnship();
     this.drawPanel();
     this.drawHud();
-    this.button(this.restartBtn, 'RESTART', false, 18);
-    this.button(this.pauseBtn, !this.started || this.gameOver ? 'START' : this.paused ? 'RESUME' : 'PAUSE', this.paused, 16);
-    this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, 15);
-    this.button(this.hangarBtn, 'HANGAR', !!this.hangarOpen, 15, !this.canHangar());
-    this.button(this.speedBtn, `${this.speed}×`, this.speed > 1, 16);
+    const ts = (b) => Math.max(9, b.size * this.topScale);
+    this.button(this.restartBtn, 'RESTART', false, ts(this.restartBtn));
+    this.button(this.pauseBtn, !this.started || this.gameOver ? 'START' : this.paused ? 'RESUME' : 'PAUSE', this.paused, ts(this.pauseBtn));
+    this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, ts(this.autoBtn));
+    this.button(this.hangarBtn, 'HANGAR', !!this.hangarOpen, ts(this.hangarBtn), !this.canHangar());
+    this.button(this.speedBtn, `${this.speed}×`, this.speed > 1, ts(this.speedBtn));
+    this.button(this.volBtn, 'VOL', !!this.volOpen, ts(this.volBtn));
     this.drawSelectorButtons();
     this.drawFoxButtons();
     this.drawContacts();
@@ -706,9 +722,17 @@ class TomcatGame {
     ctx.fillStyle = '#cfd8cf';
     const best = this.best();
     const bestScore = Math.max(Math.floor(this.score), (this.auto || this.usedAuto ? best.auto?.bestScore : best.bestScore) || 0);
-    ctx.fillText(`SCORE ${Math.floor(this.score).toLocaleString()}   BEST ${bestScore.toLocaleString()}`, 544, 14);
+    const l1 = `SCORE ${Math.floor(this.score).toLocaleString()}   BEST ${bestScore.toLocaleString()}`;
+    const l2 = `SPLASH ${this.splashes}   INT ${this.intercepts}   WAVE ${this.wave()}`;
+    const tw = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width);
+    const sx = this.topEnd + 12;
+    this.hudLow = sx + tw > leftW - 10;
+    if (this.hudLow) { ctx.textAlign = 'right'; this.fit(l1.length > l2.length ? l1 : l2, leftW - 120, 14); }
+    const hx = this.hudLow ? leftW - 12 : sx, hy = this.hudLow ? 58 : 14;
+    ctx.fillText(l1, hx, hy);
     ctx.fillStyle = '#9ecf9f';
-    ctx.fillText(`SPLASH ${this.splashes}   INT ${this.intercepts}   WAVE ${this.wave()}`, 544, 32);
+    ctx.fillText(l2, hx, hy + 18);
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#ffd36b';
     ctx.font = `bold 16px ${MONO}`;
     ctx.fillText(`$${(best.cash || 0).toLocaleString()}`, 14, 58);
@@ -716,13 +740,13 @@ class TomcatGame {
       ctx.textAlign = 'center';
       ctx.font = `bold 18px ${MONO}`;
       ctx.fillStyle = '#c9a8ff';
-      ctx.fillText(`NOTCHING — WEAPONS HOLD ${Math.ceil(this.notchHold)}s`, leftW * 0.45, 92);
+      ctx.fillText(`NOTCHING — WEAPONS HOLD ${Math.ceil(this.notchHold)}s`, leftW * 0.45, 92 + (this.hudLow ? 40 : 0));
     }
     if (this.hostiles.length && !this.gameOver && Math.floor(performance.now() / 300) % 2 === 0) {
       ctx.textAlign = 'center';
       ctx.font = `bold 18px ${MONO}`;
       ctx.fillStyle = '#ff4d4d';
-      ctx.fillText(`MISSILE${this.hostiles.length > 1 ? ` ×${this.hostiles.length}` : ''}`, leftW * 0.45, 66);
+      ctx.fillText(`MISSILE${this.hostiles.length > 1 ? ` ×${this.hostiles.length}` : ''}`, leftW * 0.45, 66 + (this.hudLow ? 40 : 0));
     }
     ctx.restore();
   }
@@ -943,7 +967,7 @@ class TomcatGame {
 
   drawToasts() {
     const { ctx } = this;
-    let y = 84;
+    let y = this.hudLow ? 104 : 84;
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const t = this.toasts[i];
       ctx.save();
@@ -1024,6 +1048,7 @@ class TomcatGame {
     else if (k === 'r') this.reset();
     else if (k === 'a') this.toggleAuto();
     else if (k === 't') this.cycleSpeed();
+    else if (k === 'v') this.onVolume?.(this.volBtn);
     else if (k === 'h') this.onHangar?.();
     else if (k === 'p' || k === ' ' || k === 'escape') { if (k !== 'escape' || !this.paused) this.togglePause(); }
     else return false;
@@ -1040,6 +1065,7 @@ class TomcatGame {
     if (inRect(x, y, this.autoBtn)) return this.toggleAuto();
     if (inRect(x, y, this.hangarBtn)) return this.onHangar?.();
     if (inRect(x, y, this.speedBtn)) return this.cycleSpeed();
+    if (inRect(x, y, this.volBtn)) return this.onVolume?.(this.volBtn);
     if (inRect(x, y, this.selBtns.up)) return this.cycleTarget(-1);
     if (inRect(x, y, this.selBtns.dn)) return this.cycleTarget(1);
     for (const b of this.foxBtns) if (inRect(x, y, b)) { this.foxMode = b.label; return; }
@@ -1085,6 +1111,7 @@ class TomcatGame {
 // While the easter egg is on, one sortie keeps flying for as long as the app runs: full size in its tab, as a tiny
 // radar you can drag anywhere, or folded into the right sidebar. It only stops for the hangar or for P.
 
+const SOUND_FILE = { flare: '/assets/sounds/cm.mp3', missile: '/assets/sounds/missile.mp3' };
 const SIM_STEP = 0.05; // s per update (the old frame loop capped steps at 0.06)
 const MINI_W = 120, MINI_H = 84;
 
@@ -1103,7 +1130,9 @@ export class Flight {
       upgrades: () => app.settings.tomcat?.upgrades || {},
       onEarn: (n) => this.earn(n),
       onHangar: () => this.view?.toggleHangar(),
-      onFlare: () => this.flareSound(),
+      onFlare: () => this.sound('flare'),
+      onFire: () => this.sound('missile'),
+      onVolume: () => this.view?.toggleVolume(),
       speed: app.settings.tomcatSpeed || 1,
       onSpeed: (n) => app.saveSettings({ tomcatSpeed: n }),
       onStart: () => this.launch(),
@@ -1180,12 +1209,20 @@ export class Flight {
     this.view?.refreshStatus();
   }
 
-  /** Only heard while the game is on screen. */
-  flareSound() {
+  /** The game's own volumes (VOL in the game), each on top of the app's sound volume. */
+  volume(kind) { return clamp((this.app.settings.tomcatVolume || {})[kind] ?? 1, 0, 1); }
+
+  /** Only heard while the game is on screen. A busy fight at 3× fires a lot: one launch sound per 120 ms at most. */
+  sound(kind) {
     const s = this.app.settings;
     if (!this.view || s.sounds === false) return;
-    const a = new Audio('/assets/sounds/cm.mp3');
-    a.volume = Math.max(0, Math.min(1, s.soundVolume ?? 0.7));
+    const now = performance.now();
+    if (kind === 'missile' && now - (this.lastLaunch || 0) < 120) return;
+    if (kind === 'missile') this.lastLaunch = now;
+    const v = clamp((s.soundVolume ?? 0.7) * this.volume(kind), 0, 1);
+    if (v <= 0) return;
+    const a = new Audio(SOUND_FILE[kind]);
+    a.volume = v;
     a.play().catch(() => {});
   }
 
@@ -1399,11 +1436,48 @@ export class TomcatEditor extends BaseEditor {
   hide() {
     cancelAnimationFrame(this.raf);
     if (this.hangar) this.closeHangar();
+    if (this.vol) this.closeVolume();
     if (this.flight?.view !== this) return;
     this.flight.view = null;
     this.game.detach();
     this.flight.syncMini();
     this.flight.flushCash();
+  }
+
+  // ---- VOL: the game's sound levels (flares, missile launches)
+
+  toggleVolume() {
+    if (this.vol) return this.closeVolume();
+    const b = this.game.volBtn;
+    const row = (kind, label) => {
+      const pct = h('span', { class: 'tv-pct' });
+      const input = h('input', { type: 'range', min: '0', max: '100', step: '1', value: String(Math.round(this.flight.volume(kind) * 100)) });
+      const show = () => { pct.textContent = `${input.value}%`; };
+      input.addEventListener('input', show);
+      input.addEventListener('change', () => {
+        this.app.saveSettings({ tomcatVolume: { ...(this.app.settings.tomcatVolume || {}), [kind]: Number(input.value) / 100 } });
+        this.flight.sound(kind);
+      });
+      show();
+      return h('label', { class: 'tv-row' }, h('span', { class: 'tv-name' }, label), input, pct);
+    };
+    const note = this.app.settings.sounds === false ? h('div', { class: 'tv-note' }, 'App sounds are off (Settings), so the game is silent.') : null;
+    this.vol = h('div', { class: 'tomcat-vol', tabindex: '-1', style: { left: `${Math.max(8, Math.min(b.x, this.game.W - PANEL_W - 258))}px`, top: `${b.y + b.h + 6}px` } }, // stays off the scope
+      h('div', { class: 'tv-head' }, 'SOUND'), row('flare', 'Chaff / flares'), row('missile', 'Missile launch'), note);
+    this.vol.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key.toLowerCase() === 'v') { e.preventDefault(); e.stopPropagation(); this.closeVolume(); } });
+    this.offVol = (e) => { if (this.vol && !this.vol.contains(e.target) && e.target !== this.canvas) this.closeVolume(); };
+    document.addEventListener('pointerdown', this.offVol, true);
+    this.root.append(this.vol);
+    this.game.volOpen = true;
+    this.vol.focus();
+  }
+
+  closeVolume() {
+    document.removeEventListener('pointerdown', this.offVol, true);
+    this.vol?.remove();
+    this.vol = null;
+    this.game.volOpen = false;
+    this.canvas.focus();
   }
 
   // ---- the hangar: spend $ on upgrades that last between sorties
@@ -1476,7 +1550,7 @@ export class TomcatEditor extends BaseEditor {
   status() {
     const s = this.app.settings.tomcat || {};
     return {
-      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · H hangar (between sorties) · P pause · R restart' }],
+      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · V volume · H hangar (between sorties) · P pause · R restart' }],
       right: [{ text: `high score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()}` }],
     };
   }

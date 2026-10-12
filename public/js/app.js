@@ -158,6 +158,8 @@ const TOP_TOOLS = ['btn-music', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-sho
 // files the video editor can use
 const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
 const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', cut: 'Video editor', secure: 'Secure notes' };
+// tabs that are tools rather than files
+const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'secure', 'tomcat', 'browser'];
 const TOOL_LABEL = { 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
@@ -1109,7 +1111,7 @@ class App {
     const t = this.active;
     document.title = t ? `${t.dirty ? '● ' : ''}${t.title} — Box-DocSpitter` : 'Box-DocSpitter';
     const el = clear($('#doc-title'));
-    const tool = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'secure', 'tomcat', 'browser'].includes(t?.mode) && !t.path;
+    const tool = TOOL_MODES.includes(t?.mode) && !t.path;
     if (t) el.append(...[h('b', {}, t.title), t.path ? h('span', {}, '  ·  ' + dirname(t.path)) : tool ? null : h('span', {}, '  ·  not saved yet')].filter(Boolean));
   }
 
@@ -1129,9 +1131,11 @@ class App {
     }
     const modeBtn = h('button', { class: 'sb-item mode', title: 'Reopen in a different editor' }, (TOOL_OF_MODE[tab.mode] ? this.toolName(TOOL_OF_MODE[tab.mode]) : MODE_LABEL[tab.mode] || 'Loading').toLowerCase());
     modeBtn.addEventListener('click', () => tab.path && showMenu(this.reopenAsItems(tab), { anchor: modeBtn }));
-    L.append(modeBtn,
+    // tools (the game, the browser, BoxMail…) have no file: no saved/new dot, and the tab already shows the name
+    const tool = TOOL_MODES.includes(tab.mode) && !tab.path;
+    L.append(modeBtn, ...(tool ? [] : [
       h('span', { class: 'sb-item', title: tab.dirty ? 'Unsaved changes' : 'Saved' }, h('span', { class: `sb-dot ${tab.dirty ? 'dirty' : ''}` }), tab.dirty ? 'modified' : tab.path ? 'saved' : 'new'),
-      h('span', { class: 'sb-item sb-path', title: tab.path || '' }, tab.path || tab.title));
+      h('span', { class: 'sb-item sb-path', title: tab.path || '' }, tab.path || tab.title)]));
     const st = tab.editor?.status?.() || {};
     const render = (it) => {
       const el = it.action ? h('button', { class: `sb-item ${it.cls || ''}`, title: it.title || '' }) : h('span', { class: `sb-item ${it.cls || ''}`, title: it.title || '' });
