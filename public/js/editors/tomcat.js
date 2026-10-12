@@ -40,13 +40,20 @@ const HOSTILE_MISSILES = {
 // points and $ per kill
 const BOUNTY = { 'J-11': [100, 10], 'J-36': [150, 15], 'PL-15': [50, 5], 'PL-21': [80, 8] };
 const NOTCH_HOLD = 5; // seconds without firing after a notch
+// missiles don't always kill: a target breaks hard as one closes in (the seeker has to out-turn it), and a fuse can dud
+const JINK_KM = 6; // the target sees it coming and breaks
+const AGILITY = { 'J-11': 1, 'J-36': 0.8, 'PL-15': 0.5, 'PL-21': 0.4 };
+const overshootChance = (agility, turnDps) => clamp(0.25 * agility * (20 / turnDps) ** 2, 0.02, 0.6);
+const dudChance = (fuseLevel) => Math.max(0.02, 0.15 - 0.025 * fuseLevel);
+export const SPEEDS = [1, 2, 3];
 const MAGAZINE_STEP = { 'FOX-1': 1, 'FOX-2': 2, 'FOX-3': 1 };
 /** Hangar upgrades: each level costs base·1.6^level. */
 export const UPGRADES = [
   { id: 'reload', name: 'Reload crews', what: 'Missiles come back 10% faster per level', base: 60, max: 5 },
   { id: 'magazine', name: 'Extra rails', what: '+1 AIM-7R, +2 AIM-9X, +1 AIM-54F per level', base: 120, max: 3 },
   { id: 'motor', name: 'Hotter motors', what: 'Missiles fly 8% faster per level', base: 80, max: 5 },
-  { id: 'seeker', name: 'Better seekers', what: 'Missiles turn 10% harder and fuse 15% wider per level', base: 80, max: 5 },
+  { id: 'seeker', name: 'Better seekers', what: 'Missiles turn 10% harder per level: fewer overshoots on jinking targets', base: 80, max: 5 },
+  { id: 'fuse', name: 'Proximity fuses', what: 'Fuses 15% wider and fewer duds per level', base: 80, max: 5 },
   { id: 'reach', name: 'Longer burn', what: 'Missiles reach 10% further per level', base: 100, max: 5 },
   { id: 'flares', name: 'Bigger dispenser', what: '+2 chaff/flares and 15% faster reload per level', base: 90, max: 3 },
   { id: 'notch', name: 'Beam training', what: 'Notch is ready 10% sooner per level', base: 110, max: 5 },
@@ -69,7 +76,7 @@ function shortCode(name) { const m = /AIM-(\d+)([A-Z]+)/.exec(name); return m ? 
 export function clock(t) { const m = Math.floor(t / 60); const s = Math.floor(t % 60); const cs = Math.floor((t - Math.floor(t)) * 100); return `${pad2(m)}:${pad2(s)}.${pad2(cs)}`; }
 
 class TomcatGame {
-  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare } = {}) {
+  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare, speed = 1, onSpeed, onStart } = {}) {
     this.canvas = null;
     this.ctx = null;
     this.onGameOver = onGameOver;
@@ -79,6 +86,10 @@ class TomcatGame {
     this.onHangar = onHangar;
     this.onFlare = onFlare;
     this.auto = auto;
+    this.speed = SPEEDS.includes(speed) ? speed : 1;
+    this.onSpeed = onSpeed;
+    this.onStart = onStart;
+    this.hangarOpen = false; // set by the tab while the hangar is up: holds an automatic restart
     this.best = best || (() => ({}));
     this.W = 0; this.H = 0;
     this.paused = false;
@@ -97,6 +108,7 @@ class TomcatGame {
     this.pauseBtn = { x: 140, y: 10, w: 96, h: 40 };
     this.autoBtn = { x: 246, y: 10, w: 96, h: 40 };
     this.hangarBtn = { x: 352, y: 10, w: 106, h: 40 };
+    this.speedBtn = { x: 468, y: 10, w: 64, h: 40 };
     this.contactRegions = [];
     this.reset();
     if (canvas) this.attach(canvas);
@@ -108,7 +120,9 @@ class TomcatGame {
 
   // ---------------------------------------------------------------- state
 
-  reset() {
+  /** A fresh sortie, waiting on the ramp (or straight into the air with start). */
+  reset({ start = false } = {}) {
+    this.started = false;
     this.bandits = []; this.missiles = []; this.hostiles = [];
     this.selectedId = null; this.selectedKind = 'bandit';
     this.nextId = 1; this.nextMissileId = 1; this.nextHostileId = 1;
@@ -123,13 +137,47 @@ class TomcatGame {
     this.infoMode = null;
     this.toasts.length = 0;
     this.paused = false;
+    if (start) this.start();
   }
+
+  /** Off the ramp: the run starts and the hangar shuts until it's over. */
+  start() {
+    if (this.started || this.hangarOpen) return;
+    if (this.gameOver) return this.reset({ start: true });
+    this.started = true;
+    this.toast('FIGHT’S ON', 1.4, '#8afc96');
+    this.onStart?.();
+  }
+
+  /** The hangar is open on the ramp and between sorties, never mid-run. */
+  canHangar() { return !this.started || !!this.gameOver; }
 
   toast(msg, t = 1.6, color = '#fff') { this.toasts.push({ msg, t, color }); if (this.toasts.length > 8) this.toasts.shift(); }
 
   /** More bandits at once, arriving sooner, the longer you last. */
-  maxBandits() { return Math.min(6, 3 + Math.floor(this.simTime / 90)); }
-  spawnGap() { const k = Math.max(0.45, 1 - this.simTime / 600); return [3 * k, 7 * k]; }
+  // ---- the difficulty curve: it never levels off. A new wave every 90 s, and every wave is worse on every axis.
+  wave() { return 1 + Math.floor(this.simTime / 90); }
+  /** 0 on wave 1, +1 per wave after. */
+  heat() { return this.wave() - 1; }
+  /** One more bandit allowed in the air each wave, with no ceiling. */
+  maxBandits() { return 2 + this.wave(); }
+  /** Gaps shrink to 45% by ~5½ min, then keep shrinking 15% a wave. */
+  spawnGap() {
+    const t = this.simTime;
+    const k = t <= 330 ? 1 - t / 600 : 0.45 * 0.85 ** ((t - 330) / 90);
+    return [3 * k, 7 * k];
+  }
+  /** Bandits fly 5% faster per wave. Their missiles are 4% faster and turn 5% harder per wave. */
+  banditPace() { return 1 + 0.05 * this.heat(); }
+  missilePace() { return 1 + 0.04 * this.heat(); }
+  missileTurn() { return 1 + 0.05 * this.heat(); }
+  /** Targets break harder each wave (more overshoots), so seekers stay worth upgrading. */
+  agility() { return 1 + 0.04 * this.heat(); }
+  /** Launch range grows 3% a wave (never past where they show up). */
+  launchKm(type) { const base = type === 'J-36' ? 160 : 80; return Math.min(type === 'J-36' ? 178 : 116, base * (1 + 0.03 * this.heat())); }
+  /** An extra missile in each salvo every 4 waves (J-11) or 5 waves (J-36), fired at shrinking intervals. */
+  salvo(type) { return type === 'J-36' ? 1 + Math.floor(this.heat() / 5) : 2 + Math.floor(this.heat() / 4); }
+  shotGap(type) { return (type === 'J-36' ? 10 : 8) * Math.max(0.35, 1 - 0.04 * this.heat()); }
 
   spawnBandit() {
     if (this.bandits.length >= this.maxBandits()) return;
@@ -137,8 +185,8 @@ class TomcatGame {
     const distance = rand(pick.spawnMin, pick.spawnMax);
     const b = {
       id: 'B' + this.nextId++, type: pick.name, angle: rand(-AZ_LIMIT, AZ_LIMIT), distance, prevDistance: distance,
-      altitude: rand(MIN_ALT_M, MAX_ALT_M), mach: pick.mach, climb: (Math.random() < 0.5 ? -1 : 1) * rand(5, 20),
-      closure: 0, fired1: false, fired2: false, nextShotAt: null,
+      altitude: rand(MIN_ALT_M, MAX_ALT_M), mach: pick.mach * this.banditPace(), climb: (Math.random() < 0.5 ? -1 : 1) * rand(5, 20),
+      closure: 0, shots: 0, salvo: this.salvo(pick.name), launchKm: this.launchKm(pick.name), nextShotAt: null,
     };
     this.bandits.push(b);
     if (!this.selectedId) { this.selectedId = b.id; this.selectedKind = 'bandit'; }
@@ -195,9 +243,9 @@ class TomcatGame {
     const heading = Math.atan2(tp.x, tp.y);
     this.missiles.push({
       id: 'M' + this.nextMissileId++, code: card.code, name: card.name, guidance: card.guidance,
-      turnRate: rad(card.turnRateDps), speed: card.speedMach * MACH1_KMPS, rMaxKm: card.rMaxKm, activeKm: card.activeKm,
+      turnRate: rad(card.turnRateDps), turnDps: card.turnRateDps, speed: card.speedMach * MACH1_KMPS, rMaxKm: card.rMaxKm, activeKm: card.activeKm,
       state: card.guidance === 'ARH' ? 'inertial' : 'guiding', x: 0, y: 0, heading, rangeKm: 0, bearing: heading, travelled: 0,
-      targetId: sel.obj.id, targetKind: sel.kind, killRadiusKm: card.killRadiusKm,
+      targetId: sel.obj.id, targetKind: sel.kind, killRadiusKm: card.killRadiusKm, dud: card.dud,
     });
     this.shots++;
     inv.count--;
@@ -219,7 +267,8 @@ class TomcatGame {
       regen: base.regen * (1 - 0.1 * (u.reload || 0)),
       speedMach: base.speedMach * (1 + 0.08 * (u.motor || 0)),
       turnRateDps: base.turnRateDps * (1 + 0.1 * (u.seeker || 0)),
-      killRadiusKm: KILL_RADIUS_KM * (1 + 0.15 * (u.seeker || 0)),
+      killRadiusKm: KILL_RADIUS_KM * (1 + 0.15 * (u.fuse || 0)),
+      dud: dudChance(u.fuse || 0),
       rMaxKm: Math.round(base.rMaxKm * (1 + 0.1 * (u.reach || 0))),
     };
   }
@@ -270,7 +319,9 @@ class TomcatGame {
 
   /** Points and $ for a kill. */
   award(what) {
-    const [pts, cash] = BOUNTY[what] || [50, 5];
+    // later waves pay more (+15% a wave), so the money keeps up with the hangar prices
+    const pay = 1 + 0.15 * this.heat();
+    const [pts, cash] = (BOUNTY[what] || [50, 5]).map((n) => Math.round(n * pay));
     this.score += pts;
     this.earned += cash;
     this.onEarn?.(cash);
@@ -286,12 +337,33 @@ class TomcatGame {
     this.onAuto?.(this.auto);
   }
 
+  /** 1x -> 2x -> 3x -> 1x: the whole sim runs faster (Flight.tick takes more steps). */
+  cycleSpeed() {
+    this.speed = SPEEDS[(SPEEDS.indexOf(this.speed) + 1) % SPEEDS.length];
+    this.toast(this.speed > 1 ? `FAST FORWARD ${this.speed}×` : 'NORMAL SPEED', 1.4, '#9ecf9f');
+    this.onSpeed?.(this.speed);
+  }
+
+  /** Seconds until an inbound missile reaches us. */
+  timeToImpact(m) { return (m.distance - 1) / m.speed; }
+
+  /**
+   * Defence while auto flies: chaff/flares while any missile is under ~6 s out (each one is a 10% roll), and a notch
+   * once one is under ~1.5 s out, or early when three or more are inbound. Notching holds fire, so it's the last resort.
+   */
+  autoDefend() {
+    if (!this.hostiles.length) return;
+    const soonest = Math.min(...this.hostiles.map((m) => this.timeToImpact(m)));
+    if (this.notchCd <= 0 && (soonest <= 1.5 || (this.hostiles.length >= 3 && soonest <= 4))) { this.toast('AUTO: NOTCH', 1.2, '#c9a8ff'); this.notch(); return; }
+    if (soonest <= 6 && this.flareCd <= 0 && this.flares > 0) this.flare();
+  }
+
   /** Seconds until a track becomes dangerous: a bandit reaching its launch range (or the merge), a missile reaching us. */
   deadline(kind, o, d, vt) {
     if (kind === 'hostile') return (d - 1) / vt;
     const merge = (d - KILL_RANGE_KM) / vt;
-    if (!o.fired1) { const t = (d - (o.type === 'J-36' ? 160 : 80)) / vt; return t > 0 ? t : merge; }
-    if (o.type === 'J-11' && !o.fired2) return Math.min(merge, Math.max(0, (o.nextShotAt ?? 0) - this.simTime));
+    if (!o.shots) { const t = (d - o.launchKm) / vt; return t > 0 ? t : merge; }
+    if (o.shots < o.salvo) return Math.min(merge, Math.max(0, (o.nextShotAt ?? 0) - this.simTime));
     return merge;
   }
 
@@ -320,7 +392,7 @@ class TomcatGame {
   autopilot(dt) {
     this.autoCd = Math.max(0, this.autoCd - dt);
     if (this.autoCd > 0) return;
-    const covered = new Set(this.missiles.map((m) => m.targetId));
+    const covered = new Set(this.missiles.filter((m) => !m.lost).map((m) => m.targetId));
     const plans = this.tracksSorted()
       .filter((t) => !covered.has(t.obj.id))
       .map((t) => {
@@ -343,7 +415,7 @@ class TomcatGame {
       const m = this.missiles[i];
       const tp = this.posOf(m.targetKind, m.targetId);
       const px = m.x, py = m.y;
-      if (tp) {
+      if (tp && !m.lost) {
         const los = Math.atan2(tp.x - m.x, tp.y - m.y);
         const maxStep = m.turnRate * dt;
         m.heading = angNorm(m.heading + clamp(angNorm(los - m.heading), -maxStep, maxStep));
@@ -354,8 +426,14 @@ class TomcatGame {
       m.rangeKm = m.y;
       m.bearing = Math.atan2(m.x, m.y);
       if (m.guidance === 'ARH' && m.state !== 'active' && m.rangeKm >= m.activeKm) { m.state = 'active'; this.toast('PITBULL', 1.2, '#8fbfff'); }
-      if (m.travelled >= m.rMaxKm) { this.missiles.splice(i, 1); this.toast('MISSILE LOST (range)', 1.6, '#aaa'); continue; }
-      if (!tp) continue;
+      if (m.travelled >= m.rMaxKm) { this.missiles.splice(i, 1); if (!m.lost) this.toast('MISSILE LOST (range)', 1.6, '#aaa'); continue; }
+      if (!tp || m.lost) continue;
+      // the target breaks hard as the missile closes: a seeker that can't turn with it overshoots
+      if (!m.jinked && Math.hypot(tp.x - m.x, tp.y - m.y) <= JINK_KM) {
+        m.jinked = true;
+        const t = (m.targetKind === 'bandit' ? this.bandits : this.hostiles).find((x) => x.id === m.targetId);
+        if (Math.random() < overshootChance((AGILITY[t?.type || t?.wpn] ?? 0.7) * this.agility(), m.turnDps)) { m.lost = true; this.toast(`${m.id} OVERSHOT ${m.targetId}`, 1.8, '#aaa'); continue; }
+      }
       // continuous proximity fuse: closest approach during this step, in the target's frame
       const tpPrev = this.posOf(m.targetKind, m.targetId, true) || tp;
       const R0x = px - tpPrev.x, R0y = py - tpPrev.y;
@@ -364,6 +442,7 @@ class TomcatGame {
       const denom = Vx * Vx + Vy * Vy;
       const u = denom > 1e-9 ? clamp(-(R0x * Vx + R0y * Vy) / denom, 0, 1) : 0;
       if (Math.hypot(R0x + u * Vx, R0y + u * Vy) >= m.killRadiusKm) continue;
+      if (Math.random() < m.dud) { m.lost = true; this.toast(`${m.id} DUD — fuse failed`, 1.8, '#aaa'); continue; }
       this.missiles.splice(i, 1);
       if (m.targetKind === 'bandit') {
         const bi = this.bandits.findIndex((b) => b.id === m.targetId);
@@ -380,7 +459,7 @@ class TomcatGame {
     const x = Math.sin(b.angle) * b.distance, y = b.distance;
     const heading = Math.atan2(-x, -y);
     this.hostiles.push({
-      id: 'H' + this.nextHostileId++, wpn, speed: spec.speedMach * MACH1_KMPS, turnRate: rad(spec.turnRateDps), heading,
+      id: 'H' + this.nextHostileId++, wpn, speed: spec.speedMach * MACH1_KMPS * this.missilePace(), turnRate: rad(spec.turnRateDps * this.missileTurn()), heading,
       x, y, px: x, py: y, bearing: heading, rangeKm: y, altitude: b.altitude, distance: Math.hypot(x, y),
     });
     this.toast(`${b.id} FOX (${wpn})`, 1.8, '#ff8080');
@@ -412,10 +491,11 @@ class TomcatGame {
     if (this.paused) return;
     for (let i = this.toasts.length - 1; i >= 0; i--) if ((this.toasts[i].t -= dt) <= 0) this.toasts.splice(i, 1);
     if (this.gameOver) {
-      // automatic mode flies again on its own
-      if (this.auto) { this.restartIn -= dt; if (this.restartIn <= 0) this.reset(); }
+      // automatic mode flies again on its own (not while you're shopping in the hangar)
+      if (this.auto && !this.hangarOpen) { this.restartIn -= dt; if (this.restartIn <= 0) this.reset({ start: true }); }
       return;
     }
+    if (!this.started) return;
     this.simTime += dt;
     this.score += dt; // a point a second
     this.spawnT += dt;
@@ -428,11 +508,10 @@ class TomcatGame {
       b.altitude += b.climb * dt;
       if (b.altitude < MIN_ALT_M) { b.altitude = MIN_ALT_M; b.climb = Math.abs(b.climb); }
       if (b.altitude > MAX_ALT_M) { b.altitude = MAX_ALT_M; b.climb = -Math.abs(b.climb); }
-      if (b.type === 'J-36') {
-        if (!b.fired1 && b.distance <= 160) { this.spawnHostile(b, 'PL-21'); b.fired1 = true; }
-      } else {
-        if (!b.fired1 && b.distance <= 80) { this.spawnHostile(b, 'PL-15'); b.fired1 = true; b.nextShotAt = this.simTime + 8; }
-        if (b.fired1 && !b.fired2 && this.simTime >= (b.nextShotAt ?? Infinity)) { this.spawnHostile(b, 'PL-15'); b.fired2 = true; }
+      if (b.shots < b.salvo && (b.shots ? this.simTime >= b.nextShotAt : b.distance <= b.launchKm)) {
+        this.spawnHostile(b, b.type === 'J-36' ? 'PL-21' : 'PL-15');
+        b.shots++;
+        b.nextShotAt = this.simTime + this.shotGap(b.type);
       }
     }
     // targets move first, so the missiles' proximity fuse sees where they went this step
@@ -440,9 +519,7 @@ class TomcatGame {
     this.updateMissiles(dt);
     this.updateFlares(dt);
     if (this.auto && !this.gameOver) {
-      // last-ditch defence: keep popping flares while a missile is about to arrive
-      if (this.hostiles.some((m) => m.distance <= 15)) this.flare();
-      if (this.notchCd <= 0 && this.hostiles.some((m) => m.distance <= 5)) this.notch();
+      this.autoDefend();
       if (this.notchHold <= 0) this.autopilot(dt);
     }
 
@@ -530,9 +607,10 @@ class TomcatGame {
     this.drawPanel();
     this.drawHud();
     this.button(this.restartBtn, 'RESTART', false, 18);
-    this.button(this.pauseBtn, this.paused ? 'RESUME' : 'PAUSE', this.paused, 16);
+    this.button(this.pauseBtn, !this.started || this.gameOver ? 'START' : this.paused ? 'RESUME' : 'PAUSE', this.paused, 16);
     this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, 15);
-    this.button(this.hangarBtn, 'HANGAR', false, 15);
+    this.button(this.hangarBtn, 'HANGAR', !!this.hangarOpen, 15, !this.canHangar());
+    this.button(this.speedBtn, `${this.speed}×`, this.speed > 1, 16);
     this.drawSelectorButtons();
     this.drawFoxButtons();
     this.drawContacts();
@@ -540,12 +618,14 @@ class TomcatGame {
     this.drawMissileInfo();
     this.drawToasts();
     if (this.gameOver) this.drawGameOver();
+    else if (!this.started) this.drawReady();
     else if (this.paused) this.drawPaused();
   }
 
-  button(r, label, active, size = 13) {
+  button(r, label, active, size = 13, dim = false) {
     const { ctx } = this;
     ctx.save();
+    if (dim) ctx.globalAlpha = 0.35;
     ctx.fillStyle = active ? '#2e5a2e' : '#1e1e1e';
     ctx.strokeStyle = active ? '#9f9' : '#777';
     ctx.lineWidth = 2;
@@ -626,9 +706,9 @@ class TomcatGame {
     ctx.fillStyle = '#cfd8cf';
     const best = this.best();
     const bestScore = Math.max(Math.floor(this.score), (this.auto || this.usedAuto ? best.auto?.bestScore : best.bestScore) || 0);
-    ctx.fillText(`SCORE ${Math.floor(this.score).toLocaleString()}   BEST ${bestScore.toLocaleString()}`, 470, 14);
+    ctx.fillText(`SCORE ${Math.floor(this.score).toLocaleString()}   BEST ${bestScore.toLocaleString()}`, 544, 14);
     ctx.fillStyle = '#9ecf9f';
-    ctx.fillText(`SPLASH ${this.splashes}   INT ${this.intercepts}   WAVE ${this.maxBandits() - 2}`, 470, 32);
+    ctx.fillText(`SPLASH ${this.splashes}   INT ${this.intercepts}   WAVE ${this.wave()}`, 544, 32);
     ctx.fillStyle = '#ffd36b';
     ctx.font = `bold 16px ${MONO}`;
     ctx.fillText(`$${(best.cash || 0).toLocaleString()}`, 14, 58);
@@ -684,7 +764,7 @@ class TomcatGame {
       const my = by + BSCOPE_SIZE - m.rangeKm * kmToPx;
       const mx = this.scopeX(m.rangeKm, m.bearing, bx);
       m._sx = mx; m._sy = my;
-      ctx.fillStyle = '#4aa3ff'; ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = m.lost ? '#5a6470' : '#4aa3ff'; ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI * 2); ctx.fill();
       if (m.guidance === 'ARH' && m.state === 'active') { ctx.strokeStyle = '#8fbfff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2); ctx.stroke(); }
       if (this.hoveredMissileId === m.id) {
         const label = `${m.id} ${shortCode(m.name)}`;
@@ -756,7 +836,7 @@ class TomcatGame {
       ctx.fillStyle = isBandit ? '#fff' : '#ffb3b3';
       this.fit(line, PANEL_W - MARGIN * 2 - 18, 12); // room on the right for the missile-on-it dot
       ctx.fillText(line, x + MARGIN, y);
-      if (this.missiles.some((m) => m.targetId === o.id)) {
+      if (this.missiles.some((m) => m.targetId === o.id && !m.lost)) {
         const dx = x + PANEL_W - MARGIN - 8, dy = y - 4;
         ctx.fillStyle = '#4aa3ff'; ctx.beginPath(); ctx.arc(dx, dy, 4, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#8fbfff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(dx, dy, 6, 0, Math.PI * 2); ctx.stroke();
@@ -824,6 +904,7 @@ class TomcatGame {
       `Type: ${m.guidance === 'ARH' ? 'Active RADAR' : m.guidance === 'IR' ? 'IR' : 'Semi-active/IR terminal'}`,
       `Speed: Mach ${m.speedMach.toFixed(1)} (~${(m.speedMach * MACH1_KMPS).toFixed(2)} km/s)`,
       `Range: ${m.rMaxKm} km (${(m.rMaxKm / KM_PER_NM).toFixed(0)} nm)`,
+      `Turn: ${Math.round(m.turnRateDps)}°/s · fuse ${Math.round(m.killRadiusKm * 1000)} m · dud ${Math.round(m.dud * 100)}%`,
       `Reload: ${m.regen}s per round once empty`,
     ];
     const notes = this.wrap(m.notes, w - 2 * padX, `12px ${MONO}`);
@@ -902,7 +983,7 @@ class TomcatGame {
         [g.reason, '#ff8080'],
         [`Auto survived ${clock(g.time)}   ·   score ${g.score.toLocaleString()}   ·   +$${g.earned}`],
         [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
-        [this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}…` : 'R or RESTART to fly again', '#888'],
+        [this.hangarOpen ? 'Holding while the hangar is open' : this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}… · H hangar` : 'Space or START to fly again · H hangar', '#888'],
       ], '#ff4d4d');
       return;
     }
@@ -913,20 +994,26 @@ class TomcatGame {
       [`Survived ${clock(g.time)}`],
       [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
       [`High score ${Math.max(g.score, b.bestScore || 0).toLocaleString()}   ·   best time ${clock(Math.max(g.time, b.bestTime || 0))}`, '#9ecf9f'],
-      ['R or RESTART to fly again', '#888'],
+      ['Space or START to fly again · H hangar', '#888'],
     ], '#ff4d4d');
   }
 
   drawPaused() {
-    this.card('PAUSED', [['P or Space to resume', '#ddd'], ['F fire · 1 2 3 weapon · ↑ ↓ / Tab target', '#888'], ['X flare · N notch · A auto · H hangar · R restart', '#888']], '#9ecf9f');
+    this.card('PAUSED', [['P or Space to resume', '#ddd'], ['F fire · 1 2 3 weapon · ↑ ↓ / Tab target', '#888'], ['X flare · N notch · A auto · T speed · R restart', '#888']], '#9ecf9f');
+  }
+
+  drawReady() {
+    if (this.hangarOpen) return;
+    this.card('READY', [['Space, Enter or START to take off', '#ddd'], ['H hangar: upgrades are bought between sorties', '#888'], ['A auto · T speed', '#888']], '#8afc96');
   }
 
   // ---------------------------------------------------------------- input
 
-  togglePause() { if (!this.gameOver) this.paused = !this.paused; }
+  togglePause() { if (!this.gameOver && this.started) this.paused = !this.paused; }
 
   key(e) {
     const k = e.key.toLowerCase();
+    if ((!this.started || this.gameOver) && (k === ' ' || k === 'enter')) { if (!this.hangarOpen) this.start(); return true; }
     if (k === 'f') this.fire();
     else if (k === 'x') this.flare();
     else if (k === 'n') this.notch();
@@ -936,6 +1023,7 @@ class TomcatGame {
     else if (k === 'tab') this.cycleTarget(-1);
     else if (k === 'r') this.reset();
     else if (k === 'a') this.toggleAuto();
+    else if (k === 't') this.cycleSpeed();
     else if (k === 'h') this.onHangar?.();
     else if (k === 'p' || k === ' ' || k === 'escape') { if (k !== 'escape' || !this.paused) this.togglePause(); }
     else return false;
@@ -948,9 +1036,10 @@ class TomcatGame {
     const { x, y } = this.local(e);
     this.layout();
     if (inRect(x, y, this.restartBtn)) return this.reset();
-    if (inRect(x, y, this.pauseBtn)) return this.togglePause();
+    if (inRect(x, y, this.pauseBtn)) return !this.started || this.gameOver ? this.start() : this.togglePause();
     if (inRect(x, y, this.autoBtn)) return this.toggleAuto();
     if (inRect(x, y, this.hangarBtn)) return this.onHangar?.();
+    if (inRect(x, y, this.speedBtn)) return this.cycleSpeed();
     if (inRect(x, y, this.selBtns.up)) return this.cycleTarget(-1);
     if (inRect(x, y, this.selBtns.dn)) return this.cycleTarget(1);
     for (const b of this.foxBtns) if (inRect(x, y, b)) { this.foxMode = b.label; return; }
@@ -1002,6 +1091,9 @@ const MINI_W = 120, MINI_H = 84;
 export class Flight {
   constructor(app) {
     this.app = app;
+    // fuses used to come with seekers: pilots who bought seekers keep those levels as fuses too
+    const t = app.settings.tomcat;
+    if (t?.upgrades?.seeker && t.upgrades.fuse == null) app.saveSettings({ tomcat: { ...t, upgrades: { ...t.upgrades, fuse: t.upgrades.seeker } } });
     this.view = null; // the TomcatEditor drawing it full size, while that tab is the one on screen
     this.game = new TomcatGame(null, {
       best: () => app.settings.tomcat || {},
@@ -1012,6 +1104,9 @@ export class Flight {
       onEarn: (n) => this.earn(n),
       onHangar: () => this.view?.toggleHangar(),
       onFlare: () => this.flareSound(),
+      speed: app.settings.tomcatSpeed || 1,
+      onSpeed: (n) => app.saveSettings({ tomcatSpeed: n }),
+      onStart: () => this.launch(),
     });
     // a timer, not animation frames: those stop when the window is minimized. A throttled timer catches up in steps.
     this.last = performance.now();
@@ -1022,11 +1117,21 @@ export class Flight {
     document.addEventListener('keydown', this.onKey);
     window.addEventListener('resize', this.onResize);
     this.syncMini();
+    if (this.game.auto) this.game.start(); // automatic mode keeps flying from start-up
+  }
+
+  /** The first take-off: the top-bar button steps aside for the radar. */
+  launch() {
+    if (this.launched) return;
+    this.launched = this.app.tomcatLaunched = true;
+    const btn = document.getElementById('btn-tomcat');
+    if (btn) btn.hidden = true;
+    this.syncMini();
   }
 
   tick() {
     const now = performance.now();
-    let left = Math.min(600, (now - this.last) / 1000); // asleep longer than 10 min: that time is lost
+    let left = Math.min(600, (now - this.last) / 1000) * this.game.speed; // asleep longer than 10 min: that time is lost
     this.last = now;
     while (left > 1e-6) { const d = Math.min(SIM_STEP, left); this.game.update(d); left -= d; }
   }
@@ -1037,6 +1142,7 @@ export class Flight {
     document.removeEventListener('keydown', this.onKey);
     window.removeEventListener('resize', this.onResize);
     this.mini.remove();
+    this.app.tomcatLaunched = false;
     this.app.syncRail?.();
     return this.flushCash();
   }
@@ -1120,7 +1226,13 @@ export class Flight {
 
   /** Folded: always in the sidebar. Floating: only while the game isn't on screen full size. */
   syncMini() {
-    const docked = !!this.miniState().docked;
+    if (!this.launched) {
+      cancelAnimationFrame(this.miniRaf);
+      this.mini.remove();
+      this.app.syncRail?.();
+      return;
+    }
+    const docked = this.miniState().docked ?? true;
     this.mini.classList.toggle('docked', docked);
     this.mini.title = docked
       ? 'F-14F Super Tomcat · click to open · drag it out to float it · P pauses'
@@ -1218,7 +1330,7 @@ export class Flight {
     ctx.strokeStyle = 'rgba(120,220,120,.35)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(...at(-AZ_LIMIT, RADAR_RANGE_KM)); ctx.moveTo(ox, oy); ctx.lineTo(...at(AZ_LIMIT, RADAR_RANGE_KM)); ctx.stroke();
     for (const k of docked ? [1] : [1 / 3, 2 / 3, 1]) { ctx.beginPath(); ctx.arc(ox, oy, R * k, -Math.PI / 2 - AZ_LIMIT, -Math.PI / 2 + AZ_LIMIT); ctx.stroke(); }
-    if (!g.paused && !g.gameOver) {
+    if (!g.paused && !g.gameOver && g.started) {
       const sweep = Math.sin(performance.now() / 700) * AZ_LIMIT;
       ctx.strokeStyle = 'rgba(140,255,140,.25)'; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(...at(sweep, RADAR_RANGE_KM)); ctx.stroke();
     }
@@ -1226,6 +1338,9 @@ export class Flight {
     for (const b of g.bandits) { ctx.fillStyle = b.type === 'J-36' ? '#ffd27a' : '#8ef08e'; ctx.beginPath(); ctx.arc(...at(b.angle, b.distance), dot, 0, Math.PI * 2); ctx.fill(); }
     const blink = Math.floor(performance.now() / 250) % 2 === 0;
     for (const m of g.hostiles) { ctx.fillStyle = blink ? '#ff4d4d' : '#ff9a9a'; ctx.beginPath(); ctx.arc(...at(m.bearing, m.distance), dot, 0, Math.PI * 2); ctx.fill(); }
+    // ours: blue, like on the B-scope
+    ctx.fillStyle = '#4aa3ff';
+    for (const m of g.missiles) if (!m.lost) { ctx.beginPath(); ctx.arc(...at(m.bearing, Math.hypot(m.x, m.y)), dot * 0.75, 0, Math.PI * 2); ctx.fill(); }
     ctx.fillStyle = '#cfe8cf'; ctx.beginPath(); ctx.moveTo(ox, oy - (docked ? 3 : 5)); ctx.lineTo(ox - (docked ? 2 : 3), oy); ctx.lineTo(ox + (docked ? 2 : 3), oy); ctx.fill();
     // nearest enemy: a missile beats a bandit for attention at the same range
     let near = null;
@@ -1234,9 +1349,10 @@ export class Flight {
     const km = near ? `${near.d < 10 ? near.d.toFixed(1) : Math.round(near.d)}km` : '';
     let label;
     if (g.gameOver) label = g.auto ? `DOWN · ${Math.max(0, Math.ceil(g.restartIn))}s` : 'DOWN';
+    else if (!g.started) label = 'READY';
     else if (g.paused) label = 'PAUSED';
     else if (!near) label = 'CLEAR';
-    else label = docked ? km : `${near.msl ? 'MSL' : 'BANDIT'} ${km}`;
+    else label = docked ? km : `${near.msl ? 'MSL' : 'BANDIT'} ${km}${g.speed > 1 ? ` ${g.speed}×` : ''}`;
     this.miniDist.textContent = label;
     this.miniDist.classList.toggle('threat', !!near?.msl && !g.paused && !g.gameOver);
     this.miniDist.classList.toggle('down', !!g.gameOver);
@@ -1295,8 +1411,8 @@ export class TomcatEditor extends BaseEditor {
   toggleHangar() {
     if (this.hangar) return this.closeHangar();
     const g = this.game;
-    this.resumeAfterHangar = !g.paused && !g.gameOver;
-    if (!g.gameOver) g.paused = true;
+    if (!g.canHangar()) { g.toast('HANGAR OPENS BETWEEN SORTIES', 1.6, '#ffb36b'); return; }
+    g.hangarOpen = true;
     this.hangar = h('div', { class: 'tomcat-hangar', tabindex: '-1' });
     this.hangar.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' || e.key.toLowerCase() === 'h') { e.preventDefault(); e.stopPropagation(); this.closeHangar(); }
@@ -1309,8 +1425,7 @@ export class TomcatEditor extends BaseEditor {
   closeHangar() {
     this.hangar?.remove();
     this.hangar = null;
-    if (this.resumeAfterHangar) this.game.paused = false;
-    this.resumeAfterHangar = false;
+    this.game.hangarOpen = false;
     this.canvas.focus();
   }
 
@@ -1361,7 +1476,7 @@ export class TomcatEditor extends BaseEditor {
   status() {
     const s = this.app.settings.tomcat || {};
     return {
-      left: [{ text: 'F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · H hangar · P pause · R restart' }],
+      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · H hangar (between sorties) · P pause · R restart' }],
       right: [{ text: `high score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()}` }],
     };
   }

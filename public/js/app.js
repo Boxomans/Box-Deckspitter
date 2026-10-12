@@ -324,7 +324,7 @@ class App {
   /** The F-14 button shows, and the sortie flies, only while the easter egg is turned on (Settings → Easter eggs). */
   syncTomcat() {
     const on = !!this.settings.tomcatEnabled;
-    $('#btn-tomcat').hidden = !on;
+    $('#btn-tomcat').hidden = !on || !!this.tomcatLaunched; // after the first take-off the radar stands in for it
     $('#btn-tomcat').title = 'F-14F Super Tomcat · P pauses · drag or flick it to the right sidebar to dock it there';
     if (on) this.tomcatFlight();
     else {
