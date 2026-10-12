@@ -1,10 +1,11 @@
 # BOX//DOCSPITTER
 
 A self-hosted document workstation that runs entirely on your PC: a Word-style editor, a PDF editor and
-form filler, a notepad, a code/config editor, spreadsheets, images, a video trimmer, a video grabber,
+form filler, a notepad, a code/config editor, spreadsheets, a layered image editor, offline OCR, a file
+compare tool, a video trimmer, a video grabber, Gmail, a YouTube/Spotify-to-MP3 tool with a music player,
 folder workspaces and a disk-space explorer. Everything is served from `127.0.0.1`. Your files stay on
-this machine. The only optional exceptions are the ones you switch on yourself (Ask Claude, Discord status,
-BoxVidKlep downloads).
+this machine. The only exceptions are the ones you switch on yourself (Ask Claude, Discord status, BoxMail,
+downloads, update checks).
 
 ## Start it
 
@@ -13,6 +14,7 @@ BoxVidKlep downloads).
 | **Box-DocSpitter.vbs** | Starts the app in its own window, with no console. Drag files onto it to open them. |
 | **Create Shortcuts.bat** | Adds Box-DocSpitter to your Desktop and Start menu, with its icon. Run it again after moving the folder. |
 | **Box-DocSpitter (with console).bat** | Same as the `.vbs`, but shows the server log. |
+| **Restore previous version.bat** | Puts back the version from before the last in-app update. Works even if the app won't start. |
 
 The app opens in its own window (built on Electron, in `node_modules/electron`), with its own taskbar icon
 and no browser bars. Closing the window stops the server. `npm start` runs the server alone at
@@ -32,13 +34,31 @@ shows up in "Open with". Windows doesn't let apps make themselves the default, s
 Settings → Default apps on Box-DocSpitter's page, where you click **Set default**. **Remove** undoes all of
 it. If you move the folder, choose the file types again to update the paths.
 
+## Updates
+
+**Settings → Updates → Check for updates** looks at this GitHub repo for a newer version and shows what's
+new. **Download** fetches it and checks every file for errors first; **Restart & install** installs it.
+
+- **Your stuff is never touched:** `data/` (settings, keys, history), the three dumps and `node_modules`
+  are left alone. So is the small boot file that does the installing (`electron/main.js`).
+- **It can't leave you with a broken app:** every replaced file is backed up first. If the new version's
+  server crashes, or the app doesn't finish starting within 90 seconds, the previous version is put back
+  and restarted automatically, and you're told why.
+- **Going back by hand:** **Go back to 1.0.x** in the same place, or `Restore previous version.bat` (needs
+  only Windows, so it works even if the app won't open).
+- **Not installed from inside the app:** updates that change the boot file or need new libraries say so,
+  and are installed by copying the new version over instead.
+- **What's new** opens once after every update (notes live in `public/changelog.json`).
+- **Private repo?** Paste a read-only GitHub token in Settings → Updates. It's kept in `data/secrets.json`.
+- A git checkout (a copy with a `.git` folder) is never updated from inside the app. Use `git pull`.
+
 ## Credits
 
 - UI sound effects are from [Pixabay](https://pixabay.com), used under the Pixabay Content License. They
   aren't covered by the code's license. See `public/assets/sounds/SOUNDS-LICENSE.txt`.
-- Built on pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, Electron, nodemailer,
-  ImapFlow, mailparser and the Anthropic SDK (installed by npm under their own licenses). It also uses
-  yt-dlp and ffmpeg if you install them.
+- Built on pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, tesseract.js, Electron,
+  nodemailer, ImapFlow, mailparser and the Anthropic SDK (installed by npm under their own licenses). It also
+  uses yt-dlp and ffmpeg if you install them.
 
 ## Getting it from GitHub
 
@@ -63,6 +83,8 @@ Everything the app stores lives in `data\`, including Electron's cache. Nothing 
 Before handing a copy to someone else, use **Settings → Reset → Reset to clean state**. It erases settings,
 recent files and spaces, drafts, version history, your API key, Discord lines, form-fill info and caches, and
 optionally the image dump. Then it restarts the app as a fresh copy. Your own files elsewhere are never touched.
+To update a copy that's older than 1.0.3 (before the in-app updater existed), copy the new version over it
+once, keeping its `data\` and dump folders. From then on it updates itself from Settings → Updates.
 Needs Windows 10 or 11 (64-bit). PDF export uses Edge if it's installed, otherwise the app window's own
 renderer. If `node_modules` wasn't copied, the launcher offers to download it, which needs Node.js and internet
 once.
@@ -143,10 +165,17 @@ Emails display with no scripts and remote images (tracking pixels) blocked until
 `.eml` files open in BoxMail too, no account needed.
 
 **BoxTape** Paste a YouTube playlist (or an album, or a single video) and pick the tracks. They're saved as
-MP3s, with title, artist and cover art, into `audio-dump/` for the ♪ player, one at a time with
-per-track progress. A track that fails is skipped and listed. BoxVidKlep also has an **MP3** button on every
-video, and a bulk **→ MP3** button, for the same thing. Needs yt-dlp and ffmpeg. Only download music you
-have the right to keep.
+MP3s, with title, artist and cover art, into `audio-dump/` for the ♪ player, 1–6 at a time with per-track
+progress. A track that fails is skipped and listed. BoxVidKlep also has an **MP3** button on every video,
+and a bulk **→ MP3** button, for the same thing. Needs yt-dlp and ffmpeg. Only download music you have the
+right to keep.
+- **Spotify links** (playlist, album or song) work too. Spotify's audio is copy-protected, so BoxTape reads
+  the track list and finds each song on YouTube: the closest match by length (usually within a couple of
+  seconds), title and channel, avoiding live versions, covers, remixes, sped-up/slowed and karaoke unless
+  the Spotify title says so. Songs with no close match are skipped rather than guessed. Files are named
+  `Artist - Title.mp3` with Spotify's tags. Songs already in your audio dump start unticked.
+- Up to 100 songs per Spotify link need no setup. For longer playlists, BoxTape links to a free Spotify
+  developer key (kept in `data/secrets.json`). Playlists made by Spotify itself stop at 100 either way.
 
 **Image (BoxPaint)** Start something → Image. A lightweight Paint.NET-style editor.
 - **Tools:** layers (add, duplicate, delete, reorder, hide, opacity, merge down), brush, eraser,
@@ -168,6 +197,12 @@ open a scanned PDF (each page is read).
   named after the file.
 - **Where else:** image dump pictures have **Read text (BoxScribe)** in their Shift+right-click menu.
 - **Privacy:** uses tesseract.js with English data shipped in `node_modules`. Nothing is uploaded.
+
+**BoxDiff** Compare two files side by side (Tools → BoxDiff, or right-click a file → **Compare with…**).
+Removed lines are red, added lines green, and the exact changed words are highlighted. Prev/next change
+(F7 / Shift+F7), inline view, ignore spaces and wrap. Text and code compare as they are; Word, OpenDocument,
+RTF, PDF and spreadsheets compare by their text; two pictures compare pixel by pixel with the differences
+highlighted. Drop two files on it, one on each half, or pick an open tab or a dump file.
 
 **Binary files** A fast hex viewer that identifies the file type.
 
@@ -192,6 +227,13 @@ open a scanned PDF (each page is read).
 ## Other handy bits
 
 - **Ctrl+Shift+P** command palette · **Ctrl+E** quick open · **F1** all shortcuts · **F11** focus mode
+- **Hover keys**: point at a name and press **F2** to rename it in place, **Del** to remove it. Works on dump
+  items, BoxPaint layers, songs, files in the file panel and BoxSpaces, and the home screen's cards, title,
+  tagline and logo (F2 on the logo picks a new picture; **Ctrl+F2** puts the original back). Del never
+  fires while you're typing in a text box, and everything it removes is recoverable (`.removed` folders,
+  the Recycle Bin, or Ctrl+Z for layers).
+- **Menus**: press on a menu, drag to an item and let go to pick it, submenus included.
+- **Mouse back / forward** (buttons 4 and 5) step between tabs, or between folders over the file panel.
 - **Version history**: every save keeps the previous version (File → Version history).
 - **Discord status** (Settings → Discord): off by default. Choose automatic lines ("editing a .pdf",
   "changing a config") or write your own. File names are never sent.
@@ -203,15 +245,20 @@ open a scanned PDF (each page is read).
   play/pause, skip, shuffle, loop (all or one song), seek and volume, and music keeps playing while you
   work. Media keys work too. Drop songs onto the player or use **+** to add them. **Mixer** is a 10-band
   equalizer (±18 dB) with low cut and high cut, a live response curve, and presets (Tinny/phone, AM radio,
-  Muffled, Underwater, Lo-fi, Bass boost, Vocal…).
+  Muffled, Underwater, Lo-fi, Bass boost, Vocal…). **Duplicates**: an amber button appears when a song is
+  in the dump twice, as the very same file under any name or as "Song (1)", "Song - Copy",
+  "Song (Official Video)" and the like. You review the list, and the extra copies move to
+  `audio-dump/.removed`.
 
 ## Where things live
 
 | Folder | What |
 |---|---|
 | `data/settings.json` | your preferences, Discord lines, My info |
-| `data/secrets.json` | your Anthropic API key, if you add one |
+| `data/secrets.json` | keys you add: Anthropic, Gmail app passwords, GitHub token, Spotify key |
 | `data/backups/` | previous versions of files you saved |
+| `data/backups/app/` | the app's own files from before each update (kept for "Go back") |
+| `data/update/` | update downloads waiting to install, and how the last one went |
 | `data/drafts/` | crash-recovery copies of unsaved work |
 | `data/bin/` | the compiled StoragePeek scanner (rebuilt automatically if deleted) |
 | `doc-dump/` | the doc dump (removed files go to `doc-dump/.removed`) |
@@ -222,4 +269,9 @@ open a scanned PDF (each page is read).
 
 Node's built-in HTTP server with no frameworks. The page gets a random token per launch, and the server
 only answers requests from `127.0.0.1` with that token. Libraries are served from `node_modules`:
-pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm and the Anthropic SDK.
+pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, tesseract.js and the Anthropic SDK.
+
+The desktop window is Electron. `electron/main.js` is a tiny boot file that installs updates and rolls them
+back; `electron/shell.js` is the window itself, which runs `server.js` as a child process. Server modules:
+`mail-server.js` (BoxMail), `update-server.js` (updates), `spotify-server.js` (Spotify links),
+`file-assoc.js` (Windows file types).
