@@ -203,7 +203,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   });
 
   // Drag a dump file out of the window as a real file (to Explorer, the desktop, Discord…).
-  const DRAG_DIRS = [path.join(ROOT, 'image-dump'), path.join(ROOT, 'doc-dump')].map((d) => d.toLowerCase() + path.sep);
+  const DRAG_DIRS = [path.join(ROOT, 'media-dump'), path.join(ROOT, 'image-dump'), path.join(ROOT, 'doc-dump')].map((d) => d.toLowerCase() + path.sep);
   const DRAG_ICON = path.join(ROOT, 'public', 'assets', 'icon-256.png');
   ipcMain.on('bds:drag', (e, file) => {
     const full = path.resolve(String(file || ''));

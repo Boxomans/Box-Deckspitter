@@ -5,7 +5,7 @@ import { icon } from './core/icons.js';
 import { api } from './core/api.js';
 import {
   showMenu, closeMenus, menusOpen, contextMenu, modal, modalOpen, alertDialog, confirmDialog, promptDialog,
-  choiceDialog, toast, errorToast, hoverKeys, rubberSelect,
+  choiceDialog, toast, errorToast, hoverKeys, rubberSelect, PATHS_MIME, draggedPaths,
 } from './core/ui.js';
 import { detectMode, extForLang, LANGUAGES, MODE_ICON, MODE_LABEL, iconForName, OPEN_FILTERS, VIDEO_FILTERS } from './core/filetypes.js';
 import { pickOpen, pickSave, configureFiles, setLastDir, getLastDir } from './core/files.js';
@@ -150,6 +150,8 @@ const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clip
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
 const TOP_TOOLS = ['btn-music', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
 // tool modes and the home-card name they're renamed by
+// files the video editor can use
+const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
 const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', cut: 'Video editor' };
 const TOOL_LABEL = { 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
@@ -234,7 +236,7 @@ class App {
     this.wireMusicDock();
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
-    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'clock', settings: 'settings' };
+    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'clock', mediadump: 'image', docdump: 'file-pdf', settings: 'settings' };
     for (const b of $$('.rail-btn')) {
       b.append(icon(railIcons[b.dataset.panel], 'lg'));
       b.addEventListener('click', () => this.togglePanel(b.dataset.panel));
@@ -1000,7 +1002,7 @@ class App {
     this.activate(tab);
     try {
       const bytes = spec.content ? new TextEncoder().encode(spec.content) : null;
-      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images, diff: opts.diff, pickRight: opts.pickRight, media: opts.media });
+      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images, diff: opts.diff, pickRight: opts.pickRight, media: opts.media, place: opts.place });
       if (images) this.setDirty(tab, true);
     } catch (e) {
       this.failOpen(tab, e, null);
@@ -1246,7 +1248,7 @@ class App {
     }
   }
 
-  /** F2 on the home logo: pick a picture (file, image dump or paste) — shrunk to 256 px and kept in settings. */
+  /** F2 on the home logo: pick a picture (file, media dump or paste) — shrunk to 256 px and kept in settings. */
   async changeHomeLogo(img) {
     const set = (url) => { this.saveSettings({ homeLogo: url }); img.src = url || '/assets/icon.svg'; };
     const shrink = async (blob) => {
@@ -1263,7 +1265,7 @@ class App {
     const preview = h('img', { src: this.settings.homeLogo || '/assets/icon.svg', alt: '', class: 'logo-pick-preview' });
     const grid = h('div', { class: 'mail-dumppick image logo-pick-dump' });
     api.dump('image').then(({ items }) => {
-      if (!items.length) grid.append(h('div', { class: 'faint' }, 'The image dump is empty.'));
+      if (!items.length) grid.append(h('div', { class: 'faint' }, 'The media dump is empty.'));
       for (const it of items) {
         const b = h('button', { class: 'mail-dumpitem', title: it.name }, h('img', { src: it.url, alt: '' }), h('span', { class: 'mail-dumpname' }, it.name));
         b.addEventListener('click', async () => use(await (await fetch(it.url)).blob()));
@@ -1285,7 +1287,7 @@ class App {
             } }, icon('folder-open', 'sm'), 'Choose a picture…'),
             h('button', { class: 'btn ghost', onclick: () => { set(null); ctx?.close(null); } }, icon('undo', 'sm'), 'Back to the original'),
             pasteHint)),
-        h('div', { class: 'home-section-title' }, 'from the image dump'),
+        h('div', { class: 'home-section-title' }, 'from the media dump'),
         grid),
       buttons: [{ label: 'Close', value: null, ghost: true }],
       onOpen: (c) => { ctx = c; },
@@ -1521,6 +1523,8 @@ class App {
     if (name !== 'settings') this.saveSettings({ sidebar: name });
     if (name === 'explorer') this.renderExplorer();
     else if (name === 'recent') this.renderRecentPanel();
+    else if (name === 'mediadump') this.renderDumpPanel('media');
+    else if (name === 'docdump') this.renderDumpPanel('doc');
     else if (name === 'settings') this.renderSettings();
     else if (name === 'spaces') this.ensureSpaces().then((s) => s.render(this.sidepanel));
     this.active?.editor?.onShow?.();
@@ -1606,6 +1610,7 @@ class App {
     return [
       { label: 'Open', icon: 'file', action: () => this.openPath(e.path) },
       { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['video', 'Video trimmer'], ['hex', 'Hex viewer']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.openPath(e.path, { mode: m }) })) },
+      ...this.videoEditorMenu([e.path]),
       { sep: true },
       { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
       { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
@@ -1615,10 +1620,47 @@ class App {
     ];
   }
 
+  /** "Add to the video editor" for menus of files: only when there's a video, sound or picture among them. */
+  videoEditorMenu(paths) {
+    const media = paths.filter((p) => MEDIA_FILE_RE.test(p));
+    if (!media.length) return [];
+    const label = `Add ${media.length > 1 ? `${media.length} files ` : ''}to the ${this.toolName('Video editor').toLowerCase() === 'video editor' ? 'video editor' : this.toolName('Video editor')}`;
+    return [{ label, icon: 'video', action: () => this.sendToVideoEditor(media) }];
+  }
+
+  /** Into the media list of the open video editor (the one showing, else the last one used), or a new one. */
+  async sendToVideoEditor(paths) {
+    const cuts = this.tabs.filter((t) => t.mode === 'cut' && t.editor?.addPaths);
+    const tab = cuts.includes(this.active) ? this.active : cuts.sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0))[0];
+    if (!tab) return this.newDocument('cut', { media: paths, place: false });
+    this.activate(tab);
+    const n = await tab.editor.addPaths(paths);
+    if (n) toast(`Added ${n} file${n === 1 ? '' : 's'} to the media list`, { type: 'ok', timeout: 1800 });
+  }
+
   /** Open BoxDiff with this file on the left and ask for the file to compare it with. */
   compareWith(path) { return this.newDocument('diff', { diff: [{ path }], pickRight: true }); }
 
   // ---- actions on several picked files / recent entries (drag-to-select)
+  /**
+   * Files handed to the open tab: the video editor puts them in its media list, the document editor and
+   * BoxPaint take pictures… Editors say how with receiveFiles(paths) → how many they took.
+   * With nothing open (home), the files just open.
+   */
+  async sendToActive(paths) {
+    if (!paths.length) return;
+    const tab = this.active;
+    if (!tab?.editor) return this.openMany(paths.map((path) => ({ path })));
+    const name = tab.title || this.toolName(TOOL_OF_MODE[tab.mode] || MODE_LABEL[tab.mode] || 'this tab');
+    if (typeof tab.editor.receiveFiles !== 'function') {
+      return toast(`${name} can’t take files that way.`, { type: 'warn', timeout: 3000, action: { label: paths.length > 1 ? 'Open them' : 'Open it', fn: () => this.openMany(paths.map((path) => ({ path }))) } });
+    }
+    try {
+      const n = await tab.editor.receiveFiles(paths);
+      if (!n) toast(`Nothing there that ${name} can use.`, { type: 'warn', timeout: 2500 });
+    } catch (e) { errorToast(e, 'Could not send that'); }
+  }
+
   openMany(items) {
     const files = items.filter((x) => !x.isDir && x.exists !== false);
     if (files.length > 12 && !confirm(`Open ${files.length} files?`)) return;
@@ -1632,6 +1674,7 @@ class App {
       { label: `Open ${ok.length}`, icon: 'file', disabled: !ok.length, action: () => this.openMany(ok) },
       { label: 'Copy paths', icon: 'copy', action: () => { navigator.clipboard.writeText(items.map((x) => x.path).join('\r\n')); toast('Paths copied', { timeout: 1200 }); } },
       ...(items.length === 2 && ok.length === 2 ? [{ label: 'Compare these two', icon: 'diff', action: () => this.newDocument('diff', { diff: ok.map((x) => ({ path: x.path })) }) }] : []),
+      ...this.videoEditorMenu(ok.map((x) => x.path)),
       { sep: true },
       { label: `Remove ${items.length} from the list`, icon: 'x', shortcut: 'Del', action: () => this.forgetRecents(items, after) },
     ];
@@ -1650,6 +1693,7 @@ class App {
       { label: `Open ${files.length} file${files.length === 1 ? '' : 's'}`, icon: 'file', disabled: !files.length, action: () => this.openMany(files) },
       { label: 'Copy paths', icon: 'copy', action: () => { navigator.clipboard.writeText(items.map((x) => x.path).join('\r\n')); toast('Paths copied', { timeout: 1200 }); } },
       ...(files.length === 2 && items.length === 2 ? [{ label: 'Compare these two', icon: 'diff', action: () => this.newDocument('diff', { diff: files.map((x) => ({ path: x.path })) }) }] : []),
+      ...this.videoEditorMenu(files.map((x) => x.path)),
       { sep: true },
       { label: `Delete ${items.length} (Recycle Bin)`, icon: 'trash', shortcut: 'Del', action: () => this.trashMany(items, after) },
     ];
@@ -1700,6 +1744,101 @@ class App {
     const name = await promptDialog('New folder', 'Folder name', 'New folder');
     if (!name) return;
     try { await api.mkdir(joinPath(this.explorer.dir, name)); this.renderExplorer(this.explorer.dir); } catch (e) { errorToast(e); }
+  }
+
+  /**
+   * The media dump / doc dump as a side panel: drag to pick several, Shift+drag to carry them somewhere
+   * (the video editor's timeline…), Ctrl+right-click to send them to the open tool, Del to remove.
+   * Files dropped on the panel are copied in.
+   */
+  async renderDumpPanel(kind) {
+    const panel = kind === 'media' ? 'mediadump' : 'docdump';
+    const label = kind === 'media' ? 'Media dump' : 'Doc dump';
+    const folder = kind === 'media' ? 'media-dump' : 'doc-dump';
+    const again = () => { if (this.panel === panel) this.renderDumpPanel(kind); };
+    const p = clear(this.sidepanel);
+    const list = h('div', { class: 'file-list dump-list' });
+    const body = h('div', { class: 'panel-body' }, list);
+    const addFiles = async () => {
+      const paths = await pickOpen({ multi: true, title: `Add to the ${label.toLowerCase()}` });
+      if (paths?.length) { await this.copyToDump(paths, kind); again(); }
+    };
+    p.append(h('div', { class: 'panel-head' }, label, h('div', { class: 'grow' }),
+      h('button', { class: 'icon-btn', 'data-tip': 'Add files', onclick: addFiles }, icon('plus', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: again }, icon('refresh', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': `Open ${folder} in Explorer`, onclick: () => api.dumpReveal(kind) }, icon('external', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
+    h('div', { class: 'dump-panel-hint faint' }, 'Shift+drag to carry · Ctrl+right-click sends to the open tool'),
+    body);
+    const remove = async (items) => {
+      for (const it of items) { try { await api.dumpRemove(it.name, kind); } catch (e) { errorToast(e, it.name); } }
+      toast(`Moved ${items.length === 1 ? items[0].name : `${items.length} files`} to ${folder}\\.removed`, { timeout: 2500 });
+      again();
+    };
+    const picker = rubberSelect(list, {
+      scroller: () => body,
+      menu: (items) => [
+        { label: `Send ${items.length} to the open tool`, icon: 'send', shortcut: 'Ctrl+right-click', action: () => this.sendToActive(items.map((x) => x.path)) },
+        { label: `Open ${items.length}`, icon: 'file', action: () => this.openMany(items) },
+        ...this.videoEditorMenu(items.map((x) => x.path)),
+        { sep: true },
+        { label: `Remove ${items.length} from the dump`, icon: 'trash', shortcut: 'Del', action: () => remove(items) },
+      ],
+      onDelete: (items) => remove(items),
+      onOpen: (items) => this.openMany(items),
+    });
+    // drop files (Explorer, Shift+drag from Files / BoxSpaces, the video editor's media list) to keep copies
+    body.addEventListener('dragover', (e) => { if ([PATHS_MIME, 'Files'].some((t) => e.dataTransfer.types.includes(t)) && !e.dataTransfer.types.includes('text/bds-from-dump')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; body.classList.add('drop'); } });
+    body.addEventListener('dragleave', (e) => { if (!body.contains(e.relatedTarget)) body.classList.remove('drop'); });
+    body.addEventListener('drop', async (e) => {
+      body.classList.remove('drop');
+      if (e.dataTransfer.types.includes('text/bds-from-dump')) return;
+      e.preventDefault();
+      const paths = draggedPaths(e);
+      for (const f of e.dataTransfer.files) { const fp = window.bdsShell?.pathForFile?.(f); if (fp) paths.push(fp); }
+      if (paths.length) { await this.copyToDump(paths, kind); again(); }
+    });
+    let items = [];
+    try { items = (await api.dump(kind)).items; } catch (e) { list.append(h('div', { class: 'empty-note' }, e.message)); return; }
+    if (!items.length) list.append(h('div', { class: 'empty-note' }, `Empty. Drop files here, or Shift+drag them in from Files. They live in Box-DocSpitter\\${folder}.`));
+    for (const it of items) {
+      const thumb = it.type === 'image' ? h('img', { class: 'fr-thumb', src: it.url, alt: '', loading: 'lazy', draggable: 'false' })
+        : icon(it.type === 'video' ? 'video' : it.type === 'audio' ? 'music' : iconForName(it.name), 'sm');
+      const row = h('button', { class: 'file-row dump-row', title: `${it.name}\n${formatBytes(it.size)} · added ${timeAgo(it.mtime)}\nDouble-click to open · Shift+drag to carry · Ctrl+right-click to send to the open tool` },
+        h('span', { class: 'fr-icon' }, thumb),
+        h('span', { class: 'fr-name' }, it.name),
+        h('span', { class: 'fr-meta' }, formatBytes(it.size)));
+      row._item = it;
+      hoverKeys(row, { nameEl: row.querySelector('.fr-name'), value: () => it.name, selectBase: true,
+        commit: async (n) => { const to = extOf(n) ? n : `${n}.${extOf(it.name)}`; await api.dumpRename(it.name, to, kind); again(); },
+        remove: () => remove(row.classList.contains('picked') && picker.picked().length > 1 ? picker.picked() : [it]) });
+      row.addEventListener('dblclick', () => this.openPath(it.path));
+      row.addEventListener('contextmenu', (e) => contextMenu(e, [
+        { label: 'Open', icon: 'file', action: () => this.openPath(it.path) },
+        { label: 'Send to the open tool', icon: 'send', shortcut: 'Ctrl+right-click', action: () => this.sendToActive([it.path]) },
+        ...this.videoEditorMenu([it.path]),
+        { sep: true },
+        { label: 'Copy as file', icon: 'copy', action: () => api.dumpClip(it.name, kind).then(() => toast(`Copied ${it.name}`, { type: 'ok', timeout: 1500 }), errorToast) },
+        { label: 'Copy path', icon: 'link', action: () => navigator.clipboard.writeText(it.path) },
+        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(kind, it.name) },
+        { sep: true },
+        { label: 'Remove from the dump', icon: 'trash', shortcut: 'Del', action: () => remove([it]) },
+      ]));
+      list.append(row);
+    }
+  }
+
+  /** Copy files on disk into a dump ('media' or 'doc'); files that don't belong there are skipped. */
+  async copyToDump(paths, kind) {
+    let n = 0;
+    let skipped = 0;
+    for (const p of paths) {
+      try { const r = await api.dumpImport(p, kind); if (!r.already) n++; } catch (e) { if (e.status === 400) skipped++; else errorToast(e, basename(p)); }
+    }
+    const where = kind === 'media' ? 'media dump' : 'doc dump';
+    if (n) toast(`Added ${n} file${n === 1 ? '' : 's'} to the ${where}${skipped ? ` (${skipped} skipped: wrong kind of file)` : ''}`, { type: 'ok', timeout: 2200 });
+    else if (skipped) toast(kind === 'media' ? 'Only pictures, videos and sounds go in the media dump.' : 'Only documents go in the doc dump.', { type: 'warn' });
+    return n;
   }
 
   async renderRecentPanel() {
@@ -1789,7 +1928,7 @@ class App {
   }
 
   async factoryReset() {
-    const DUMP_KINDS = [['image', 'image dump', 'image'], ['doc', 'doc dump', 'document'], ['audio', 'audio dump', 'song']];
+    const DUMP_KINDS = [['media', 'media dump', 'file'], ['doc', 'doc dump', 'document'], ['audio', 'audio dump', 'song']];
     const counts = {};
     await Promise.all(DUMP_KINDS.map(async ([k]) => { try { counts[k] = (await api.dump(k)).items.length; } catch { counts[k] = 0; } }));
     const dumpBoxes = DUMP_KINDS.map(([k, label, noun]) => {
@@ -1840,6 +1979,8 @@ class App {
       }
     } catch { /* browser mode or old server */ }
     this.launchUpdateCheck();
+    // Ctrl+right-click on a file in Files / recents / BoxSpaces sends it to the tool that's open
+    window.addEventListener('bds:send-files', (e) => this.sendToActive(e.detail?.paths || []));
     const last = this.settings.lastSeenVersion;
     if (!this.settings.welcomed) {
       this.saveSettings({ welcomed: true, lastSeenVersion: version });
@@ -2431,6 +2572,8 @@ class App {
     ];
     const mouseRows = [
       ['Back / forward between tabs', 'Mouse 4 / Mouse 5'], ['Back / forward between folders (over the file panel)', 'Mouse 4 / Mouse 5'],
+      ['Pick several files (Files, recents, BoxSpaces)', 'Drag'], ['Carry files to the video editor, a dump…', 'Shift+drag'],
+      ['Send files to the open tool', 'Ctrl+right-click'],
     ];
     const docRows = [
       ['Bold / italic / underline', 'Ctrl+B / I / U'], ['Strikethrough', 'Alt+Shift+5'], ['Insert link', 'Ctrl+K'], ['Heading 1–3', 'Ctrl+Alt+1…3'],

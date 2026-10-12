@@ -2,11 +2,13 @@
 // change how long they show), keyframes for position / scale / rotation / opacity / volume, chroma key, a
 // properties panel for the selected clip, and frame-exact MP4 export through the PC's ffmpeg.
 // Projects are saved as .boxcut (JSON) and use media files where they are on disk.
+// The media panel has a second tab, the media dump (Box-DocSpitter\media-dump): drag between it, the media
+// list and the timeline; files from the Files / BoxSpaces / recents panels come in by Shift+drag.
 
 import { BaseEditor } from './base.js';
-import { h, clear, clamp, basename, extOf, stripExt, uid, dirname } from '../core/dom.js';
+import { h, clear, clamp, basename, extOf, stripExt, uid, dirname, formatBytes } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { tbButton, tbSep, toast, errorToast, contextMenu, modal } from '../core/ui.js';
+import { tbButton, tbSep, toast, errorToast, contextMenu, modal, hoverKeys, PATHS_MIME, draggedPaths, setDraggedPaths } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { pickOpen, pickSave } from '../core/files.js';
 import { fmtTime } from './video.js';
@@ -193,7 +195,7 @@ export class CutEditor extends BaseEditor {
     this.els = new Map(); // preview media elements: clip id → <video>/<audio>; media id → <img>
     this.build();
     for (const m of this.p.media) this.probe(m);
-    for (const p of opts.media || []) await this.importPath(p, { place: true });
+    for (const p of opts.media || []) await this.importPath(p, { place: opts.place !== false });
     this.renderAll();
   }
 
@@ -310,17 +312,113 @@ export class CutEditor extends BaseEditor {
     for (const p of paths || []) await this.importPath(p);
   }
 
-  async fromImageDump() {
-    let items = [];
-    try { items = (await api.dump('image')).items; } catch { /* ignore */ }
-    if (!items.length) return toast('The image dump is empty.', { type: 'warn' });
-    let ctx = null;
-    const grid = h('div', { class: 'mail-dumppick image' }, items.map((it) => {
-      const b = h('button', { class: 'mail-dumpitem', title: it.name }, h('img', { src: it.url, alt: '' }), h('span', { class: 'mail-dumpname' }, it.name));
-      b.addEventListener('click', async () => { ctx?.close(null); await this.importPath(it.path); });
-      return b;
-    }));
-    modal({ title: 'Add from the image dump', wide: true, body: grid, buttons: [{ label: 'Cancel', value: null, ghost: true }], onOpen: (c) => { ctx = c; } });
+  /** Files into the media list (from the file panels, the app's "Add to the video editor"…). How many went in. */
+  async addPaths(paths) {
+    let n = 0;
+    for (const p of paths) if (kindOf(p) && (await this.importPath(p))) n++;
+    if (n) this.showBin('project');
+    return n;
+  }
+  receiveFiles(paths) { return this.addPaths(paths); }
+
+  /** Several files dropped on the timeline at `at`: one after another on fitting tracks. */
+  async placePaths(paths, trackId, at) {
+    let t = at;
+    for (const p of paths) {
+      if (!kindOf(p)) continue;
+      const m = await this.importPath(p);
+      if (m) { const c = this.placeMedia(m, this.fits(trackId, m), t); t = c.start + c.len; }
+    }
+  }
+
+  // =================================================================== media dump
+
+  showBin(view) {
+    this.binView = view;
+    const dump = view === 'dump';
+    this.bin.hidden = dump;
+    this.dumpView.hidden = !dump;
+    this.tabProject.classList.toggle('on', !dump);
+    this.tabDump.classList.toggle('on', dump);
+    this.projActions.hidden = dump;
+    this.dumpActions.hidden = !dump;
+    if (dump) this.refreshDump();
+  }
+
+  async refreshDump() {
+    let items;
+    try { items = (await api.dump('media')).items; } catch { return; }
+    this.dumpCount.textContent = items.length ? String(items.length) : '';
+    const sig = items.map((i) => i.name + i.mtime).join('|');
+    if (sig === this.dumpSig) return;
+    this.dumpSig = sig;
+    this.dumpItems = items;
+    const G = clear(this.dumpGrid);
+    if (!items.length) {
+      G.append(h('div', { class: 'cut-empty' }, 'The media dump is empty. Drop videos, sounds and pictures here — from Explorer, the media list, the timeline, or Shift+drag from Files — or export straight into it.'));
+      return;
+    }
+    this.thumbIO?.disconnect();
+    // video thumbnails load only when they scroll into view
+    this.thumbIO = new IntersectionObserver((ents) => {
+      for (const en of ents) if (en.isIntersecting && en.target.dataset.src) { en.target.src = en.target.dataset.src; delete en.target.dataset.src; this.thumbIO.unobserve(en.target); }
+    }, { root: this.dumpView });
+    for (const it of items) {
+      const kind = it.type;
+      let thumb;
+      if (kind === 'image') thumb = h('img', { src: it.url, alt: '', loading: 'lazy', draggable: 'false' });
+      else if (kind === 'video') {
+        thumb = h('video', { muted: true, preload: 'metadata', draggable: 'false' });
+        thumb.dataset.src = it.url.replace(/\?v=/, '?x=') + '#t=0.5';
+        thumb.addEventListener('error', () => thumb.replaceWith(icon('video', 'lg')));
+        this.thumbIO.observe(thumb);
+      } else thumb = icon('music', 'lg');
+      const card = h('div', { class: `cut-dump-item ${kind}`, draggable: 'true', title: `${it.name}\n${formatBytes(it.size)}\nDrag onto the timeline or the media list · double-click to add at the playhead` },
+        h('div', { class: 'cut-dump-thumb' }, thumb, kind !== 'image' ? h('span', { class: 'cut-dump-badge' }, icon(kind === 'video' ? 'video' : 'music', 'sm')) : null),
+        h('div', { class: 'cut-dump-name' }, it.name));
+      card.addEventListener('dragstart', (e) => { setDraggedPaths(e, [it.path]); e.dataTransfer.setData('text/bds-from-dump', '1'); });
+      card.addEventListener('dblclick', async () => { const m = await this.importPath(it.path); if (m) this.placeMedia(m); });
+      card.addEventListener('contextmenu', (e) => contextMenu(e, [
+        { label: 'Add to the media list', icon: 'plus', action: () => this.importPath(it.path) },
+        { label: 'Add at the playhead', icon: 'video', action: async () => { const m = await this.importPath(it.path); if (m) this.placeMedia(m); } },
+        { sep: true },
+        { label: 'Copy as file', icon: 'copy', action: () => api.dumpClip(it.name, 'media').then(() => toast(`Copied ${it.name}`, { type: 'ok', timeout: 1500 }), errorToast) },
+        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('media', it.name) },
+        { sep: true },
+        { label: 'Remove from the dump', icon: 'trash', action: async () => { try { await api.dumpRemove(it.name, 'media'); toast(`Moved ${it.name} to media-dump\\.removed`, { timeout: 2500 }); this.refreshDump(); } catch (err) { errorToast(err); } } },
+      ]));
+      G.append(card);
+    }
+  }
+
+  /** Copy files on disk into the media dump. */
+  async toDump(paths) {
+    let n = 0;
+    for (const p of paths) {
+      if (!kindOf(p)) continue;
+      try { const r = await api.dumpImport(p, 'media'); if (!r.already) n++; } catch (e) { errorToast(e, basename(p)); }
+    }
+    if (n) toast(`Added ${n} file${n === 1 ? '' : 's'} to the media dump`, { type: 'ok', timeout: 1800 });
+    else if (paths.length) toast('Already in the media dump.', { timeout: 1500 });
+    if (this.binView === 'dump') this.refreshDump();
+    return n;
+  }
+
+  async addToDumpDialog() {
+    const paths = await pickOpen({ multi: true, title: 'Add to the media dump', filters: [{ name: 'Video, audio & images', extensions: ['mp4', 'm4v', 'webm', 'mov', 'mkv', 'avi', 'wmv', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'flac', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] }] });
+    if (paths?.length) await this.toDump(paths);
+  }
+
+  /** Paths in a drop: Shift+drag from the file panels / dump, the media list, or files from Explorer. */
+  async dropPaths(e) {
+    const paths = draggedPaths(e);
+    const id = e.dataTransfer.getData('text/bds-media');
+    if (id && this.media(id)) paths.push(this.media(id).path);
+    for (const f of e.dataTransfer.files) {
+      const p = window.bdsShell?.pathForFile?.(f);
+      if (p) paths.push(p);
+    }
+    return paths;
   }
 
   /** Put a media item on the first fitting track at the playhead (or after the last clip there). */
@@ -439,11 +537,23 @@ export class CutEditor extends BaseEditor {
     this.tlInner = h('div', { class: 'cut-tl-inner' }, this.ruler, this.lanes, this.playhead);
     this.tlScroll = h('div', { class: 'cut-tl-scroll' }, this.tlInner);
 
+    this.dumpGrid = h('div', { class: 'cut-dump-grid' });
+    this.dumpView = h('div', { class: 'cut-dump cut-dump-target', hidden: true }, this.dumpGrid);
+    this.dumpCount = h('span', { class: 'cut-dump-count' });
+    this.tabProject = h('button', { class: 'cut-bin-tab on', onclick: () => this.showBin('project') }, 'Media');
+    this.tabDump = h('button', { class: 'cut-bin-tab cut-dump-target', title: 'The media dump (Box-DocSpitter\\media-dump) — drop things here to keep them', onclick: () => this.showBin('dump') }, 'Media dump', this.dumpCount);
+    this.projActions = h('span', { class: 'cut-bin-actions' },
+      h('button', { class: 'icon-btn', 'data-tip': 'Add video, audio or images', onclick: () => this.importDialog() }, icon('plus', 'sm')));
+    this.dumpActions = h('span', { class: 'cut-bin-actions', hidden: true },
+      h('button', { class: 'icon-btn', 'data-tip': 'Export the video into the media dump', onclick: () => this.exportVideo(null, { toDump: true }) }, icon('download', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Add files to the media dump', onclick: () => this.addToDumpDialog() }, icon('plus', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('media') }, icon('external', 'sm')));
     const binEl = h('div', { class: 'cut-bin' },
-      h('div', { class: 'cut-pane-head' }, 'Media', h('div', { class: 'grow' }),
-        h('button', { class: 'icon-btn', 'data-tip': 'From the image dump', onclick: () => this.fromImageDump() }, icon('image', 'sm')),
-        h('button', { class: 'icon-btn', 'data-tip': 'Add video, audio or images', onclick: () => this.importDialog() }, icon('plus', 'sm'))),
-      this.bin);
+      h('div', { class: 'cut-pane-head cut-bin-head' }, this.tabProject, this.tabDump, h('div', { class: 'grow' }), this.projActions, this.dumpActions),
+      this.bin, this.dumpView);
+    this.binView = 'project';
+    this.dumpTimer = setInterval(() => { if (this.binView === 'dump' && this.root.isConnected && this.root.offsetParent) this.refreshDump(); }, 4000);
+    this.refreshDump();
     const stage = h('div', { class: 'cut-stage' },
       h('div', { class: 'cut-view' }, this.canvas),
       h('div', { class: 'cut-transport' },
@@ -475,7 +585,8 @@ export class CutEditor extends BaseEditor {
       this.zoom(e.deltaY < 0 ? 1 : -1, e.clientX);
     }, { passive: false });
     // media dragged from the bin, or files dropped from Explorer
-    this.lanes.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/bds-media') || e.dataTransfer.types.includes('Files')) { e.preventDefault(); this.lanes.classList.add('drop'); } });
+    const carries = (e) => ['text/bds-media', PATHS_MIME, 'Files'].some((t) => e.dataTransfer.types.includes(t));
+    this.lanes.addEventListener('dragover', (e) => { if (carries(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; this.lanes.classList.add('drop'); } });
     this.lanes.addEventListener('dragleave', (e) => { if (e.target === this.lanes) this.lanes.classList.remove('drop'); });
     this.lanes.addEventListener('drop', async (e) => {
       this.lanes.classList.remove('drop');
@@ -484,19 +595,37 @@ export class CutEditor extends BaseEditor {
       const lane = e.target.closest('.cut-lane');
       const id = e.dataTransfer.getData('text/bds-media');
       if (id) { const m = this.media(id); if (m) this.placeMedia(m, this.fits(lane?.dataset.track, m), at); return; }
-      for (const f of e.dataTransfer.files) {
-        const p = window.bdsShell?.pathForFile?.(f);
-        if (!p) { toast('Use the + button to add files here (drag-and-drop from Explorer works in the app window).', { type: 'warn' }); return; }
-        const m = await this.importPath(p);
-        if (m) this.placeMedia(m, this.fits(lane?.dataset.track, m), at);
-      }
+      const paths = await this.dropPaths(e);
+      if (!paths.length && e.dataTransfer.files.length) return toast('Use the + button to add files here (drag-and-drop from Explorer works in the app window).', { type: 'warn' });
+      await this.placePaths(paths, lane?.dataset.track, at);
     });
-    this.root.querySelector('.cut-bin').addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
-    this.root.querySelector('.cut-bin').addEventListener('drop', async (e) => {
-      if (!e.dataTransfer.files.length) return;
+    // the media list takes files; the media dump (its tab, or the open dump) keeps copies
+    this.bin.addEventListener('dragover', (e) => { if ([PATHS_MIME, 'Files'].some((t) => e.dataTransfer.types.includes(t))) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+    this.bin.addEventListener('drop', async (e) => {
       e.preventDefault();
-      for (const f of e.dataTransfer.files) { const p = window.bdsShell?.pathForFile?.(f); if (p) await this.importPath(p); }
+      for (const p of await this.dropPaths(e)) if (kindOf(p)) await this.importPath(p);
     });
+    for (const zone of [this.dumpView, this.tabDump]) {
+      zone.addEventListener('dragover', (e) => {
+        if (e.dataTransfer.types.includes('text/bds-from-dump') || !carries(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        this.dumpView.classList.add('drop');
+        if (zone === this.tabDump && this.binView !== 'dump') this.showBin('dump');
+      });
+      zone.addEventListener('dragleave', (e) => { if (!this.dumpView.contains(e.relatedTarget)) this.dumpView.classList.remove('drop'); });
+      zone.addEventListener('drop', async (e) => {
+        this.dumpView.classList.remove('drop');
+        if (e.dataTransfer.types.includes('text/bds-from-dump')) return;
+        e.preventDefault();
+        const paths = await this.dropPaths(e);
+        if (paths.length) return this.toDump(paths);
+        // a browser window (no file paths): send the bytes
+        let n = 0;
+        for (const f of e.dataTransfer.files) { if (kindOf(f.name)) { try { await api.dumpAdd(f.name, new Uint8Array(await f.arrayBuffer()), 'media'); n++; } catch (err) { errorToast(err, f.name); } } }
+        if (n) { toast(`Added ${n} to the media dump`, { type: 'ok', timeout: 1500 }); this.refreshDump(); }
+      });
+    }
     // chroma key eyedropper: click the preview
     this.canvas.addEventListener('click', (e) => {
       if (!this.picking) return;
@@ -554,24 +683,28 @@ export class CutEditor extends BaseEditor {
         h('span', { class: 'cut-media-name' }, m.name),
         h('span', { class: 'mono faint cut-media-len' }, state || (m.kind === 'image' ? `${m.w}×${m.h}` : fmtTime(m.duration, false))));
       row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/bds-media', m.id); e.dataTransfer.effectAllowed = 'copy'; });
+      hoverKeys(row, { remove: () => this.removeMedia(m) });
       row.addEventListener('dblclick', () => this.placeMedia(m));
       row.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Add at the playhead', icon: 'plus', action: () => this.placeMedia(m) },
         { label: m.missing ? 'Find the file…' : 'Point at a different file…', icon: 'folder-open', action: () => this.relink(m) },
         { label: 'Show in folder', icon: 'external', action: () => api.reveal(m.path) },
+        { label: 'Copy to the media dump', icon: 'download', disabled: m.missing, action: () => this.toDump([m.path]) },
         { sep: true },
-        { label: 'Remove from project', icon: 'trash', action: () => {
-          const used = this.allClips().filter(({ c }) => c.media === m.id).length;
-          this.remember();
-          for (const tr of this.p.tracks) tr.clips = tr.clips.filter((c) => c.media !== m.id);
-          this.p.media = this.p.media.filter((x) => x !== m);
-          if (this.sel && !this.clip(this.sel)) this.sel = null;
-          if (used) toast(`Removed it and its ${used} clip${used > 1 ? 's' : ''}`, { timeout: 1800 });
-          this.renderAll();
-        } },
+        { label: 'Remove from project', icon: 'trash', shortcut: 'Del', action: () => this.removeMedia(m) },
       ]));
       this.bin.append(row);
     }
+  }
+
+  removeMedia(m) {
+    const used = this.allClips().filter(({ c }) => c.media === m.id).length;
+    this.remember();
+    for (const tr of this.p.tracks) tr.clips = tr.clips.filter((c) => c.media !== m.id);
+    this.p.media = this.p.media.filter((x) => x !== m);
+    if (this.sel && !this.clip(this.sel)) this.sel = null;
+    if (used) toast(`Removed it and its ${used} clip${used > 1 ? 's' : ''}`, { timeout: 1800 });
+    this.renderAll();
   }
 
   // =================================================================== timeline
@@ -615,7 +748,7 @@ export class CutEditor extends BaseEditor {
   clipEl(c, tr) {
     const m = this.media(c.media);
     const on = c.id === this.sel;
-    const el = h('div', { class: `cut-clip ${m?.kind || 'missing'} ${on ? 'on' : ''} ${c.key?.on ? 'keyed' : ''}`, style: { left: `${this.tToX(c.start)}px`, width: `${Math.max(4, this.tToX(c.len))}px` }, title: `${m?.name || 'missing media'} · ${fmtTime(c.len)}` },
+    const el = h('div', { class: `cut-clip ${m?.kind || 'missing'} ${on ? 'on' : ''} ${c.key?.on ? 'keyed' : ''}`, dataset: { clip: c.id }, style: { left: `${this.tToX(c.start)}px`, width: `${Math.max(4, this.tToX(c.len))}px` }, title: `${m?.name || 'missing media'} · ${fmtTime(c.len)}` },
       h('span', { class: 'cut-clip-name' }, m?.name || 'missing'),
       h('span', { class: 'cut-trim l' }), h('span', { class: 'cut-trim r' }));
     if (m?.kind === 'image' && !m.missing) el.style.backgroundImage = `linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.25)), url("${srcOf(m)}")`;
@@ -633,6 +766,7 @@ export class CutEditor extends BaseEditor {
       this.sel = c.id; this.renderTimeline(); this.renderProps();
       contextMenu(e, [
         { label: 'Split at the playhead', shortcut: 'S', action: () => this.split() },
+        { label: 'Copy its file to the media dump', icon: 'download', disabled: !m || m.missing, action: () => this.toDump([m.path]) },
         { label: 'Duplicate', action: () => { this.remember(); const d = JSON.parse(JSON.stringify(c)); d.id = uid('c'); d.start = c.start + c.len; tr.clips.push(d); this.sel = d.id; this.renderAll(); } },
         { sep: true },
         { label: 'Delete', icon: 'trash', shortcut: 'Del', action: () => this.deleteSelected() },
@@ -662,10 +796,21 @@ export class CutEditor extends BaseEditor {
     let curTrack = tr;
     this.sel = c.id;
     const maxLen = m && m.kind !== 'image' && m.duration ? m.duration : Infinity;
+    let overDump = false;
     const move = (ev) => {
       const dt = (ev.clientX - sx) / this.pps;
       if (!moved && Math.abs(ev.clientX - sx) < 3 && mode === 'move' && !ev.target.closest?.('.cut-lane:not([data-track="' + curTrack.id + '"])')) return;
       if (!moved) { moved = true; this.remember(); }
+      // dragged over the media dump (its tab or the open dump): drop there to keep a copy of the file
+      const dumpHit = mode === 'move' && m && !m.missing && document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('.cut-dump-target');
+      if (!!dumpHit !== overDump) {
+        overDump = !!dumpHit;
+        this.dumpView.classList.toggle('drop', overDump);
+        this.tabDump.classList.toggle('drop', overDump);
+        el.classList.toggle('to-dump', overDump);
+        if (overDump && this.binView !== 'dump') this.showBin('dump');
+      }
+      if (overDump) return;
       if (mode === 'move') {
         let start = Math.max(0, orig.start + dt);
         const sEnd = this.snap(start + c.len, c.id) - c.len;
@@ -701,6 +846,16 @@ export class CutEditor extends BaseEditor {
     const up = () => {
       removeEventListener('pointermove', move);
       removeEventListener('pointerup', up);
+      if (overDump) {
+        // the clip stays where it was; its file goes into the dump
+        this.dumpView.classList.remove('drop');
+        this.tabDump.classList.remove('drop');
+        this.p = JSON.parse(this.undoStack.pop());
+        this.redoStack = [];
+        this.renderAll();
+        this.toDump([m.path]);
+        return;
+      }
       for (const keys of Object.values(c.keys || {})) for (const k of keys) delete k._t0;
       if (mode === 'left') for (const [p, keys] of Object.entries(c.keys || {})) c.keys[p] = keys.filter((k) => k.t >= -1e-6 && k.t <= c.len + 1e-6);
       this.renderTimeline();
@@ -711,6 +866,8 @@ export class CutEditor extends BaseEditor {
     addEventListener('pointerup', up);
     this.renderTimeline();
     this.renderProps();
+    // the timeline was just redrawn (to show the selection): keep moving the clip that's on screen now
+    el = this.lanes.querySelector(`.cut-clip[data-clip="${c.id}"]`) || el;
   }
 
   dragKey(e, c, kt, clipEl) {
@@ -886,7 +1043,8 @@ export class CutEditor extends BaseEditor {
         h('label', { class: 'cut-row' }, h('span', {}, 'Frame rate'), fps),
         h('label', { class: 'cut-row' }, h('span', {}, 'Background'), bg)),
       h('div', { class: 'cut-empty' }, 'Click a clip on the timeline to change its timing, position, size, rotation, opacity, volume or chroma key. Press ◆ next to a value to animate it from the playhead.'),
-      h('div', { class: 'cut-actions' }, h('button', { class: 'btn primary', onclick: () => this.exportVideo() }, icon('download', 'sm'), 'Export MP4…')));
+      h('div', { class: 'cut-actions' }, h('button', { class: 'btn primary', onclick: () => this.exportVideo() }, icon('download', 'sm'), 'Export MP4…'),
+        h('button', { class: 'btn', onclick: () => this.exportVideo(null, { toDump: true }) }, icon('image', 'sm'), 'Export to media dump')));
   }
 
   // =================================================================== preview
@@ -1025,13 +1183,16 @@ export class CutEditor extends BaseEditor {
 
   // =================================================================== export
 
-  /** target: a path to export to without asking (the export dialog is skipped). */
-  async exportVideo(target = null) {
+  /** target: a path to export to without asking (the export dialog is skipped). toDump: into the media dump. */
+  async exportVideo(target = null, { toDump = false } = {}) {
     if (this.exporting) return;
     if (!this.allClips().length) return toast('Put something on the timeline first.', { type: 'warn' });
     const tools = await fetch('/api/tools', { headers: { 'X-BDS-Token': api.token } }).then((r) => r.json()).catch(() => ({}));
     if (!tools.ffmpeg) return toast('Exporting needs ffmpeg: run "winget install Gyan.FFmpeg", then restart Box-DocSpitter.', { type: 'warn', timeout: 8000 });
     const base = this.tab.path ? stripExt(basename(this.tab.path)) : stripExt(this.tab.title);
+    if (toDump) {
+      try { target = (await api.dumpReserve(`${base.replace(/^\.+/, '') || 'video'}.mp4`, 'media')).path; } catch (e) { return errorToast(e, 'Export failed'); }
+    }
     const res = target ? { path: target } : await pickSave({ defaultName: `${base}.mp4`, initialDir: this.tab.path ? dirname(this.tab.path) : undefined, filters: [{ name: 'MP4 video', extensions: ['mp4'] }], title: 'Export video' });
     if (!res) return;
     let out = res.path;
@@ -1054,7 +1215,7 @@ export class CutEditor extends BaseEditor {
     const els = new Map();
     try {
       const missing = this.p.media.filter((m) => (m.missing || m.bad) && this.allClips().some(({ c }) => c.media === m.id));
-      if (missing.length && !target) toast(`Leaving out ${missing.length} missing file${missing.length > 1 ? 's' : ''}: ${missing.map((m) => m.name).join(', ')}`, { type: 'warn', timeout: 6000 });
+      if (missing.length && (!target || toDump)) toast(`Leaving out ${missing.length} missing file${missing.length > 1 ? 's' : ''}: ${missing.map((m) => m.name).join(', ')}`, { type: 'warn', timeout: 6000 });
       ({ id } = await post('/api/render/start', { width: W, height: H, fps, duration: dur, output: out, inputs: this.p.media.flatMap((m) => [m.path, m.proxy].filter(Boolean)) }));
       // 1) the soundtrack, mixed offline
       label.textContent = 'Mixing the sound…';
@@ -1135,7 +1296,8 @@ export class CutEditor extends BaseEditor {
       await post('/api/render/finish', { id });
       id = null;
       ctxModal.close(true);
-      toast(`Exported ${basename(out)}`, { type: 'ok', timeout: 8000, action: { label: 'Open', fn: () => this.app.openPath(out) } });
+      if (toDump) { this.showBin('dump'); this.refreshDump(); }
+      toast(toDump ? `Exported ${basename(out)} into the media dump` : `Exported ${basename(out)}`, { type: 'ok', timeout: 8000, action: { label: 'Open', fn: () => this.app.openPath(out) } });
     } catch (e) {
       if (id) await post('/api/render/cancel', { id }).catch(() => {});
       ctxModal.close(null);
@@ -1216,11 +1378,12 @@ export class CutEditor extends BaseEditor {
       tbButton('redo', 'Redo (Ctrl+Y)', () => this.redo()),
       tbSep(),
       tbButton('plus', 'Add media', () => this.importDialog(), { text: 'Add media' }),
-      tbButton('image', 'From the image dump', () => this.fromImageDump()),
+      tbButton('image', 'Media dump', () => this.showBin(this.binView === 'dump' ? 'project' : 'dump')),
       tbSep(),
       tbButton('scissors', 'Split at the playhead (S)', () => this.split(), { text: 'Split' }),
       tbButton('trash', 'Delete the selected clip (Del)', () => this.deleteSelected()),
       h('div', { class: 'grow' }),
+      tbButton('image-down', 'Export into the media dump', () => this.exportVideo(null, { toDump: true })),
       tbButton('download', 'Export MP4', () => this.exportVideo(), { text: 'Export MP4', cls: 'tb-primary' }));
   }
 
@@ -1245,6 +1408,8 @@ export class CutEditor extends BaseEditor {
     this.pause();
     document.removeEventListener('keydown', this.keyHandler);
     this.ro?.disconnect();
+    this.thumbIO?.disconnect();
+    clearInterval(this.dumpTimer);
     for (const el of this.els.values()) { if (el.pause) { el.pause(); el.removeAttribute('src'); el.load(); } }
   }
 }

@@ -168,7 +168,7 @@ export const PageTools = {
       : [['current', `Page ${cur + 1}`], ['pages', `All ${this.pageCount} pages`], ['long', 'One long image']], pageless ? 'long' : this.pageCount > 1 ? 'current' : 'current');
     const fmt = pick('fmt', [['png', 'PNG'], ['jpg', 'JPG'], ['webp', 'WebP']], this.app.settings.docImgFmt || 'png');
     const res = pick('res', [['1', '1× · 96 dpi'], ['2', '2× · 192 dpi'], ['3', '3× · 288 dpi']], String(this.app.settings.docImgScale || 2));
-    const dest = pick('dest', [['save', 'Save file'], ['copy', 'Copy'], ['dump', 'Image dump']], 'save');
+    const dest = pick('dest', [['save', 'Save file'], ['copy', 'Copy'], ['dump', 'Media dump']], 'save');
     const note = h('div', { class: 'faint', style: { fontSize: '11.5px' } });
     const sync = () => {
       const multi = what.value === 'pages';
@@ -250,7 +250,7 @@ export const PageTools = {
         for (const f of files) await api.dumpAdd(f.name, f.bytes);
         this.dump.refresh?.();
         this.dump.toggle(true);
-        return toast(files.length === 1 ? 'Added to the image dump' : `Added ${files.length} images to the image dump`, { type: 'ok' });
+        return toast(files.length === 1 ? 'Added to the media dump' : `Added ${files.length} images to the media dump`, { type: 'ok' });
       }
       if (files.length === 1) {
         return this.app.saveBytesAs(files[0].bytes, { defaultName: files[0].name, filters: [{ name: `${format.toUpperCase()} image`, extensions: [format] }], title: 'Export as image', openAfter: true });

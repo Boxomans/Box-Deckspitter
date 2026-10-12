@@ -241,7 +241,7 @@ export class ImageEditor extends BaseEditor {
       tbButton('fit-page', 'Fit', () => { this.view = 'fit'; this.layout(); }),
       tbButton('zoom-in', 'Zoom in', () => this.zoom(1)),
       tbSep(),
-      tbButton('image', 'Send to image dump', () => this.toDump(), { text: 'To dump' }),
+      tbButton('image', 'Send to media dump', () => this.toDump(), { text: 'To dump' }),
       this.tab.ext === 'svg' && this.tab.path ? tbButton('code', 'Edit SVG source', () => this.app.reopenAs(this.tab, 'code'), { text: 'Source' }) : null,
     );
   }
@@ -250,7 +250,7 @@ export class ImageEditor extends BaseEditor {
     const blob = await new Promise((r) => this.canvas.toBlob(r, 'image/png'));
     try {
       await api.dumpAdd(stripExt(this.tab.title) + '.png', new Uint8Array(await blob.arrayBuffer()));
-      toast('Saved to the image dump', { type: 'ok' });
+      toast('Saved to the media dump', { type: 'ok' });
     } catch (e) { errorToast(e); }
   }
 
@@ -278,7 +278,7 @@ export class ImageEditor extends BaseEditor {
       ],
       tools: [
         { label: 'Copy image to clipboard', icon: 'copy', action: async () => { const b = await new Promise((r) => this.canvas.toBlob(r, 'image/png')); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Copied', { type: 'ok' }); } },
-        { label: 'Send to image dump', icon: 'image', action: () => this.toDump() },
+        { label: 'Send to media dump', icon: 'image', action: () => this.toDump() },
       ],
     };
   }

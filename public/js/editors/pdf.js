@@ -1469,7 +1469,7 @@ export class PdfEditor extends BaseEditor {
         { label: 'Fit width', icon: 'fit-width', action: () => this.setZoom('width') },
         { label: 'Fit page', icon: 'fit-page', action: () => this.setZoom('page') },
         { label: 'Page thumbnails', icon: 'sidebar', checked: !this.side.hidden, action: () => this.toggleSide() },
-        { label: 'Image dump drawer', icon: 'image', checked: this.dump.open, action: () => this.dump.toggle() },
+        { label: 'Media dump drawer', icon: 'image', checked: this.dump.open, action: () => this.dump.toggle() },
         { label: 'Doc dump drawer', icon: 'file-text', checked: this.dumps.doc.open, action: () => this.dumps.doc.toggle() },
         ...(this.constructor.mode === 'pdf' ? [{ sep: true }, ...PDF_MODES.map(([m, label]) => ({ label: `${label} mode`, checked: this.pdfMode === m, action: () => this.setPdfMode(m) })), { label: 'Open in the Form filler', icon: 'form-fill', action: () => this.openFormFiller() }] : []),
       ],

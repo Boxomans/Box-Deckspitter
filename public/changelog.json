@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.0.12",
+    "date": "2026-10-11",
+    "notes": [
+      "The image dump is now the media dump: it keeps videos and sounds as well as pictures (the folder is now media-dump; your old image-dump folder is moved over by itself).",
+      "Media dump and Doc dump buttons in the left sidebar, below Recent.",
+      "Video editor: a Media dump tab next to the media list. Drag from the dump onto the timeline or the media list, drag a clip or a media file onto the dump to keep a copy, and export straight into the dump.",
+      "Shift+drag files from Files, BoxSpaces, Recent or the dumps into another part of the app, like the video editor's timeline. A plain drag still picks several.",
+      "Ctrl+right-click a file in Files, BoxSpaces, Recent or a dump to send it to the tool that's open: the video editor adds it to its media list, the document editor and BoxPaint take pictures.",
+      "Fixed: in the video editor, a clip didn't move on screen while you dragged it, only when you let go."
+    ]
+  },
+  {
     "version": "1.0.11",
     "date": "2026-10-11",
     "notes": [

@@ -854,7 +854,7 @@ export class DocEditor extends BaseEditor {
   imageMenu() {
     return [
       { label: 'Upload from computer…', icon: 'upload', action: () => this.insertImageFromDisk() },
-      { label: 'From image dump', icon: 'image', action: () => this.dump.toggle(true) },
+      { label: 'From media dump', icon: 'image', action: () => this.dump.toggle(true) },
       { label: 'By URL…', icon: 'link', action: () => this.insertImageByUrl() },
     ];
   }
@@ -884,6 +884,17 @@ export class DocEditor extends BaseEditor {
       if (res.ok) src = await blobToDataURL(await res.blob());
     } catch { /* keep remote URL (may be blocked by CORS) */ }
     this.insertImage(src);
+  }
+
+  /** Files sent from the file panels (Ctrl+right-click): pictures go in at the cursor. */
+  async receiveFiles(paths) {
+    let n = 0;
+    for (const p of paths.filter((x) => /\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif)$/i.test(x))) {
+      const { bytes } = await api.read(p);
+      await this.insertImage(await blobToDataURL(new Blob([bytes], { type: p.toLowerCase().endsWith('.svg') ? 'image/svg+xml' : '' })));
+      n++;
+    }
+    return n;
   }
 
   async insertImage(src, { atPoint } = {}) {
@@ -1222,7 +1233,7 @@ export class DocEditor extends BaseEditor {
 
   imageItems(img) {
     return [
-      { label: 'Save to image dump', icon: 'download', action: () => this.dump.stash(img.src, stripExt(this.tab.title).slice(0, 40) || 'image') },
+      { label: 'Save to media dump', icon: 'download', action: () => this.dump.stash(img.src, stripExt(this.tab.title).slice(0, 40) || 'image') },
       { label: 'Alt text…', action: async () => { const v = await promptDialog('Alt text', 'Describe the image', img.alt || ''); if (v != null) this.edit(() => { img.alt = v; }); } },
       { label: 'Reset size', action: () => this.edit(() => { img.style.width = ''; img.style.height = ''; }) },
       { label: 'Copy image', icon: 'copy', action: () => this.copyImage(img) },
@@ -1444,7 +1455,7 @@ export class DocEditor extends BaseEditor {
       view: [
         { label: 'Fit page width', icon: 'fit-width', action: () => this.zoom('fit') },
         { label: 'Document outline', icon: 'sidebar', checked: !this.outlineEl.hidden, action: () => this.toggleOutline() },
-        { label: 'Image dump drawer', icon: 'image', checked: this.dump.open, action: () => this.dump.toggle() },
+        { label: 'Media dump drawer', icon: 'image', checked: this.dump.open, action: () => this.dump.toggle() },
         { label: 'Doc dump drawer', icon: 'file-text', checked: this.dumps.doc.open, action: () => this.dumps.doc.toggle() },
         { label: 'Pageless', icon: 'pageless', checked: !!this.pageSetup.pageless, action: () => this.togglePageless() },
         { label: 'Night paper', icon: 'moon', checked: this.app.settings.paper === 'night', action: () => { this.app.saveSettings({ paper: this.app.settings.paper === 'night' ? 'white' : 'night' }); this.onThemeChange(); } },
@@ -1503,7 +1514,7 @@ export class DocEditor extends BaseEditor {
         { label: 'Word count…', action: () => this.wordCount() },
         { label: 'Spell check', checked: this.body.spellcheck, action: () => { this.app.saveSettings({ spellcheck: !this.body.spellcheck }); this.onThemeChange(); } },
         { label: 'Document outline', icon: 'sidebar', action: () => this.toggleOutline() },
-        { label: 'Image dump', icon: 'image', action: () => this.dump.toggle(true) },
+        { label: 'Media dump', icon: 'image', action: () => this.dump.toggle(true) },
         { label: 'Doc dump', icon: 'file-text', action: () => this.dumps.doc.toggle(true) },
       ],
     };

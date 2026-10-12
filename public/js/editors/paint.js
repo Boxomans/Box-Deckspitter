@@ -3,7 +3,7 @@
 // Left mouse button paints with the primary colour, right button with the secondary (like Paint.NET).
 
 import { BaseEditor } from './base.js';
-import { h, clear, uid, clamp, stripExt, blobToDataURL } from '../core/dom.js';
+import { h, clear, uid, clamp, stripExt, blobToDataURL, basename } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { tbButton, tbSep, toast, errorToast, modal, promptDialog, showMenu, colorPopover, hoverKeys, renameInline } from '../core/ui.js';
 import { api } from '../core/api.js';
@@ -70,7 +70,7 @@ export class PaintEditor extends BaseEditor {
     this.side = h('div', { class: 'paint-side' },
       h('div', { class: 'panel-head' }, 'Layers', h('div', { class: 'grow' }),
         h('button', { class: 'icon-btn', 'data-tip': 'Add layer', onclick: () => this.addLayer() }, icon('plus', 'sm')),
-        h('button', { class: 'icon-btn', 'data-tip': 'New layer from the image dump', onclick: () => this.layerFromDump() }, icon('image-plus', 'sm')),
+        h('button', { class: 'icon-btn', 'data-tip': 'New layer from the media dump', onclick: () => this.layerFromDump() }, icon('image-plus', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': 'Duplicate layer', onclick: () => this.duplicateLayer() }, icon('copy', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': 'Delete layer', onclick: () => this.deleteLayer() }, icon('trash', 'sm'))),
       this.layerList,
@@ -161,7 +161,7 @@ export class PaintEditor extends BaseEditor {
       tbButton('zoom-in', 'Zoom in', () => this.zoom(1)),
       tbButton('fit-page', 'Fit', () => this.zoom('fit')),
       tbSep(),
-      tbButton('image-down', 'Export to the image dump', () => this.exportToDump(), { text: 'To dump' }),
+      tbButton('image-down', 'Export to the media dump', () => this.exportToDump(), { text: 'To dump' }),
     );
     this.syncProps();
     return tb;
@@ -538,6 +538,17 @@ export class PaintEditor extends BaseEditor {
     if (cut) this.clearSelection();
   }
 
+  /** Files sent from the file panels (Ctrl+right-click): each picture becomes a layer. */
+  async receiveFiles(paths) {
+    let n = 0;
+    for (const p of paths.filter((x) => /\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif)$/i.test(x))) {
+      const { bytes } = await api.read(p);
+      await this.addImageLayer(new Blob([bytes], { type: p.toLowerCase().endsWith('.svg') ? 'image/svg+xml' : '' }), basename(p));
+      n++;
+    }
+    return n;
+  }
+
   async addImageLayer(blobOrFile, name) {
     try {
       const bmp = await createImageBitmap(blobOrFile);
@@ -629,8 +640,8 @@ export class PaintEditor extends BaseEditor {
       { label: 'Rotate 90° left', icon: 'rotate-ccw', action: () => this.rotate(-1) },
       { sep: true },
       { label: 'Add image from file as layer…', icon: 'image-plus', action: () => this.layerFromFile() },
-      { label: 'New layer from the image dump…', icon: 'image', action: () => this.layerFromDump() },
-      { label: 'Image dump drawer', icon: 'image', checked: this.dumps?.image.open, action: () => this.dumps.image.toggle() },
+      { label: 'New layer from the media dump…', icon: 'image', action: () => this.layerFromDump() },
+      { label: 'Media dump drawer', icon: 'image', checked: this.dumps?.image.open, action: () => this.dumps.image.toggle() },
       { label: 'Flatten', action: () => { this.checkpoint('all'); const f = this.flatten(); const L = this.makeLayer('Background'); L.canvas.getContext('2d').drawImage(f, 0, 0); this.layers = [L]; this.active = 0; this.after(); } },
     ];
   }
@@ -765,14 +776,14 @@ export class PaintEditor extends BaseEditor {
   async layerFromDump() {
     let items = [];
     try { items = (await api.dump('image')).items; } catch { /* ignore */ }
-    if (!items.length) return toast('The image dump is empty.', { type: 'warn' });
+    if (!items.length) return toast('The media dump is empty.', { type: 'warn' });
     let ctx = null;
     const grid = h('div', { class: 'mail-dumppick image' }, items.map((it) => {
       const b = h('button', { class: 'mail-dumpitem', title: it.name }, h('img', { src: it.url, alt: '' }), h('span', { class: 'mail-dumpname' }, it.name));
       b.addEventListener('click', async () => { ctx?.close(null); await this.addImageLayer(await (await fetch(it.url)).blob(), it.name); });
       return b;
     }));
-    modal({ title: 'Add a picture from the image dump', wide: true, body: grid, buttons: [{ label: 'Cancel', value: null, ghost: true }], onOpen: (c) => { ctx = c; } });
+    modal({ title: 'Add a picture from the media dump', wide: true, body: grid, buttons: [{ label: 'Cancel', value: null, ghost: true }], onOpen: (c) => { ctx = c; } });
   }
 
   // ================================================================ zoom
@@ -849,7 +860,7 @@ export class PaintEditor extends BaseEditor {
       const bytes = await this.serialize('png');
       const name = `${stripExt(this.tab.title) || 'image'}.png`;
       const r = await api.dumpAdd(name, bytes, 'image');
-      toast(`Saved ${r.name} to the image dump`, { type: 'ok' });
+      toast(`Saved ${r.name} to the media dump`, { type: 'ok' });
     } catch (e) { errorToast(e, 'Export failed'); }
   }
 
@@ -863,7 +874,7 @@ export class PaintEditor extends BaseEditor {
         { label: 'Erase selection', shortcut: 'Del', action: () => this.clearSelection() },
       ],
       tools: [
-        { label: 'Export to the image dump', icon: 'image-down', action: () => this.exportToDump() },
+        { label: 'Export to the media dump', icon: 'image-down', action: () => this.exportToDump() },
         { label: 'Read text in this image (BoxScribe)', icon: 'scan-text', action: async () => { const { scribeBytes } = await import('./scribe.js'); scribeBytes(this.app, `${stripExt(this.tab.title)}.png`, await this.serialize('png')); } },
       ],
     };

@@ -55,7 +55,7 @@ export class ScribeEditor extends BaseEditor {
       h('div', {}, h('b', {}, 'Drop images or a scanned PDF here'), ' — or paste a screenshot (Ctrl+V)'),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: () => this.openFiles() }, icon('folder-open', 'sm'), 'Open images / PDF…'),
-        h('button', { class: 'btn', onclick: () => this.fromDump() }, icon('image', 'sm'), 'From image dump')),
+        h('button', { class: 'btn', onclick: () => this.fromDump() }, icon('image', 'sm'), 'From media dump')),
       h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Runs entirely on this PC (offline). English text. Works best on clear, straight scans.'));
     this.stage = h('div', { class: 'scribe-stage' });
     this.overlay = h('canvas', { class: 'scribe-overlay' });
@@ -76,7 +76,7 @@ export class ScribeEditor extends BaseEditor {
     this.left = h('div', { class: 'scribe-left' },
       h('div', { class: 'scribe-bar' },
         h('button', { class: 'btn sm', onclick: () => this.openFiles() }, icon('plus', 'sm'), 'Add'),
-        h('button', { class: 'btn sm', 'data-tip': 'Add pictures from the image dump', onclick: () => this.fromDump() }, icon('image', 'sm'), 'Dump'),
+        h('button', { class: 'btn sm', 'data-tip': 'Add pictures from the media dump', onclick: () => this.fromDump() }, icon('image', 'sm'), 'Dump'),
         h('button', { class: 'btn sm primary', onclick: () => this.readAll() }, icon('scan-text', 'sm'), 'Read all'),
         h('button', { class: 'btn sm', 'data-tip': 'Read this page again', onclick: () => this.readPage(this.cur, null, true) }, icon('refresh', 'sm'), 'Re-read'),
         h('div', { class: 'grow' }),
@@ -139,7 +139,7 @@ export class ScribeEditor extends BaseEditor {
   async fromDump() {
     let items = [];
     try { items = (await api.dump('image')).items; } catch { /* ignore */ }
-    if (!items.length) return toast('The image dump is empty — add screenshots or photos to it first.', { type: 'warn' });
+    if (!items.length) return toast('The media dump is empty — add screenshots or photos to it first.', { type: 'warn' });
     const picked = new Set();
     const grid = h('div', { class: 'mail-dumppick image' }, items.map((it) => {
       const b = h('button', { class: 'mail-dumpitem', title: it.name }, h('img', { src: it.url, alt: '' }), h('span', { class: 'mail-dumpname' }, it.name));
@@ -148,7 +148,7 @@ export class ScribeEditor extends BaseEditor {
       return b;
     }));
     let ctxRef = null;
-    const res = await modal({ title: 'Read text from the image dump', wide: true, body: h('div', {}, h('div', { class: 'faint', style: { fontSize: '12px', marginBottom: '8px' } }, 'Pick one or more pictures (double-click to read just one).'), grid),
+    const res = await modal({ title: 'Read text from the media dump', wide: true, body: h('div', {}, h('div', { class: 'faint', style: { fontSize: '12px', marginBottom: '8px' } }, 'Pick one or more pictures (double-click to read just one).'), grid),
       buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Read text', value: 'ok', primary: true }], onOpen: (c) => { ctxRef = c; } });
     if (res !== 'ok' || !picked.size) return;
     for (const it of picked) await this.addBytes(it.name, new Uint8Array(await (await fetch(it.url)).arrayBuffer()));

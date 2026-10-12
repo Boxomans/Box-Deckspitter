@@ -605,6 +605,24 @@ document.addEventListener('keydown', (e) => {
 // right-click a picked row for actions on all of them, Del removes, Enter opens, Esc clears.
 // Each row carries its data in row._item. Returns { picked() } → the picked rows' items.
 
+// Files carried between parts of the app (Shift + drag from Files, BoxSpaces, recents → the video editor…).
+export const PATHS_MIME = 'text/bds-paths';
+const draggableItem = (it) => !!it && typeof it.path === 'string' && !it.isDir && it.exists !== false && !it.denied;
+export function setDraggedPaths(e, paths) {
+  e.dataTransfer.setData(PATHS_MIME, JSON.stringify(paths));
+  e.dataTransfer.setData('text/plain', paths.join('\r\n'));
+  e.dataTransfer.effectAllowed = 'copy';
+  // a little label instead of the browser's ghost of the row
+  const tag = h('div', { class: 'drag-tag' }, paths.length > 1 ? `${paths.length} files` : paths[0].split(/[\\/]/).pop());
+  document.body.append(tag);
+  e.dataTransfer.setDragImage(tag, -10, -6);
+  setTimeout(() => tag.remove(), 0);
+}
+/** Paths carried by a drag from inside the app (empty when it's something else). */
+export function draggedPaths(e) {
+  try { const v = JSON.parse(e.dataTransfer.getData(PATHS_MIME) || '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch { return []; }
+}
+
 export function rubberSelect(container, { rows = '.file-row', scroller = container, menu, onDelete, onOpen } = {}) {
   const all = () => [...container.querySelectorAll(rows)].filter((r) => r._item !== undefined);
   // scroller may be given as a function, for lists that aren't on the page yet
@@ -616,6 +634,18 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
 
   container.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('input, textarea, select, [contenteditable]')) return;
+    // Shift + drag on a file: carry it (and the other picked files) to another part of the app, e.g. the
+    // video editor's timeline. A plain drag stays drag-to-select.
+    if (e.shiftKey) {
+      const row = e.target.closest(rows);
+      if (row && draggableItem(row._item)) {
+        row.draggable = true;
+        const off = () => { row.draggable = false; removeEventListener('pointerup', off, true); };
+        addEventListener('pointerup', off, true);
+        row.addEventListener('dragend', off, { once: true });
+        return;
+      }
+    }
     const sx = e.clientX;
     const sy = e.clientY;
     const scrollEl = sc();
@@ -670,6 +700,16 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
     addEventListener('pointerup', up, true);
   });
 
+  container.addEventListener('dragstart', (e) => {
+    const row = e.target.closest?.(rows);
+    if (!row?.draggable || !container.contains(row) || e.dataTransfer.types.length) return;
+    const items = (row.classList.contains('picked') ? picked().map((r) => r._item) : [row._item]).filter(draggableItem);
+    if (!items.length) { e.preventDefault(); return; }
+    setDraggedPaths(e, items.map((it) => it.path));
+    justDragged = true;
+    setTimeout(() => { justDragged = false; }, 60);
+  });
+
   container.addEventListener('click', (e) => {
     if (justDragged) { e.preventDefault(); e.stopImmediatePropagation(); return; }
     const row = e.target.closest(rows);
@@ -691,6 +731,15 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
 
   container.addEventListener('contextmenu', (e) => {
     const row = e.target.closest(rows);
+    // Ctrl+right-click: send the file (or every picked file) to the tool that's open
+    if ((e.ctrlKey || e.metaKey) && row && draggableItem(row._item) && container.contains(row)) {
+      e.preventDefault(); e.stopPropagation();
+      const items = (row.classList.contains('picked') ? picked().map((r) => r._item) : [row._item]).filter(draggableItem);
+      row.classList.add('sent');
+      setTimeout(() => row.classList.remove('sent'), 500);
+      window.dispatchEvent(new CustomEvent('bds:send-files', { detail: { paths: items.map((it) => it.path) } }));
+      return;
+    }
     const sel = picked();
     if (!row || !row.classList.contains('picked') || sel.length < 2 || !menu) return;
     e.preventDefault(); e.stopPropagation();

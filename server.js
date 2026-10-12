@@ -28,22 +28,25 @@ const MODULES = path.join(ROOT, 'node_modules');
 const INSTALL_ID = crypto.createHash('sha1').update(path.resolve(ROOT).toLowerCase()).digest('hex').slice(0, 10);
 const DATA_ARG = process.argv.find((a) => a.startsWith('--data='));
 const DATA = DATA_ARG ? path.resolve(DATA_ARG.slice('--data='.length)) : path.join(ROOT, 'data');
-const DUMP = path.join(ROOT, 'image-dump');
+const DUMP = path.join(ROOT, 'media-dump');
 const DUMP_REMOVED = path.join(DUMP, '.removed');
 const DOC_DUMP = path.join(ROOT, 'doc-dump');
-// The PDF dump became the doc dump: move an existing pdf-dump folder over once.
-try {
-  const OLD_PDF_DUMP = path.join(ROOT, 'pdf-dump');
-  if (fs.existsSync(OLD_PDF_DUMP)) {
-    if (!fs.existsSync(DOC_DUMP)) fs.renameSync(OLD_PDF_DUMP, DOC_DUMP);
-    else {
-      for (const n of fs.readdirSync(OLD_PDF_DUMP)) if (!fs.existsSync(path.join(DOC_DUMP, n))) fs.renameSync(path.join(OLD_PDF_DUMP, n), path.join(DOC_DUMP, n));
-      if (!fs.readdirSync(OLD_PDF_DUMP).length) fs.rmdirSync(OLD_PDF_DUMP);
-    }
-  }
-} catch (e) { console.error(`[Box-DocSpitter] couldn't move pdf-dump to doc-dump: ${e.message}`); }
+// Folders that were renamed: move an old one over once (pdf-dump became doc-dump, image-dump became
+// media-dump). Never overwrites: a name that's already in the new folder stays in the old one.
+function moveDumpFolder(from, to) {
+  try {
+    if (!fs.existsSync(from)) return;
+    if (!fs.existsSync(to)) { fs.renameSync(from, to); return; }
+    for (const n of fs.readdirSync(from)) if (!fs.existsSync(path.join(to, n))) fs.renameSync(path.join(from, n), path.join(to, n));
+    if (!fs.readdirSync(from).length) fs.rmdirSync(from);
+  } catch (e) { console.error(`[Box-DocSpitter] couldn't move ${path.basename(from)} to ${path.basename(to)}: ${e.message}`); }
+}
+moveDumpFolder(path.join(ROOT, 'pdf-dump'), DOC_DUMP);
+moveDumpFolder(path.join(ROOT, 'image-dump'), DUMP);
 const IS_WIN = process.platform === 'win32';
 const DUMP_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.avif', '.jfif', '.ico']);
+const DUMP_VIDEO_EXT = new Set(['.mp4', '.m4v', '.webm', '.mov', '.mkv', '.avi', '.wmv', '.ogv', '.3gp']);
+const DUMP_AUDIO_EXT = new Set(['.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg', '.oga', '.opus', '.weba']);
 
 const argv = process.argv.slice(2);
 const flagVal = (name) => {
@@ -97,9 +100,12 @@ const AUDIO_DUMP = path.join(ROOT, 'audio-dump');
 ensureDir(AUDIO_DUMP);
 
 // The "dumps": folders of reusable files shown in the document editor's bottom drawers.
+// The media dump holds pictures, videos and sounds; "image" is the same folder seen as pictures only (for the
+// editors that can only use pictures). "media" comes first so /dump/ serves every kind.
 const DUMPS = {
+  media: { dir: DUMP, exts: new Set([...DUMP_EXT, ...DUMP_VIDEO_EXT, ...DUMP_AUDIO_EXT]), prefix: '/dump/', what: 'a picture, video or sound' },
   image: { dir: DUMP, exts: DUMP_EXT, prefix: '/dump/', what: 'an image' },
-  audio: { dir: AUDIO_DUMP, exts: new Set(['.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg', '.oga', '.opus', '.weba']), prefix: '/audiodump/', what: 'an audio file' },
+  audio: { dir: AUDIO_DUMP, exts: DUMP_AUDIO_EXT, prefix: '/audiodump/', what: 'an audio file' },
   doc: { dir: DOC_DUMP, exts: new Set(['.pdf', '.docx', '.doc', '.odt', '.rtf', '.txt', '.md', '.xlsx', '.xls', '.ods', '.csv', '.pptx', '.ppt', '.odp', '.html', '.htm', '.eml']), prefix: '/docdump/', what: 'a document' },
 };
 function dumpOf(kind) { return DUMPS[kind === 'pdf' ? 'doc' : kind] || DUMPS.image; }
@@ -1948,7 +1954,9 @@ const routes = {
       if (!e.isFile() || e.name.startsWith('.') || !d.exts.has(path.extname(e.name).toLowerCase())) continue;
       const full = path.join(d.dir, e.name);
       const st = await fsp.stat(full).catch(() => null);
-      if (st) out.push({ name: e.name, path: full, size: st.size, mtime: st.mtimeMs, url: `${d.prefix}${encodeURIComponent(e.name)}?v=${Math.round(st.mtimeMs)}` });
+      const ext = path.extname(e.name).toLowerCase();
+      const type = DUMP_VIDEO_EXT.has(ext) ? 'video' : DUMP_EXT.has(ext) ? 'image' : DUMP_AUDIO_EXT.has(ext) ? 'audio' : 'doc';
+      if (st) out.push({ name: e.name, path: full, size: st.size, mtime: st.mtimeMs, type, url: `${d.prefix}${encodeURIComponent(e.name)}?v=${Math.round(st.mtimeMs)}` });
     }
     return { dir: d.dir, items: out.sort((a, b) => b.mtime - a.mtime) };
   },
@@ -2022,6 +2030,26 @@ const routes = {
     const dest = await uniqueDumpPath(name, kind);
     await fsp.writeFile(dest, body);
     return { ok: true, name: path.basename(dest), path: dest };
+  },
+  // A file on disk copied into a dump (videos are too big to send through the page).
+  'POST /api/dump/import': async (req) => {
+    const { path: src, kind = 'media', name } = await readJSONBody(req);
+    const file = requirePath(src);
+    const st = await fsp.stat(file).catch(() => null);
+    if (!st?.isFile()) throw Object.assign(new Error('That file isn’t there any more'), { status: 404 });
+    const d = dumpOf(kind);
+    const n = dumpName(name || path.basename(file), kind);
+    // already in this dump: nothing to copy
+    if (path.dirname(path.resolve(file)).toLowerCase() === path.resolve(d.dir).toLowerCase()) return { ok: true, name: path.basename(file), path: file, already: true };
+    const dest = await uniqueDumpPath(n, kind);
+    await fsp.copyFile(file, dest, fs.constants.COPYFILE_EXCL);
+    return { ok: true, name: path.basename(dest), path: dest };
+  },
+  // A free file name in a dump (for exporting straight into it); nothing is created.
+  'POST /api/dump/reserve': async (req) => {
+    const { name, kind = 'media' } = await readJSONBody(req);
+    const dest = await uniqueDumpPath(dumpName(name, kind), kind);
+    return { path: dest, name: path.basename(dest) };
   },
   'POST /api/dump/remove': async (req) => {
     // "Remove" is reversible: files go to <dump>/.removed rather than being deleted.
@@ -2101,7 +2129,7 @@ const routes = {
   },
 
   // Factory reset: wipe everything the app has stored (settings, recent files, drafts, version history,
-  // API key, caches, and optionally the image dump), then restart clean. Never touches the user's own files.
+  // API key, caches, and optionally the dumps), then restart clean. Never touches the user's own files.
   'POST /api/reset': async (req) => {
     const body = await readJSONBody(req);
     // which dumps to empty: { dumps: ['image', 'doc', 'audio'] } (older clients sent dump: true for all)
@@ -2307,7 +2335,14 @@ const server = http.createServer(async (req, res) => {
     for (const d of Object.values(DUMPS)) {
       if (!p.startsWith(d.prefix)) continue;
       const name = path.basename(p.slice(d.prefix.length));
-      if (name.startsWith('.') || !d.exts.has(path.extname(name).toLowerCase())) return fail(res, 404, 'Not found');
+      const ext = path.extname(name).toLowerCase();
+      if (name.startsWith('.') || !d.exts.has(ext)) return fail(res, 404, 'Not found');
+      // videos and sounds stream (with seeking); pictures are served whole
+      if (DUMP_VIDEO_EXT.has(ext) || DUMP_AUDIO_EXT.has(ext)) {
+        const file = path.join(d.dir, name);
+        if (!fs.existsSync(file)) return fail(res, 404, 'Not found');
+        return await streamFile(req, res, file);
+      }
       return await serveStatic(res, d.dir, name, false);
     }
     if (p.startsWith('/preview/')) {

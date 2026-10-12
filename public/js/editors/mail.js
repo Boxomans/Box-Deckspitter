@@ -1,5 +1,5 @@
 // BoxMail — read Gmail (several accounts), split the inbox into Gmail's tabs, and write emails with
-// attachments straight from the image dump / doc dump / open documents, with Claude to help draft.
+// attachments straight from the media dump / doc dump / open documents, with Claude to help draft.
 // Also opens saved .eml files (no account needed).
 //
 // Safety: email HTML is shown in a sandboxed iframe with no scripts and a strict CSP; remote images
@@ -130,7 +130,7 @@ export class MailEditor extends BaseEditor {
     this.root.append(h('div', { class: 'mail-hero' },
       h('div', { class: 'klep-title' }, h('span', { class: 'g mail-g' }, this.app.toolLabel('BoxMail')), h('span', { class: 'klep-cursor' })),
       h('div', { class: 'klep-sub mono' }, '> your gmail, with the dumps one click away'),
-      h('div', { class: 'mail-hero-text' }, 'Read your inbox split into Primary, Updates, Promotions and more, and write emails with attachments straight from the image dump, the doc dump or any open document. Claude can draft, polish and summarize.'),
+      h('div', { class: 'mail-hero-text' }, 'Read your inbox split into Primary, Updates, Promotions and more, and write emails with attachments straight from the media dump, the doc dump or any open document. Claude can draft, polish and summarize.'),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: async () => { const list = await addMailAccountDialog(); if (list) { this.accounts = list; this.acct = list[list.length - 1].id; this.render(); } } }, icon('plus', 'sm'), 'Add a Gmail account'),
         h('button', { class: 'btn', onclick: () => this.openEmlFile() }, icon('file', 'sm'), 'Open an .eml file…')),
@@ -245,7 +245,7 @@ export class MailEditor extends BaseEditor {
 
   showEmpty() {
     clear(this.view).append(h('div', { class: 'mail-empty' }, icon('inbox', 'xl'), h('div', {}, 'Pick a message, or compose a new one.'),
-      h('div', { class: 'faint' }, 'Tip: attach from the image dump or doc dump in one click.')));
+      h('div', { class: 'faint' }, 'Tip: attach from the media dump or doc dump in one click.')));
   }
 
   fetchMessage(uid) {
@@ -326,7 +326,7 @@ export class MailEditor extends BaseEditor {
     const toDump = async (kind) => { try { await api.dumpAdd(a.filename, await bytes(), kind); toast(`Saved ${a.filename} to the ${kind === 'doc' ? 'doc' : 'image'} dump`, { type: 'ok' }); } catch (e) { errorToast(e); } };
     chip.addEventListener('contextmenu', (e) => contextMenu(e, [
       { label: 'Open', icon: 'file', action: () => chip.click() },
-      ...(isImg ? [{ label: 'Save to image dump', icon: 'image', action: () => toDump('image') }] : []),
+      ...(isImg ? [{ label: 'Save to media dump', icon: 'image', action: () => toDump('image') }] : []),
       ...(isDocFile ? [{ label: 'Save to doc dump', icon: 'file-text', action: () => toDump('doc') }] : []),
       { label: 'Save as…', icon: 'download', action: async () => { try { await this.app.saveBytesAs(await bytes(), { defaultName: a.filename, filters: [{ name: 'All files', extensions: [ext || '*'] }], openAfter: false }); } catch (err) { errorToast(err); } } },
     ]));
@@ -591,7 +591,7 @@ export class MailEditor extends BaseEditor {
         h('div', { class: 'grow' }), aiStatus, undoBtn),
       body, quote,
       h('div', { class: 'mail-attach-bar' },
-        h('button', { class: 'btn sm', onclick: (e) => dumpPicker('image', e.currentTarget) }, icon('image', 'sm'), 'Image dump'),
+        h('button', { class: 'btn sm', onclick: (e) => dumpPicker('image', e.currentTarget) }, icon('image', 'sm'), 'Media dump'),
         h('button', { class: 'btn sm', onclick: (e) => dumpPicker('doc', e.currentTarget) }, icon('file-text', 'sm'), 'Doc dump'),
         h('button', { class: 'btn sm', onclick: (e) => fromTabs(e.currentTarget) }, icon('file', 'sm'), 'Open document'),
         h('button', { class: 'btn sm', onclick: fromDisk }, icon('paperclip', 'sm'), 'Files…'),

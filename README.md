@@ -83,7 +83,7 @@ The folder is self-contained. Nothing needs installing, not even Node.js, becaus
 Everything the app stores lives in `data\`, including Electron's cache. Nothing goes into `%APPDATA%`.
 Before handing a copy to someone else, use **Settings → Reset → Reset to clean state**. It erases settings,
 recent files and spaces, drafts, version history, your API key, Discord lines, form-fill info and caches, and
-optionally the image dump. Then it restarts the app as a fresh copy. Your own files elsewhere are never touched.
+optionally the media dump. Then it restarts the app as a fresh copy. Your own files elsewhere are never touched.
 To update a copy that's older than 1.0.3 (before the in-app updater existed), copy the new version over it
 once, keeping its `data\` and dump folders. From then on it updates itself from Settings → Updates.
 Needs Windows 10 or 11 (64-bit). PDF export uses Edge if it's installed, otherwise the app window's own
@@ -102,8 +102,8 @@ Markdown, RTF or text, and exports PDF. Crash-recovery drafts are kept automatic
 **add page** button under the last page. **Pageless** turns the document into one continuous sheet as wide as
 the window. PDF export and printing still use pages. **Export as image** saves the current page, every page
 as its own file, or the whole document as one long image, as PNG, JPG or WebP at 1×, 2× or 3× sharpness. It can
-also copy the image to the clipboard or send it to the image dump.
-**Image dump** and **doc dump**: two tabs at the bottom of the editor, backed by the `image-dump/` and
+also copy the image to the clipboard or send it to the media dump.
+**Media dump** and **doc dump**: two tabs at the bottom of the editor, backed by the `media-dump/` and
 `doc-dump/` folders. Click a picture to insert it, or click a document (PDF, Word, spreadsheet, text…) to open it in a new tab. Right-click copies:
 a picture goes to the clipboard as an image, and a document as a file you can paste into Explorer or Discord.
 Shift+right-click shows every option. Drag items into the page, or out of the app as real files. Drop or paste
@@ -132,7 +132,7 @@ sort, insert/delete rows and columns, column resize, and live sum/avg of the sel
 **Images** Crop, rotate, flip, resize and adjust colors. Save as PNG, JPG or WebP, or export as PDF.
 
 **Video trimmer** Mark in/out on a filmstrip timeline, preview the loop, and export as an instant
-lossless copy, MP4, WebM, GIF, MP3 or WAV. Grab single frames as PNGs, or send them to the image dump.
+lossless copy, MP4, WebM, GIF, MP3 or WAV. Grab single frames as PNGs, or send them to the media dump.
 It runs with the built-in ffmpeg.wasm. If you install real ffmpeg (`winget install Gyan.FFmpeg`),
 big files export much faster.
 
@@ -156,7 +156,7 @@ other users, WindowsApps) and counts the NTFS file table.
 **BoxMail** Gmail inside Box-DocSpitter, with as many accounts as you like. The inbox is split into
 Gmail's tabs (Primary, Updates, Promotions, Social, Forums), plus Starred, Sent, Drafts, All mail, Spam and
 Trash, and Gmail search works (`from:`, `has:attachment`, ...). Compose, reply and forward, with
-attachments in one click from the image dump, the doc dump, any open document or your disk. Drop files on
+attachments in one click from the media dump, the doc dump, any open document or your disk. Drop files on
 the composer to attach them. **✦ Claude** drafts emails from a note, polishes or shortens them, fixes
 grammar, summarizes emails, lists action items and drafts replies. Nothing is sent until you press Send.
 Attachments you receive can go straight into the dumps. Setup: Settings → Email → **Add Gmail account**,
@@ -186,17 +186,17 @@ right to keep.
   sepia, brightness, contrast, blur, sharpen.
 - **Mouse and keys:** the left button paints with the primary colour and the right button with the secondary.
   Shortcuts follow Paint.NET (B, E, L, R, O, F, T, K, S, M, X, D, [ and ]).
-- **Bringing images in:** paste or drop images to add them as layers, or pull them in from the image dump.
-- **Saving:** PNG, JPG or WebP (layers are flattened), or **To dump** to drop it into the image dump.
+- **Bringing images in:** paste or drop images to add them as layers, or pull them in from the media dump.
+- **Saving:** PNG, JPG or WebP (layers are flattened), or **To dump** to drop it into the media dump.
 
-**BoxScribe** Offline OCR (image to text). Open, drop or paste images, pick them from the image dump, or
+**BoxScribe** Offline OCR (image to text). Open, drop or paste images, pick them from the media dump, or
 open a scanned PDF (each page is read).
 - **Area select:** drag a box to read just part of an image.
 - **Clean up:** enlarges small images and boosts contrast, and dark-mode screenshots get inverted.
 - **Word boxes:** show what was found, with unsure words in pink.
 - **Output:** Copy, Save as .txt, Open as document, or **To clip**, which saves the text as a ✂ clip snippet
   named after the file.
-- **Where else:** image dump pictures have **Read text (BoxScribe)** in their Shift+right-click menu.
+- **Where else:** media dump pictures have **Read text (BoxScribe)** in their Shift+right-click menu.
 - **Privacy:** uses tesseract.js with English data shipped in `node_modules`. Nothing is uploaded.
 
 **BoxDiff** Compare two files side by side (Tools → BoxDiff, or right-click a file → **Compare with…**).
@@ -219,7 +219,7 @@ highlighted. Drop two files on it, one on each half, or pick an open tab or a du
 
 - **✂ clip**: two sub-tabs.
   - **History** keeps what you copy inside Box-DocSpitter: text (Ctrl+C, Copy buttons, characters, paths),
-    pictures copied from the image dump, and files copied from the dumps.
+    pictures copied from the media dump, and files copied from the dumps.
   - **Snippets** are texts you save and reuse (addresses, sign-offs, stock replies, form answers).
   - Click to put an item into what you're working on, right-click to copy it again, and Shift+right-click
     for pin, save as snippet, edit, reorder and delete. Everything is stored in `data/clips.json` and erased
@@ -264,7 +264,7 @@ highlighted. Drop two files on it, one on each half, or pick an open tab or a du
 | `data/bin/` | the compiled StoragePeek scanner (rebuilt automatically if deleted) |
 | `doc-dump/` | the doc dump (removed files go to `doc-dump/.removed`) |
 | `audio-dump/` | songs for the ♪ player (removed songs go to `audio-dump/.removed`) |
-| `image-dump/` | the image dump (removed images go to `image-dump/.removed`) |
+| `media-dump/` | the media dump: pictures, videos and sounds (removed files go to `media-dump/.removed`; an old `image-dump/` is moved here on start) |
 
 ## Under the hood
 

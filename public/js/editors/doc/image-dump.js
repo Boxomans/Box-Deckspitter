@@ -1,5 +1,5 @@
 // Dumps — bottom drawers backed by folders next to the app: image-dump\ and doc-dump\.
-// Image dump: click inserts into the page. Doc dump: click opens the document in a new tab.
+// Media dump: click inserts into the page. Doc dump: click opens the document in a new tab.
 // Right-click copies (image → picture, PDF → file); Shift+right-click shows every option.
 // Drag a thumbnail into the page, or (in the app window) out to Explorer / the desktop / Discord as a real file.
 
@@ -13,11 +13,11 @@ export const DUMP_MIME = 'text/bds-dump';
 
 const KINDS = {
   image: {
-    label: 'image dump', icon: 'image', folder: 'image-dump', noun: 'image',
+    label: 'media dump', icon: 'image', folder: 'media-dump', noun: 'image',
     accept: /\.(png|jpe?g|jfif|gif|webp|bmp|svg|avif|ico)$/i,
     filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif'] }],
     hint: 'click to insert · right-click to copy · shift+right-click for more · drag into the page or out of the app',
-    emptyHint: 'drop images here, paste a screenshot (Ctrl+V), or use “Add images”.',
+    emptyHint: 'drop images here, paste a screenshot (Ctrl+V), or use “Add images”. (Videos and sounds in the media dump show in the video editor and the left sidebar.)',
   },
   doc: {
     label: 'doc dump', icon: 'file-text', folder: 'doc-dump', noun: 'document',
@@ -60,7 +60,7 @@ export class ImageDump {
   /**
    * @param {object} o
    * @param {'image'|'doc'} [o.kind]
-   * @param {(url: string, name: string) => void} [o.onInsert]  image dump: insert into the page
+   * @param {(url: string, name: string) => void} [o.onInsert]  media dump: insert into the page
    * @param {() => Promise<{name: string, bytes: Uint8Array}>} [o.onSaveDoc]  doc dump: current document as a PDF
    */
   constructor({ app, kind = 'image', onInsert, onSaveDoc, dock }) {
@@ -353,14 +353,14 @@ export class ImageDump {
     } catch (e) { errorToast(e, 'Could not save PDF'); } finally { t(); }
   }
 
-  /** Save an image (data URL / URL) from a document into the image dump. */
+  /** Save an image (data URL / URL) from a document into the media dump. */
   async stash(src, name = 'image') {
     try {
       const blob = await (await fetch(src)).blob();
       const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
       const fname = `${name.replace(/\.[^.]+$/, '')}-${Date.now().toString(36)}.${ext}`;
       await api.dumpAdd(fname, new Uint8Array(await blob.arrayBuffer()), 'image');
-      toast('Saved to image dump', { type: 'ok' });
+      toast('Saved to media dump', { type: 'ok' });
       if (!this.open) this.toggle(true); else this.refresh(true);
     } catch (e) { errorToast(e, 'Could not save image'); }
   }
@@ -368,7 +368,7 @@ export class ImageDump {
   destroy() { clearInterval(this.timer); }
 }
 
-/** The bottom bar: the image dump and doc dump tabs side by side, one drawer open at a time. */
+/** The bottom bar: the media dump and doc dump tabs side by side, one drawer open at a time. */
 export class DumpDock {
   constructor({ app, onInsert, onSaveDoc }) {
     this.app = app;
@@ -393,7 +393,7 @@ export class DumpDock {
       window.addEventListener('mouseup', up);
     });
     this.el.append(this.drawers, h('div', { class: 'dump-bar' }, this.image.tabBtn, this.doc.tabBtn, this.hint));
-    // remember which drawer was open (older versions stored a plain true/false for the image dump)
+    // remember which drawer was open (older versions stored a plain true/false for the media dump)
     let saved = app.settings.dumpPanel ?? (app.settings.dumpOpen === true ? 'image' : null);
     if (saved === 'pdf') saved = 'doc';
     this.show(saved === 'image' || saved === 'doc' ? saved : null, false);

@@ -285,7 +285,7 @@ export class VideoEditor extends BaseEditor {
     const name = `${stripExt(this.tab.title)} @ ${fmtTime(this.media.currentTime).replace(/:/g, '-')}.png`;
     showMenu([
       { label: 'Save frame as PNG…', icon: 'download', action: () => this.app.saveBytesAs(blob, { defaultName: name, filters: [{ name: 'PNG image', extensions: ['png'] }] }) },
-      { label: 'Send to image dump', icon: 'image', action: async () => { await api.dumpAdd(name, new Uint8Array(await blob.arrayBuffer())); toast('Frame saved to the image dump', { type: 'ok' }); } },
+      { label: 'Send to media dump', icon: 'image', action: async () => { await api.dumpAdd(name, new Uint8Array(await blob.arrayBuffer())); toast('Frame saved to the media dump', { type: 'ok' }); } },
       { label: 'Copy to clipboard', icon: 'copy', action: async () => { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); toast('Copied', { type: 'ok' }); } },
     ], { anchor });
   }

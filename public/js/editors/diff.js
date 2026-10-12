@@ -226,7 +226,7 @@ export class DiffEditor extends BaseEditor {
     showMenu([
       { label: 'Open a file…', icon: 'folder-open', action: () => this.pickFile(i) },
       { label: 'From the doc dump…', icon: 'file-pdf', action: () => this.fromDump(i, 'doc') },
-      { label: 'From the image dump…', icon: 'image', action: () => this.fromDump(i, 'image') },
+      { label: 'From the media dump…', icon: 'image', action: () => this.fromDump(i, 'image') },
       { sep: true },
       ...(tabs.length ? tabs.map((t) => ({ label: `Tab: ${t.title}${t.dirty ? ' (unsaved)' : ''}`, icon: 'file', action: () => this.fromTab(i, t) })) : [{ label: 'No other tabs open', disabled: true }]),
     ], { anchor });

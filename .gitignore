@@ -7,6 +7,7 @@ data/
 
 # Your files in the dumps (the app recreates the empty folders on start).
 image-dump/
+media-dump/
 doc-dump/
 audio-dump/
 

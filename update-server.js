@@ -1,7 +1,7 @@
 // In-app updates from GitHub. This side only checks, downloads, verifies and stages files under
 // data/update/; the boot file (electron/main.js) installs them at the next start, keeps a backup of every
 // file it replaces, and puts the old version back if the new one doesn't start.
-// Never touched by an update: data/, the three dumps, node_modules/, .git/, electron/main.js.
+// Never touched by an update: data/, the dumps, node_modules/, .git/, electron/main.js.
 
 'use strict';
 
@@ -13,7 +13,7 @@ const { spawn } = require('child_process');
 const DEFAULT_REPO = 'Boxomans/Box-Docspitter';
 const BRANCH = 'main';
 const MAX_ZIP = 300 * 1024 * 1024;
-const PROTECTED = [/^data(\/|$)/i, /^(image|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-docspitter\.exe$/i];
+const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-docspitter\.exe$/i];
 // Files that must be in any real release.
 const REQUIRED = ['package.json', 'server.js', 'update-server.js', 'electron/shell.js', 'electron/preload.js', 'public/index.html', 'public/js/app.js'];
 

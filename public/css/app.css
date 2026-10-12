@@ -1264,3 +1264,12 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .toast-x:hover { opacity: 1; }
 .sb-root { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-root:hover { color: var(--text); }
+
+/* files carried by Shift+drag, rows sent by Ctrl+right-click, the dump side panels */
+.drag-tag { position: fixed; left: -1000px; top: -1000px; padding: 4px 10px; border-radius: 7px; background: var(--accent); color: #fff; font: 600 12px var(--font-ui, inherit); white-space: nowrap; }
+.file-row.sent { animation: row-sent .5s ease-out; }
+@keyframes row-sent { from { background: var(--accent-soft-2); box-shadow: inset 2px 0 0 var(--accent); } to { background: transparent; box-shadow: none; } }
+.dump-panel-hint { padding: 0 12px 6px; font-size: 10.5px; }
+.panel-body.drop { background: var(--accent-soft); outline: 1px dashed var(--accent-line); outline-offset: -4px; }
+.dump-row .fr-icon { width: 22px; height: 22px; display: grid; place-items: center; }
+.fr-thumb { width: 22px; height: 22px; object-fit: cover; border-radius: 4px; }

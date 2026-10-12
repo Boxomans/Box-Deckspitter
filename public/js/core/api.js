@@ -99,6 +99,8 @@ export const api = {
   customSound: (name) => request('GET', `/api/sounds/file?name=${enc(name)}`),
   setCustomSound: (name, ext, bytes) => request('POST', `/api/sounds/custom?name=${enc(name)}&ext=${enc(ext)}`, { body: bytes }),
   resetSound: (name = null) => request('POST', '/api/sounds/reset', { json: { name } }),
+  dumpImport: (path, kind = 'media', name) => request('POST', '/api/dump/import', { json: { path, kind, name } }),
+  dumpReserve: (name, kind = 'media') => request('POST', '/api/dump/reserve', { json: { name, kind } }),
   dumpRemove: (name, kind = 'image') => request('POST', '/api/dump/remove', { json: { name, kind } }),
   dumpRename: (name, to, kind = 'image') => request('POST', '/api/dump/rename', { json: { name, to, kind } }),
   dumpIdentical: (kind = 'image') => request('GET', `/api/dump/identical?kind=${enc(kind)}`),

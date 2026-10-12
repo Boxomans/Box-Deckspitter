@@ -24,7 +24,7 @@ const ROLLBACK_FLAG = path.join(UPD, 'rollback.flag'); // written by Settings â†
 const READY_TIMEOUT = 90 * 1000;
 
 // Paths an update may never touch, whatever the download says.
-const PROTECTED = [/^data(\/|$)/i, /^(image|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-docspitter\.exe$/i];
+const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-docspitter\.exe$/i];
 const isSafeRel = (rel) => typeof rel === 'string' && rel.length > 0 && rel.length < 400 && !rel.includes('\0') && !path.isAbsolute(rel)
   && !/^[a-z]:/i.test(rel) && !rel.split(/[\\/]/).includes('..') && !PROTECTED.some((re) => re.test(rel.replace(/\\/g, '/')));
 const abs = (rel) => path.join(ROOT, ...rel.split(/[\\/]/));
