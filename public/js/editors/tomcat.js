@@ -15,7 +15,12 @@ const PANEL_W = 360;
 const BSCOPE_SIZE = 260;
 const MARGIN = 18;
 const RADAR_RANGE_KM = 185; // ~100 nm
-const KILL_RANGE_KM = 20; // a bandit this close has merged: game over
+const KILL_RANGE_KM = 20; // a bandit this close has merged: dogfight
+// the merge: after a 3 s countdown, click DOGFIGHT_CLICKS times in DOGFIGHT_S seconds (real time) to get guns on it,
+// then a 50/50 roll decides it
+const DOGFIGHT_S = 3;
+const DOGFIGHT_COUNTDOWN = 3; // a 3-2-1 to get your hand on the mouse first
+const DOGFIGHT_CLICKS = 15;
 const MACH1_KMPS = 0.343;
 const OWN_SPEED = MACH1_KMPS * 1.0;
 const PLAYER_ALT_FT = 30000;
@@ -66,8 +71,17 @@ export const UPGRADES = [
   { id: 'armor', name: 'Armor plating', what: 'Shrug off one missile hit per sortie per level', base: 2500, max: 3, rebirth: 1 },
 ];
 export const upgradeCost = (u, level) => Math.round(u.base * (u.growth || 1.6) ** level);
-/** Rebirth: at this much $, trade the $ and every upgrade for a rebirth, which opens new upgrades. */
+/**
+ * Rebirth: trade the $ and every upgrade for tokens. The price doubles each time ($1M, $2M, $4M…) and so does the
+ * payout (1, 2, 4… tokens). Tokens buy perks in the rebirth shop, which are kept through later rebirths.
+ */
 export const REBIRTH_AT = 1_000_000;
+export const rebirthCost = (rebirths = 0) => REBIRTH_AT * 2 ** rebirths;
+export const rebirthTokens = (rebirths = 0) => 2 ** rebirths;
+/** Rebirth-shop perks, bought with tokens: level n costs cost(n) tokens. */
+export const PERKS = [
+  { id: 'favor', name: 'Admiral’s favor', what: '+10% $ from every kill per level, on top of Defense contracts. Kept through rebirths. No limit.', max: Infinity, cost: (level) => level + 1 },
+];
 export const unlockedUpgrades = (rebirths = 0) => UPGRADES.filter((u) => (u.rebirth || 0) <= rebirths);
 export const nextUnlock = (rebirths = 0) => UPGRADES.filter((u) => (u.rebirth || 0) > rebirths).sort((a, b) => a.rebirth - b.rebirth)[0] || null;
 
@@ -143,7 +157,7 @@ class TomcatGame {
     this.selectedId = null; this.selectedKind = 'bandit';
     this.nextId = 1; this.nextMissileId = 1; this.nextHostileId = 1;
     this.spawnT = 0; this.nextSpawn = rand(3, 7);
-    this.simTime = 0; this.gameOver = null;
+    this.simTime = 0; this.gameOver = null; this.dogfight = null;
     this.splashes = 0; this.intercepts = 0; this.shots = 0; this.score = 0; this.earned = 0;
     this.usedAuto = this.auto; this.autoCd = 0; this.restartIn = 0;
     this.flares = this.flareMax(); this.flareT = 0; this.flareCd = 0; this.flareFx = 0;
@@ -340,7 +354,8 @@ class TomcatGame {
     // later waves pay more (+15% a wave), so the money keeps up with the hangar prices
     const pay = 1 + 0.15 * this.heat();
     const [pts, base] = (BOUNTY[what] || [50, 5]).map((n) => Math.round(n * pay));
-    const cash = Math.max(1, Math.round(INCOME * base * (1 + 0.1 * (this.upgrades().contracts || 0))));
+    const favor = this.best().perks?.favor || 0;
+    const cash = Math.max(1, Math.round(INCOME * base * (1 + 0.1 * (this.upgrades().contracts || 0)) * (1 + 0.1 * favor)));
     this.score += pts;
     this.earned += cash;
     this.onEarn?.(cash);
@@ -519,6 +534,7 @@ class TomcatGame {
       return;
     }
     if (!this.started) return;
+    if (this.dogfight) { this.updateDogfight(dt / this.speed); return; } // the fight stops the clock (in real time)
     this.simTime += dt;
     this.score += dt; // a point a second
     this.spawnT += dt;
@@ -558,12 +574,60 @@ class TomcatGame {
     }
 
     const merged = this.bandits.find((b) => b.distance <= KILL_RANGE_KM);
-    if (merged) this.end(`${merged.id} (${merged.type}) MERGED`);
+    if (merged) this.dogfight = { bandit: merged, phase: 'countdown', cd: DOGFIGHT_COUNTDOWN, t: DOGFIGHT_S, clicks: 0, spin: 0, face: 1, hold: 0 };
     if (this.selectedTrack() == null) {
       const first = this.tracksSorted()[0];
       this.selectedId = first?.obj.id || null;
       this.selectedKind = first?.kind || 'bandit';
     }
+  }
+
+  // ---------------------------------------------------------------- the merge
+
+  /** Clicks only count while the game is on screen; with the tab in the background the fight waits for you. */
+  updateDogfight(dt) {
+    const f = this.dogfight;
+    f.spin += dt;
+    const watching = this.watching();
+    if (f.phase === 'countdown') {
+      if (!watching) return;
+      f.cd -= dt;
+      if (f.cd <= 0) f.phase = 'qte';
+    } else if (f.phase === 'qte') {
+      if (!watching) return;
+      f.t -= dt;
+      if (f.clicks >= DOGFIGHT_CLICKS) { f.phase = 'roll'; f.hold = 1.4; return; }
+      if (f.t <= 0) { this.dogfight = null; this.end(`${f.bandit.id} (${f.bandit.type}) WON THE DOGFIGHT`); }
+    } else if (f.phase === 'roll') {
+      f.hold -= dt;
+      if (f.hold > 0) { if ((f.tumble = (f.tumble || 0) + dt) > 0.07) { f.tumble = 0; f.face = 1 + Math.floor(Math.random() * 6); } return; }
+      f.face = 1 + Math.floor(Math.random() * 6);
+      f.win = f.face >= 4; // 4, 5, 6: guns kill · 1, 2, 3: you're hit
+      f.phase = 'result';
+      f.hold = 1.5;
+    } else if (f.phase === 'result') {
+      f.hold -= dt;
+      if (f.hold > 0) return;
+      this.dogfight = null;
+      const b = f.bandit;
+      if (!f.win) { this.end(`SHOT DOWN BY ${b.id} (${b.type}) IN THE DOGFIGHT`); return; }
+      const i = this.bandits.indexOf(b);
+      if (i >= 0) this.bandits.splice(i, 1);
+      if (this.selectedId === b.id) this.selectedId = null;
+      this.splashes++;
+      this.toast(`GUNS GUNS GUNS — SPLASH ${b.id}  +$${this.award(b.type)}`, 2.6, '#8afc96');
+    }
+  }
+
+  /** Someone's looking at the game: its tab is up and the app window is in front. */
+  watching() { return !!this.canvas && !document.hidden && document.hasFocus(); }
+
+  /** A click during the merge. True when it was one (so it doesn't also press a button). */
+  dogfightClick() {
+    const f = this.dogfight;
+    if (!f || this.gameOver) return false;
+    if (f.phase === 'qte') f.clicks++;
+    return true;
   }
 
   end(reason) {
@@ -640,7 +704,7 @@ class TomcatGame {
     this.button(this.restartBtn, 'RESTART', false, ts(this.restartBtn));
     this.button(this.pauseBtn, !this.started || this.gameOver ? 'START' : this.paused ? 'RESUME' : 'PAUSE', this.paused, ts(this.pauseBtn));
     this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, ts(this.autoBtn));
-    this.button(this.hangarBtn, 'HANGAR', !!this.hangarOpen, ts(this.hangarBtn), !this.canHangar());
+    this.button(this.hangarBtn, 'CARRIER', !!this.hangarOpen, ts(this.hangarBtn), !this.canHangar());
     this.button(this.speedBtn, `${this.speed}×`, this.speed > 1, ts(this.speedBtn));
     this.button(this.volBtn, 'VOL', !!this.volOpen, ts(this.volBtn));
     this.drawSelectorButtons();
@@ -651,6 +715,7 @@ class TomcatGame {
     this.drawToasts();
     if (this.gameOver) this.drawGameOver();
     else if (!this.started) this.drawReady();
+    else if (this.dogfight) this.drawDogfight();
     else if (this.paused) this.drawPaused();
   }
 
@@ -1023,7 +1088,7 @@ class TomcatGame {
         [g.reason, '#ff8080'],
         [`Auto survived ${clock(g.time)}   ·   score ${g.score.toLocaleString()}   ·   +$${g.earned}`],
         [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
-        [this.hangarOpen ? 'Holding while the hangar is open' : this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}… · H hangar` : 'Space or START to fly again · H hangar', '#888'],
+        [this.hangarOpen ? 'Holding while you’re on the carrier' : this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}… · H carrier` : 'Space or START to fly again · H carrier', '#888'],
       ], '#ff4d4d');
       return;
     }
@@ -1034,8 +1099,105 @@ class TomcatGame {
       [`Survived ${clock(g.time)}`],
       [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
       [`High score ${Math.max(g.score, b.bestScore || 0).toLocaleString()}   ·   best time ${clock(Math.max(g.time, b.bestTime || 0))}`, '#9ecf9f'],
-      ['Space or START to fly again · H hangar', '#888'],
+      ['Space or START to fly again · H carrier', '#888'],
     ], '#ff4d4d');
+  }
+
+  /** The merge: two jets chasing each other round a circle, the click meter, then the dice. */
+  drawDogfight() {
+    const { ctx } = this;
+    const f = this.dogfight;
+    const leftW = this.W - PANEL_W;
+    const w = Math.min(leftW - 40, 460), hgt = 360;
+    const x = (leftW - w) / 2, y = Math.max(60, this.H * 0.45 - hgt / 2);
+    const red = '#ff5d5d', green = '#8afc96';
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,12,10,0.94)'; ctx.strokeStyle = f.phase === 'result' ? (f.win ? green : red) : '#ffb36b'; ctx.lineWidth = 2;
+    ctx.fillRect(x, y, w, hgt); ctx.strokeRect(x, y, w, hgt);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffb36b'; ctx.font = `bold 22px ${MONO}`;
+    ctx.fillText(`MERGED — ${f.bandit.id} (${f.bandit.type})`, x + w / 2, y + 34);
+    // the turning fight: F-14 and bandit on one circle, the bandit a little behind and closing
+    const cx = x + w / 2, cy = y + 140, r = 62;
+    ctx.strokeStyle = '#2a2f2a'; ctx.setLineDash([4, 6]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    const a = f.spin * 2.6;
+    const at = (ang) => [cx + Math.cos(ang) * r, cy + Math.sin(ang) * r];
+    // going round clockwise: the nose points along the circle (a + π in drawJet's frame), the bandit on its tail
+    this.drawJet(...at(a), a + Math.PI, 'f14', '#cfe8cf');
+    this.drawJet(...at(a - 1.0), a - 1.0 + Math.PI, f.bandit.type === 'J-36' ? 'j36' : 'flanker', red);
+    ctx.font = `11px ${MONO}`;
+    ctx.fillStyle = '#cfe8cf'; ctx.fillText('F-14F', ...at(a).map((v, i) => v + (i ? -16 : 0)));
+    ctx.fillStyle = red; ctx.fillText(f.bandit.type, ...at(a - 1.0).map((v, i) => v + (i ? -16 : 0)));
+    const barX = x + 30, barW = w - 60;
+    if (f.phase === 'countdown') {
+      const n = Math.max(1, Math.ceil(f.cd));
+      const k = f.cd - Math.floor(f.cd); // shrinks through each second
+      ctx.fillStyle = '#ffd36b'; ctx.font = `bold ${Math.round(40 + 28 * k)}px ${MONO}`;
+      ctx.fillText(this.watching() ? String(n) : '…', cx, y + 290);
+      ctx.fillStyle = '#999'; ctx.font = `13px ${MONO}`;
+      ctx.fillText(`Get ready: then click ${DOGFIGHT_CLICKS} times in ${DOGFIGHT_S}s`, cx, y + 330);
+    } else if (f.phase === 'qte') {
+      const pulse = 0.6 + 0.4 * Math.abs(Math.sin(f.spin * 9));
+      ctx.fillStyle = `rgba(255,211,107,${pulse})`; ctx.font = `bold 20px ${MONO}`;
+      ctx.fillText(this.watching() ? 'CLICK AS FAST AS YOU CAN!' : 'WAITING FOR YOU…', cx, y + 248);
+      // clicks
+      ctx.fillStyle = '#1d241d'; ctx.fillRect(barX, y + 264, barW, 16);
+      ctx.fillStyle = green; ctx.fillRect(barX, y + 264, barW * Math.min(1, f.clicks / DOGFIGHT_CLICKS), 16);
+      ctx.strokeStyle = '#3c5a3c'; ctx.strokeRect(barX, y + 264, barW, 16);
+      // time
+      ctx.fillStyle = '#1d241d'; ctx.fillRect(barX, y + 288, barW, 6);
+      ctx.fillStyle = f.t < 1 ? red : '#ffb36b'; ctx.fillRect(barX, y + 288, barW * Math.max(0, f.t / DOGFIGHT_S), 6);
+      ctx.fillStyle = '#999'; ctx.font = `13px ${MONO}`;
+      ctx.fillText(`${f.clicks} / ${DOGFIGHT_CLICKS} clicks · ${Math.max(0, f.t).toFixed(1)}s`, cx, y + 320);
+      ctx.fillText('Get guns on it, or it gets you', cx, y + 342);
+    } else {
+      // the roll: a die, 4–6 is the kill
+      const s = 44, dx = cx - s / 2, dy = y + 222;
+      ctx.fillStyle = '#eee'; ctx.fillRect(dx, dy, s, s);
+      ctx.fillStyle = '#111';
+      const pip = (px, py) => { ctx.beginPath(); ctx.arc(dx + px * s, dy + py * s, 4, 0, Math.PI * 2); ctx.fill(); };
+      const P = { 1: [[0.5, 0.5]], 2: [[0.25, 0.25], [0.75, 0.75]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]], 4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]], 5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]], 6: [[0.25, 0.22], [0.75, 0.22], [0.25, 0.5], [0.75, 0.5], [0.25, 0.78], [0.75, 0.78]] };
+      for (const [px, py] of P[f.face]) pip(px, py);
+      ctx.font = `bold 18px ${MONO}`;
+      if (f.phase === 'roll') { ctx.fillStyle = '#ffd36b'; ctx.fillText('GUNS ON HIM — ROLLING…', cx, y + 300); }
+      else { ctx.fillStyle = f.win ? green : red; ctx.fillText(f.win ? 'SPLASH — YOU WIN THE MERGE' : 'HE GOT YOU FIRST', cx, y + 300); }
+      ctx.fillStyle = '#999'; ctx.font = `13px ${MONO}`;
+      ctx.fillText('4–6: guns kill  ·  1–3: you’re hit', cx, y + 330);
+    }
+    ctx.restore();
+  }
+
+  /** A jet seen from above, nose along `heading` (radians, 0 = up the screen). */
+  drawJet(x, y, heading, kind, color) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(heading);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (kind === 'f14') {
+      // long nose, swept swing wings, wide-set twin tails
+      ctx.moveTo(0, -16); ctx.lineTo(2, -9); ctx.lineTo(3, -3); ctx.lineTo(13, 4); ctx.lineTo(13, 6); ctx.lineTo(4, 4);
+      ctx.lineTo(4, 9); ctx.lineTo(8, 13); ctx.lineTo(8, 15); ctx.lineTo(1, 13); ctx.lineTo(0, 15); ctx.lineTo(-1, 13);
+      ctx.lineTo(-8, 15); ctx.lineTo(-8, 13); ctx.lineTo(-4, 9); ctx.lineTo(-4, 4); ctx.lineTo(-13, 6); ctx.lineTo(-13, 4);
+      ctx.lineTo(-3, -3); ctx.lineTo(-2, -9);
+    } else {
+      // the right half, nose to tail, mirrored for the left
+      const half = kind === 'j36'
+        // J-36: big tailless cranked delta, long chined nose, sawtooth trailing edge
+        ? [[0, -22], [1.6, -16], [3, -9], [6, -3], [18, 11], [18, 12.5], [11, 13], [7, 17], [3, 14], [0, 16]]
+        // J-11 (Su-27 clone): needle nose, curved LERX into a clipped trapezoid wing, wide-set engines,
+        // big stabilators reaching past the nozzles and the stinger between them
+        : [[0, -19], [1, -15], [1.8, -10], [2.4, -6], [4, -2.5], [6, 0.5], [14, 7], [14, 9.5], [6.5, 9.5], [6, 11.5],
+           [11.5, 14.5], [11.5, 16.5], [5.5, 15.5], [5, 17.5], [2.6, 17.5], [1.4, 15], [0.8, 19], [0, 19.5]];
+      const pts = [...half, ...half.slice(1, -1).reverse().map(([px, py]) => [-px, py])];
+      const k = kind === 'j36' ? 0.95 : 0.85;
+      pts.forEach(([px, py], i) => (i ? ctx.lineTo(px * k, py * k) : ctx.moveTo(px * k, py * k)));
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   drawPaused() {
@@ -1044,16 +1206,17 @@ class TomcatGame {
 
   drawReady() {
     if (this.hangarOpen) return;
-    this.card('READY', [['Space, Enter or START to take off', '#ddd'], ['H hangar: upgrades are bought between sorties', '#888'], ['A auto · T speed', '#888']], '#8afc96');
+    this.card('READY', [['Space, Enter or START to take off', '#ddd'], ['H carrier: upgrades are bought between sorties', '#888'], ['A auto · T speed', '#888']], '#8afc96');
   }
 
   // ---------------------------------------------------------------- input
 
-  togglePause() { if (!this.gameOver && this.started) this.paused = !this.paused; }
+  togglePause() { if (!this.gameOver && this.started && !this.dogfight) this.paused = !this.paused; }
 
   key(e) {
     const k = e.key.toLowerCase();
     if ((!this.started || this.gameOver) && (k === ' ' || k === 'enter')) { if (!this.hangarOpen) this.start(); return true; }
+    if (this.dogfight && !this.gameOver) return k !== 'r' ? ['f', 'x', 'n', ' ', 'p', 'a', 'h', 'tab'].includes(k) : (this.reset(), true); // the merge is clicks only
     if (k === 'f') this.fire();
     else if (k === 'x') this.flare();
     else if (k === 'n') this.notch();
@@ -1074,6 +1237,7 @@ class TomcatGame {
   local(e) { const r = this.canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
 
   click(e) {
+    if (this.dogfight && !this.gameOver) return; // counted on pointerdown
     const { x, y } = this.local(e);
     this.layout();
     if (inRect(x, y, this.restartBtn)) return this.reset();
@@ -1127,7 +1291,7 @@ class TomcatGame {
 // While the easter egg is on, one sortie keeps flying for as long as the app runs: full size in its tab, as a tiny
 // radar you can drag anywhere, or folded into the right sidebar. It only stops for the hangar or for P.
 
-const SOUND_FILE = { flare: '/assets/sounds/cm.mp3', missile: '/assets/sounds/missile.mp3' };
+const SOUND_FILE = { flare: '/assets/sounds/cm.mp3', missile: '/assets/sounds/missile.mp3', rwr: '/assets/sounds/rwr.mp3' };
 const SIM_STEP = 0.05; // s per update (the old frame loop capped steps at 0.06)
 const MINI_W = 120, MINI_H = 84;
 
@@ -1179,6 +1343,13 @@ export class Flight {
     let left = Math.min(600, (now - this.last) / 1000) * this.game.speed; // asleep longer than 10 min: that time is lost
     this.last = now;
     while (left > 1e-6) { const d = Math.min(SIM_STEP, left); this.game.update(d); left -= d; }
+    // merged while you're somewhere else (another tab, another window): the RWR goes off, app wide, every few seconds
+    // until you come back to it
+    const f = this.game.dogfight;
+    if (f && !this.game.gameOver && f.phase !== 'result' && !this.game.watching() && now - (this.lastRwr || 0) > 4000) {
+      this.lastRwr = now;
+      this.sound('rwr', { anywhere: true });
+    }
   }
 
   stop() {
@@ -1229,9 +1400,9 @@ export class Flight {
   volume(kind) { return clamp((this.app.settings.tomcatVolume || {})[kind] ?? 1, 0, 1); }
 
   /** Only heard while the game is on screen. A busy fight at 3× fires a lot: one launch sound per 120 ms at most. */
-  sound(kind) {
+  sound(kind, { anywhere = false } = {}) {
     const s = this.app.settings;
-    if (!this.view || s.sounds === false) return;
+    if ((!this.view && !anywhere) || s.sounds === false) return;
     const now = performance.now();
     if (kind === 'missile' && now - (this.lastLaunch || 0) < 120) return;
     if (kind === 'missile') this.lastLaunch = now;
@@ -1403,11 +1574,12 @@ export class Flight {
     let label;
     if (g.gameOver) label = g.auto ? `DOWN · ${Math.max(0, Math.ceil(g.restartIn))}s` : 'DOWN';
     else if (!g.started) label = 'READY';
+    else if (g.dogfight) label = docked ? 'MERGE' : 'MERGED — CLICK!';
     else if (g.paused) label = 'PAUSED';
     else if (!near) label = 'CLEAR';
     else label = docked ? km : `${near.msl ? 'MSL' : 'BANDIT'} ${km}${g.speed > 1 ? ` ${g.speed}×` : ''}`;
     this.miniDist.textContent = label;
-    this.miniDist.classList.toggle('threat', !!near?.msl && !g.paused && !g.gameOver);
+    this.miniDist.classList.toggle('threat', (!!near?.msl || !!g.dogfight) && !g.paused && !g.gameOver);
     this.miniDist.classList.toggle('down', !!g.gameOver);
     this.miniPause.textContent = g.paused ? '▶' : '❚❚';
   }
@@ -1425,6 +1597,7 @@ export class TomcatEditor extends BaseEditor {
     this.flight = await this.app.tomcatFlight();
     this.game = this.flight.game;
     this.canvas.addEventListener('click', (e) => { this.canvas.focus(); this.game.click(e); });
+    this.canvas.addEventListener('pointerdown', (e) => { if (e.button === 0 && this.game.dogfightClick()) e.preventDefault(); });
     this.canvas.addEventListener('mousemove', (e) => this.game.move(e));
     this.canvas.addEventListener('mouseleave', () => { this.game.hoveredMissileId = null; });
     this.canvas.addEventListener('wheel', (e) => this.game.wheel(e), { passive: false });
@@ -1479,7 +1652,7 @@ export class TomcatEditor extends BaseEditor {
     };
     const note = this.app.settings.sounds === false ? h('div', { class: 'tv-note' }, 'App sounds are off (Settings), so the game is silent.') : null;
     this.vol = h('div', { class: 'tomcat-vol', tabindex: '-1', style: { left: `${Math.max(8, Math.min(b.x, this.game.W - PANEL_W - 258))}px`, top: `${b.y + b.h + 6}px` } }, // stays off the scope
-      h('div', { class: 'tv-head' }, 'SOUND'), row('flare', 'Chaff / flares'), row('missile', 'Missile launch'), note);
+      h('div', { class: 'tv-head' }, 'SOUND'), row('flare', 'Chaff / flares'), row('missile', 'Missile launch'), row('rwr', 'Merge warning'), note);
     this.vol.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key.toLowerCase() === 'v') { e.preventDefault(); e.stopPropagation(); this.closeVolume(); } });
     this.offVol = (e) => { if (this.vol && !this.vol.contains(e.target) && e.target !== this.canvas) this.closeVolume(); };
     document.addEventListener('pointerdown', this.offVol, true);
@@ -1501,7 +1674,7 @@ export class TomcatEditor extends BaseEditor {
   toggleHangar() {
     if (this.hangar) return this.closeHangar();
     const g = this.game;
-    if (!g.canHangar()) { g.toast('HANGAR OPENS BETWEEN SORTIES', 1.6, '#ffb36b'); return; }
+    if (!g.canHangar()) { g.toast('BACK TO THE CARRIER BETWEEN SORTIES', 1.6, '#ffb36b'); return; }
     g.hangarOpen = true;
     this.hangar = h('div', { class: 'tomcat-hangar', tabindex: '-1' });
     this.hangar.addEventListener('keydown', (e) => {
@@ -1524,7 +1697,9 @@ export class TomcatEditor extends BaseEditor {
     const cash = t.cash || 0;
     const lv = t.upgrades || {};
     const reborn = t.rebirths || 0;
-    const rows = unlockedUpgrades(reborn).map((u) => {
+    const tokens = t.tokens || 0;
+    const shop = this.carrierTab === 'shop';
+    const rows = shop ? this.shopRows(t) : unlockedUpgrades(reborn).map((u) => {
       const level = lv[u.id] || 0;
       const cost = upgradeCost(u, level);
       const maxed = level >= u.max;
@@ -1537,35 +1712,79 @@ export class TomcatEditor extends BaseEditor {
         h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, u.rebirth ? `★ ${u.name}` : u.name), h('div', { class: 'th-what' }, u.what)),
         pips, buy);
     });
-    // rebirth: shown once there's something new it would open
-    const next = nextUnlock(reborn);
-    if (next) {
-      const ready = cash >= REBIRTH_AT;
-      const btn = h('button', { class: 'th-buy th-rebirth-btn', disabled: !ready }, this.rebirthArmed ? 'CONFIRM' : 'REBIRTH');
-      btn.addEventListener('click', () => this.rebirth());
-      rows.push(h('div', { class: 'th-row th-rebirth' },
-        h('div', { class: 'th-info' },
-          h('div', { class: 'th-name' }, `Rebirth${reborn ? ` ${reborn + 1}` : ''}`),
-          h('div', { class: 'th-what' }, this.rebirthArmed
-            ? `Sure? Your $ and every upgrade go back to zero. High scores and stats stay. Opens ★ ${next.name}.`
-            : `At $${REBIRTH_AT.toLocaleString()}: start over with $0 and no upgrades, and open a new upgrade: ★ ${next.name}.`),
-          ready ? null : h('div', { class: 'th-bar' }, h('span', { style: `width:${Math.min(100, (cash / REBIRTH_AT) * 100).toFixed(1)}%` }))),
-        btn));
-    }
     const close = h('button', { class: 'th-close', title: 'Close (H or Esc)' }, '×');
     close.addEventListener('click', () => this.closeHangar());
+    const tab = (id, label) => {
+      const b = h('button', { class: `th-tab${(this.carrierTab || 'upgrades') === id ? ' on' : ''}` }, label);
+      b.addEventListener('click', () => { this.carrierTab = id; this.rebirthArmed = false; this.renderHangar(); });
+      return b;
+    };
     const focused = this.hangar.contains(document.activeElement);
     this.hangar.replaceChildren(h('div', { class: 'th-card' },
-      h('div', { class: 'th-head' }, h('span', {}, 'HANGAR'), reborn ? h('span', { class: 'th-stars', title: `Reborn ${reborn}×` }, `★${reborn}`) : null, h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`), close),
-      h('div', { class: 'th-sub' }, 'Splash bandits and missiles for $. Upgrades stay between sorties.'),
+      h('div', { class: 'th-head' }, h('span', {}, 'BACK ON THE CARRIER'), reborn ? h('span', { class: 'th-stars', title: `Reborn ${reborn}×` }, `★${reborn}`) : null,
+        h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`), tokens || reborn ? h('span', { class: 'th-tokens', title: 'Rebirth tokens' }, `◆${tokens}`) : null, close),
+      h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP')),
+      h('div', { class: 'th-sub' }, shop
+        ? 'Rebirth for tokens, and spend them on perks. Perks stay through every rebirth.'
+        : 'Splash bandits and missiles for $. Upgrades stay between sorties (until you rebirth).'),
       ...rows));
     if (focused) this.hangar.focus();
+  }
+
+  /** The rebirth shop: the rebirth itself, then the token perks. */
+  shopRows(t) {
+    const cash = t.cash || 0;
+    const reborn = t.rebirths || 0;
+    const tokens = t.tokens || 0;
+    const price = rebirthCost(reborn);
+    const pay = rebirthTokens(reborn);
+    const next = nextUnlock(reborn);
+    const ready = cash >= price;
+    const btn = h('button', { class: 'th-buy th-rebirth-btn', disabled: !ready }, this.rebirthArmed ? 'CONFIRM' : 'REBIRTH');
+    btn.addEventListener('click', () => this.rebirth());
+    const gain = `+${pay} token${pay === 1 ? '' : 's'}${next ? ` and ★ ${next.name}` : ''}`;
+    const rows = [h('div', { class: 'th-row th-rebirth' },
+      h('div', { class: 'th-info' },
+        h('div', { class: 'th-name' }, `Rebirth ${reborn + 1}`),
+        h('div', { class: 'th-what' }, this.rebirthArmed
+          ? `Sure? Your $ and every upgrade go back to zero (perks, high scores and stats stay). You get ${gain}.`
+          : `At $${price.toLocaleString()}: start over with $0 and no upgrades for ${gain}. The next one costs double and pays double.`),
+        ready ? null : h('div', { class: 'th-bar' }, h('span', { style: `width:${Math.min(100, (cash / price) * 100).toFixed(1)}%` }))),
+      btn)];
+    const perks = t.perks || {};
+    for (const p of PERKS) {
+      const level = perks[p.id] || 0;
+      const cost = p.cost(level);
+      const maxed = level >= p.max;
+      const buy = h('button', { class: 'th-buy th-token-btn', disabled: maxed || tokens < cost }, maxed ? 'MAX' : `◆${cost}`);
+      buy.addEventListener('click', () => this.buyPerk(p));
+      rows.push(h('div', { class: 'th-row th-reborn' },
+        h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, p.name), h('div', { class: 'th-what' }, p.what)),
+        h('div', { class: 'th-pips th-level' }, `LV ${level}`), buy));
+    }
+    return rows;
+  }
+
+  buyPerk(p) {
+    const t = { ...(this.app.settings.tomcat || {}) };
+    const perks = { ...(t.perks || {}) };
+    const level = perks[p.id] || 0;
+    const cost = p.cost(level);
+    if (level >= p.max || (t.tokens || 0) < cost) return;
+    t.tokens -= cost;
+    perks[p.id] = level + 1;
+    t.perks = perks;
+    this.app.settings.tomcat = t;
+    this.flight.flushCash();
+    this.app.sounds?.play?.('click');
+    this.renderHangar();
+    this.refreshStatus();
   }
 
   /** First click arms it, the second does it: the $ and upgrades go, the rebirth count goes up. */
   rebirth() {
     const t = { ...(this.app.settings.tomcat || {}) };
-    if ((t.cash || 0) < REBIRTH_AT || !nextUnlock(t.rebirths || 0)) return;
+    if ((t.cash || 0) < rebirthCost(t.rebirths || 0)) return;
     if (!this.rebirthArmed) {
       this.rebirthArmed = true;
       clearTimeout(this.rebirthDisarm);
@@ -1577,6 +1796,7 @@ export class TomcatEditor extends BaseEditor {
     clearTimeout(this.rebirthDisarm);
     t.cash = 0;
     t.upgrades = {};
+    t.tokens = (t.tokens || 0) + rebirthTokens(t.rebirths || 0);
     t.rebirths = (t.rebirths || 0) + 1;
     this.app.settings.tomcat = t;
     this.flight.flushCash();
@@ -1614,7 +1834,7 @@ export class TomcatEditor extends BaseEditor {
   status() {
     const s = this.app.settings.tomcat || {};
     return {
-      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · V volume · H hangar (between sorties) · P pause · R restart' }],
+      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · V volume · H carrier (between sorties) · P pause · R restart' }],
       right: [{ text: `high score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()}` }],
     };
   }
