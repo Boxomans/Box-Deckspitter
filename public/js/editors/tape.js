@@ -28,8 +28,16 @@ export class TapeEditor extends BaseEditor {
   async load() {
     this.tools = await get('/api/tools').catch(() => ({}));
     this.items = [];
-    this.input = h('input', { type: 'url', class: 'klep-url', placeholder: 'paste a YouTube or Spotify playlist / album / song link…', spellcheck: 'false' });
+    this.input = h('input', { type: 'text', class: 'klep-url', placeholder: 'search for a song, paste a list of songs, or a YouTube / Spotify link…', spellcheck: 'false' });
     this.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.fetch(); });
+    // pasting several lines (a list of songs) keeps them apart: one line becomes one ";"-separated entry
+    this.input.addEventListener('paste', (e) => {
+      const text = e.clipboardData?.getData('text') || '';
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (lines.length < 2) return;
+      e.preventDefault();
+      this.input.value = lines.join(' ; ');
+    });
     this.goBtn = h('button', { class: 'btn primary klep-go', onclick: () => this.fetch() }, icon('music', 'sm'), 'Get tracks');
     this.results = h('div', { class: 'tape-results' });
     this.progress = h('div', { class: 'tape-progress' });
@@ -49,11 +57,15 @@ export class TapeEditor extends BaseEditor {
 
   async fetch() {
     const url = this.input.value.trim();
-    if (!/^https?:\/\//i.test(url)) return toast('Paste a link that starts with https://', { type: 'warn' });
+    if (!url) return toast('Type a song to search for, or paste a link.', { type: 'warn' });
+    const isLink = /^https?:\/\//i.test(url) || /^spotify:/i.test(url);
+    const list = !isLink && url.includes(';') ? url.split(';').map((x) => x.trim()).filter(Boolean) : null;
     this.goBtn.disabled = true;
-    clear(this.results).append(h('div', { class: 'klep-loading' }, h('div', { class: 'spinner' }), h('span', { class: 'faint' }, 'reading the playlist… (big playlists take a few seconds)')));
+    clear(this.results).append(h('div', { class: 'klep-loading' }, h('div', { class: 'spinner' }), h('span', { class: 'faint' },
+      isLink ? 'reading the playlist… (big playlists take a few seconds)' : list ? 'lining up your songs…' : 'searching YouTube…')));
     try {
-      const res = /^spotify:|^https?:\/\/(open\.spotify\.com|spotify\.link)\//i.test(url) ? await this.fromSpotify(url) : await post('/api/klep/scan', { url, mode: 'ytdlp', playlist: 'on' });
+      const res = !isLink ? (list ? await this.fromList(list) : await this.search(url))
+        : /^spotify:|^https?:\/\/(open\.spotify\.com|spotify\.link)\//i.test(url) ? await this.fromSpotify(url) : await post('/api/klep/scan', { url, mode: 'ytdlp', playlist: 'on' });
       this.items = (res.items || []).filter((x) => x.url);
       this.title = res.title || '';
       this.render(res);
@@ -62,6 +74,29 @@ export class TapeEditor extends BaseEditor {
     } finally {
       this.goBtn.disabled = false;
     }
+  }
+
+  /** Words → the top YouTube results; nothing is ticked until you pick (except the first). */
+  async search(q) {
+    const res = await post('/api/tape/search', { q });
+    res.items.forEach((it, i) => { it.preselect = i === 0; });
+    res.notes = res.items.length ? ['Tick the ones you want — the top result is ticked for you.'] : [];
+    res.search = true;
+    return res;
+  }
+
+  /** A list of songs ("Artist - Title" or just a title, one per entry) → each is matched on YouTube while downloading. */
+  async fromList(entries) {
+    let have = new Set();
+    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.name)))); } catch { /* ignore */ }
+    const items = entries.slice(0, 300).map((line) => {
+      const m = /^(.+?)\s+[-–—]\s+(.+)$/.exec(line);
+      const artist = m ? m[1].trim() : '';
+      const title = m ? m[2].trim() : line;
+      return { type: 'spotify', url: 'https://www.youtube.com/', title, artist, duration: 0, label: artist ? `${artist} - ${title}` : title, uploader: artist || null, already: have.has(songKey(artist ? `${artist} - ${title}` : title)) };
+    });
+    const n = items.filter((x) => x.already).length;
+    return { title: `${items.length} songs from your list`, items, notes: [`Each song is matched to the best YouTube upload when it downloads.${n ? ` ${n} already in your audio dump start unticked.` : ''}`] };
   }
 
   /** Spotify → the song list (YouTube matching happens per song while downloading). */
@@ -112,7 +147,7 @@ export class TapeEditor extends BaseEditor {
     const R = clear(this.results);
     for (const n of res.notes || []) R.append(h('div', { class: 'klep-note' }, icon('info', 'sm'), h('span', {}, n)));
     if (!this.items.length) { R.append(h('div', { class: 'klep-note' }, 'No tracks found at that link.')); return; }
-    const all = h('input', { type: 'checkbox', checked: !this.items.some((x) => x.already) });
+    const all = h('input', { type: 'checkbox', checked: !this.items.some((x) => x.already || x.preselect === false) });
     const count = h('span', {});
     const goBtn = h('button', { class: 'btn primary', onclick: () => this.download() }, icon('download', 'sm'), h('span', {}));
     const update = () => {
@@ -126,7 +161,7 @@ export class TapeEditor extends BaseEditor {
     this.boxes = [];
     const list = h('div', { class: 'tape-list' });
     this.items.forEach((it, i) => {
-      const cb = h('input', { type: 'checkbox', checked: !it.already });
+      const cb = h('input', { type: 'checkbox', checked: it.preselect !== undefined ? it.preselect : !it.already });
       cb.addEventListener('change', update);
       cb._item = it;
       this.boxes.push(cb);

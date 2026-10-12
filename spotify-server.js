@@ -89,7 +89,7 @@ function score(c, want) {
   if (want.duration && c.duration) {
     const d = Math.abs(c.duration - want.duration);
     s += d <= 3 ? 40 : d <= 8 ? 28 : d <= 15 ? 12 : d <= 30 ? -10 : -80;
-  } else s -= 15;
+  } else if (want.duration) s -= 15; // only a penalty when we know how long the song should be (typed songs don't)
   const words = wantT.split(' ').filter((w) => w.length > 1);
   const hit = words.filter((w) => t.includes(w)).length / (words.length || 1);
   s += Math.round(hit * 35);
@@ -108,7 +108,8 @@ module.exports = function createSpotify({ secrets, saveSecrets, readJSONBody, ru
   async function findOnYouTube(want, timeoutMs = 60000) {
     const exe = tools().ytdlp;
     if (!exe) throw err(400, 'yt-dlp is not installed (winget install yt-dlp)');
-    const q = `${String(want.artist).split(',')[0]} - ${want.title}`.replace(/["\n]/g, ' ');
+    const artist = String(want.artist || '').split(',')[0].trim();
+    const q = (artist ? `${artist} - ${want.title}` : want.title).replace(/["\n]/g, ' ');
     const json = JSON.parse(await runCapture(exe, ['-J', '--flat-playlist', '--no-warnings', '--', `ytsearch8:${q}`], timeoutMs));
     const cands = (json.entries || []).filter((e) => e && (e.url || e.id)).map((e) => ({
       url: e.url && /^https?:/.test(e.url) ? e.url : `https://www.youtube.com/watch?v=${e.id}`, title: e.title, duration: e.duration, channel: e.channel || e.uploader,
@@ -134,6 +135,20 @@ module.exports = function createSpotify({ secrets, saveSecrets, readJSONBody, ru
         }
         const r = await fromEmbed(link);
         return { ...r, source: 'embed', hasKey: !!c };
+      },
+      // BoxTape word search: the top YouTube results for some words
+      'POST /api/tape/search': async (req) => {
+        const { q } = await readJSONBody(req);
+        const words = String(q || '').replace(/["\n\r]/g, ' ').trim().slice(0, 200);
+        if (!words) throw err(400, 'Type something to search for.');
+        const exe = tools().ytdlp;
+        if (!exe) throw err(400, 'yt-dlp is not installed (winget install yt-dlp)');
+        const json = JSON.parse(await runCapture(exe, ['-J', '--flat-playlist', '--no-warnings', '--', `ytsearch20:${words}`], 60000));
+        const items = (json.entries || []).filter((e) => e && (e.url || e.id) && e.duration !== 0).map((e) => ({
+          url: e.url && /^https?:/.test(e.url) ? e.url : `https://www.youtube.com/watch?v=${e.id}`,
+          title: e.title, uploader: e.channel || e.uploader || null, duration: e.duration || null, type: 'ytdlp',
+        }));
+        return { title: `“${words}” on YouTube`, items };
       },
       'GET /api/spotify/key': async () => ({ hasKey: !!creds() }),
       'POST /api/spotify/key': async (req) => {

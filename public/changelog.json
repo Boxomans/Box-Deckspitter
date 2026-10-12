@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.9",
+    "date": "2026-10-11",
+    "notes": [
+      "BoxTape searches by words: type a song or artist instead of a link to see the top 20 YouTube results, tick what you want and download.",
+      "Paste a list of songs (one per line, or separated by ;), like “Toto - Africa” or just “mr blue sky”: each one is matched to the best YouTube upload and saved to the audio dump. Songs you already have start unticked."
+    ]
+  },
+  {
     "version": "1.0.8",
     "date": "2026-10-11",
     "notes": [
