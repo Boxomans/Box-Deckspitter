@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.25",
+    "date": "2026-10-12",
+    "notes": [
+      "Fixed dragging: moving buttons and tabs between the top bar and the right sidebar works again, and no stray copies are left on screen."
+    ]
+  },
+  {
     "version": "1.0.24",
     "date": "2026-10-12",
     "notes": [
