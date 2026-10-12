@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.13",
+    "date": "2026-10-11",
+    "notes": [
+      "Fixed: “GitHub is rate-limiting update checks”. Checking and downloading updates no longer goes through GitHub's API (which only allows 60 calls an hour per internet connection, shared by every copy), so it can't run out. With a GitHub token it still uses the API, which allows far more."
+    ]
+  },
+  {
     "version": "1.0.12",
     "date": "2026-10-11",
     "notes": [

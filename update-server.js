@@ -61,13 +61,36 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
     });
     if (res.status === 404) throw err(502, token ? 'GitHub says the repo doesn’t exist, or this token can’t see it.' : 'Can’t see the repo on GitHub. If it’s private, add a GitHub token in Settings → Updates.');
     if (res.status === 401) throw err(502, 'GitHub rejected the token. Check it in Settings → Updates.');
-    if (res.status === 403 || res.status === 429) throw err(502, 'GitHub is rate-limiting update checks right now. Try again in a while.');
+    if (res.status === 403 || res.status === 429) {
+      const reset = Number(res.headers.get('x-ratelimit-reset')) * 1000;
+      const mins = reset > Date.now() ? Math.ceil((reset - Date.now()) / 60000) : 0;
+      throw err(502, `GitHub is rate-limiting update checks right now. Try again ${mins ? `in about ${mins} minute${mins === 1 ? '' : 's'}` : 'in a while'}.`);
+    }
     if (!res.ok) throw err(502, `GitHub answered ${res.status}.`);
     return raw ? res.text() : res.json();
   }
 
+  // Without a token (a public repo) the updater stays off GitHub's API, which allows only 60 calls an hour per
+  // internet connection, shared by every copy and program on it. The branch's newest commit comes from git's
+  // own list of branches, files from raw.githubusercontent.com, and the zip from codeload.github.com.
+  async function plain(url, what) {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Box-DocSpitter-updater' }, signal: AbortSignal.timeout(20000) });
+    if (res.status === 404 || res.status === 401) throw err(502, 'Can’t see the repo on GitHub. If it’s private, add a GitHub token in Settings → Updates.');
+    if (res.status === 429) throw err(502, 'GitHub is busy right now. Try again in a few minutes.');
+    if (!res.ok) throw err(502, `GitHub answered ${res.status} for ${what}.`);
+    return res.text();
+  }
+  async function plainHead() {
+    const refs = await plain(`https://github.com/${repo()}.git/info/refs?service=git-upload-pack`, 'the branch list');
+    const m = new RegExp(`([0-9a-f]{40}) refs/heads/${BRANCH}[\\s\\0]`).exec(refs);
+    if (!m) throw err(502, `GitHub didn’t list the ${BRANCH} branch.`);
+    return m[1];
+  }
+  const rawFile = (sha, file) => plain(`https://raw.githubusercontent.com/${repo()}/${sha}/${file}`, file);
+
   async function check() {
     if (process.env.BDS_UPDATE_TEST_ZIP) return checkTestZip(); // development testing only
+    if (!secrets().githubToken) return checkPlain();
     const head = await gh(`/commits/${BRANCH}`);
     const sha = head.sha;
     const remotePkg = JSON.parse(await gh(`/contents/package.json?ref=${sha}`, { raw: true }));
@@ -92,6 +115,30 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
     if (newer && depsMissing(remotePkg).length) warnings.push(`This update needs new libraries (${depsMissing(remotePkg).join(', ')}), which have to be installed by hand.`);
     lastCheck = { sha, latest, newer, at: Date.now() };
     return { current: version, latest, newer, sha: sha.slice(0, 7), notes, warnings, date: head.commit?.committer?.date || null };
+  }
+
+  /** The same check without the API (see plain() above). */
+  async function checkPlain() {
+    const sha = await plainHead();
+    const remotePkg = JSON.parse(await rawFile(sha, 'package.json'));
+    const latest = remotePkg.version;
+    const newer = cmpVersion(latest, version) > 0;
+    let notes = [];
+    const warnings = [];
+    if (newer) {
+      try {
+        const log = JSON.parse(await rawFile(sha, 'public/changelog.json'));
+        notes = log.filter((e) => cmpVersion(e.version, version) > 0).flatMap((e) => (e.notes || []).map((n) => `${e.version}: ${n}`)).slice(0, 40);
+      } catch { /* no changelog */ }
+      try {
+        const launcher = await rawFile(sha, 'electron/main.js');
+        const cur = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
+        if (launcher.replace(/\r\n/g, '\n') !== cur.replace(/\r\n/g, '\n')) warnings.push('This update changes the app launcher, which can’t be updated from inside the app. Install it by copying the new version over.');
+      } catch { /* checked again when it's downloaded */ }
+      if (depsMissing(remotePkg).length) warnings.push(`This update needs new libraries (${depsMissing(remotePkg).join(', ')}), which have to be installed by hand.`);
+    }
+    lastCheck = { sha, latest, newer, at: Date.now() };
+    return { current: version, latest, newer, sha: sha.slice(0, 7), notes, warnings, date: null };
   }
 
   /** Testing the updater without publishing anything: BDS_UPDATE_TEST_ZIP points at a release zip on disk. */
@@ -161,7 +208,8 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
     job.label = `Downloading ${latest}`;
     let zipBuf;
     if (process.env.BDS_UPDATE_TEST_ZIP) zipBuf = fs.readFileSync(process.env.BDS_UPDATE_TEST_ZIP); // development testing only
-    else zipBuf = await download(`https://api.github.com/repos/${repo()}/zipball/${sha}`, job);
+    else if (secrets().githubToken) zipBuf = await download(`https://api.github.com/repos/${repo()}/zipball/${sha}`, job);
+    else zipBuf = await download(`https://codeload.github.com/${repo()}/zip/${sha}`, job);
     job.label = 'Checking the download';
     const JSZip = require(path.join(root, 'node_modules', 'jszip'));
     const zip = await JSZip.loadAsync(zipBuf);
