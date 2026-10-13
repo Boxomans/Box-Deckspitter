@@ -100,8 +100,9 @@ function shortCode(name) { const m = /AIM-(\d+)([A-Z]+)/.exec(name); return m ? 
 export function clock(t) { const m = Math.floor(t / 60); const s = Math.floor(t % 60); const cs = Math.floor((t - Math.floor(t)) * 100); return `${pad2(m)}:${pad2(s)}.${pad2(cs)}`; }
 
 class TomcatGame {
-  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare, onFire, onVolume, speed = 1, onSpeed, onStart } = {}) {
+  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare, onFire, onVolume, speed = 1, onSpeed, onStart, mergeSkip } = {}) {
     this.canvas = null;
+    this.mergeSkip = mergeSkip || (() => false); // (auto) → true: no click minigame, straight to the 50/50 roll
     this.ctx = null;
     this.onGameOver = onGameOver;
     this.onAuto = onAuto;
@@ -136,7 +137,7 @@ class TomcatGame {
     this.autoBtn = { w: 96, h: 40, size: 15 };
     this.hangarBtn = { w: 106, h: 40, size: 15 };
     this.speedBtn = { w: 64, h: 40, size: 16 };
-    this.volBtn = { w: 60, h: 40, size: 14 };
+    this.volBtn = { w: 104, h: 40, size: 14 };
     this.topRow = [this.restartBtn, this.pauseBtn, this.autoBtn, this.hangarBtn, this.speedBtn, this.volBtn];
     this.hudLow = false; // score readout moved under the buttons (no room beside them)
     this.contactRegions = [];
@@ -574,7 +575,10 @@ class TomcatGame {
     }
 
     const merged = this.bandits.find((b) => b.distance <= KILL_RANGE_KM);
-    if (merged) this.dogfight = { bandit: merged, phase: 'countdown', cd: DOGFIGHT_COUNTDOWN, t: DOGFIGHT_S, clicks: 0, spin: 0, face: 1, hold: 0 };
+    if (merged) {
+      this.dogfight = { bandit: merged, phase: 'countdown', cd: DOGFIGHT_COUNTDOWN, t: DOGFIGHT_S, clicks: 0, spin: 0, face: 1, hold: 0 };
+      if (this.mergeSkip(this.auto)) Object.assign(this.dogfight, { phase: 'roll', hold: 1.4, skipped: true }); // set in SETTINGS
+    }
     if (this.selectedTrack() == null) {
       const first = this.tracksSorted()[0];
       this.selectedId = first?.obj.id || null;
@@ -706,7 +710,7 @@ class TomcatGame {
     this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, ts(this.autoBtn));
     this.button(this.hangarBtn, 'CARRIER', !!this.hangarOpen, ts(this.hangarBtn), !this.canHangar());
     this.button(this.speedBtn, `${this.speed}×`, this.speed > 1, ts(this.speedBtn));
-    this.button(this.volBtn, 'VOL', !!this.volOpen, ts(this.volBtn));
+    this.button(this.volBtn, 'SETTINGS', !!this.volOpen, ts(this.volBtn));
     this.drawSelectorButtons();
     this.drawFoxButtons();
     this.drawContacts();
@@ -1160,7 +1164,7 @@ class TomcatGame {
       const P = { 1: [[0.5, 0.5]], 2: [[0.25, 0.25], [0.75, 0.75]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]], 4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]], 5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]], 6: [[0.25, 0.22], [0.75, 0.22], [0.25, 0.5], [0.75, 0.5], [0.25, 0.78], [0.75, 0.78]] };
       for (const [px, py] of P[f.face]) pip(px, py);
       ctx.font = `bold 18px ${MONO}`;
-      if (f.phase === 'roll') { ctx.fillStyle = '#ffd36b'; ctx.fillText('GUNS ON HIM — ROLLING…', cx, y + 300); }
+      if (f.phase === 'roll') { ctx.fillStyle = '#ffd36b'; ctx.fillText(f.skipped ? 'ROLLING FOR IT…' : 'GUNS ON HIM — ROLLING…', cx, y + 300); }
       else { ctx.fillStyle = f.win ? green : red; ctx.fillText(f.win ? 'SPLASH — YOU WIN THE MERGE' : 'HE GOT YOU FIRST', cx, y + 300); }
       ctx.fillStyle = '#999'; ctx.font = `13px ${MONO}`;
       ctx.fillText('4–6: guns kill  ·  1–3: you’re hit', cx, y + 330);
@@ -1177,11 +1181,12 @@ class TomcatGame {
     ctx.fillStyle = color;
     ctx.beginPath();
     if (kind === 'f14') {
-      // long nose, swept swing wings, wide-set twin tails
-      ctx.moveTo(0, -16); ctx.lineTo(2, -9); ctx.lineTo(3, -3); ctx.lineTo(13, 4); ctx.lineTo(13, 6); ctx.lineTo(4, 4);
-      ctx.lineTo(4, 9); ctx.lineTo(8, 13); ctx.lineTo(8, 15); ctx.lineTo(1, 13); ctx.lineTo(0, 15); ctx.lineTo(-1, 13);
-      ctx.lineTo(-8, 15); ctx.lineTo(-8, 13); ctx.lineTo(-4, 9); ctx.lineTo(-4, 4); ctx.lineTo(-13, 6); ctx.lineTo(-13, 4);
-      ctx.lineTo(-3, -3); ctx.lineTo(-2, -9);
+      // the same F-14 as the ownship and the app icon (a 100-unit box, nose at the top), centered and ~32 long
+      ctx.scale(0.32, 0.32);
+      ctx.translate(-50, -50);
+      ctx.fill(this.f14Path ||= new Path2D(F14_PATH));
+      ctx.restore();
+      return;
     } else {
       // the right half, nose to tail, mirrored for the left
       const half = kind === 'j36'
@@ -1316,6 +1321,7 @@ export class Flight {
       speed: app.settings.tomcatSpeed || 1,
       onSpeed: (n) => app.saveSettings({ tomcatSpeed: n }),
       onStart: () => this.launch(),
+      mergeSkip: (auto) => (app.settings.tomcatMerge || {})[auto ? 'auto' : 'manual'] === 'skip',
     });
     // a timer, not animation frames: those stop when the window is minimized. A throttled timer catches up in steps.
     this.last = performance.now();
@@ -1346,7 +1352,7 @@ export class Flight {
     // merged while you're somewhere else (another tab, another window): the RWR goes off, app wide, every few seconds
     // until you come back to it
     const f = this.game.dogfight;
-    if (f && !this.game.gameOver && f.phase !== 'result' && !this.game.watching() && now - (this.lastRwr || 0) > 4000) {
+    if (f && !this.game.gameOver && (f.phase === 'countdown' || f.phase === 'qte') && !this.game.watching() && now - (this.lastRwr || 0) > 4000) {
       this.lastRwr = now;
       this.sound('rwr', { anywhere: true });
     }
@@ -1396,7 +1402,7 @@ export class Flight {
     this.view?.refreshStatus();
   }
 
-  /** The game's own volumes (VOL in the game), each on top of the app's sound volume. */
+  /** The game's own volumes (SETTINGS in the game), each on top of the app's sound volume. */
   volume(kind) { return clamp((this.app.settings.tomcatVolume || {})[kind] ?? 1, 0, 1); }
 
   /** Only heard while the game is on screen. A busy fight at 3× fires a lot: one launch sound per 120 ms at most. */
@@ -1589,7 +1595,7 @@ export class Flight {
     let label;
     if (g.gameOver) label = g.auto ? `DOWN · ${Math.max(0, Math.ceil(g.restartIn))}s` : 'DOWN';
     else if (!g.started) label = 'READY';
-    else if (g.dogfight) label = docked ? 'MERGE' : this.game.watching() ? 'FIGHT!' : 'OPEN TO FIGHT';
+    else if (g.dogfight) label = docked ? 'MERGE' : g.dogfight.phase === 'roll' || g.dogfight.phase === 'result' ? 'MERGED — ROLLING' : g.watching() ? 'FIGHT!' : 'OPEN TO FIGHT';
     else if (g.paused) label = 'PAUSED';
     else if (!near) label = 'CLEAR';
     else label = docked ? km : `${near.msl ? 'MSL' : 'BANDIT'} ${km}${g.speed > 1 ? ` ${g.speed}×` : ''}`;
@@ -1648,7 +1654,7 @@ export class TomcatEditor extends BaseEditor {
     this.flight.flushCash();
   }
 
-  // ---- VOL: the game's sound levels (flares, missile launches)
+  // ---- SETTINGS: the game's sound levels, and what a merge does
 
   toggleVolume() {
     if (this.vol) return this.closeVolume();
@@ -1666,8 +1672,25 @@ export class TomcatEditor extends BaseEditor {
       return h('label', { class: 'tv-row' }, h('span', { class: 'tv-name' }, label), input, pct);
     };
     const note = this.app.settings.sounds === false ? h('div', { class: 'tv-note' }, 'App sounds are off (Settings), so the game is silent.') : null;
+    // a merge: the click minigame (it waits for you), or skip it and go straight to the 50/50 roll. Auto and flying it yourself apart.
+    const merge = (key, label, waitText) => {
+      const cur = () => (this.app.settings.tomcatMerge || {})[key] === 'skip' ? 'skip' : 'wait';
+      const opt = (val, text) => {
+        const b = h('button', { class: `tv-opt${cur() === val ? ' on' : ''}` }, text);
+        b.addEventListener('click', () => {
+          this.app.saveSettings({ tomcatMerge: { ...(this.app.settings.tomcatMerge || {}), [key]: val } });
+          for (const o of b.parentElement.children) o.classList.toggle('on', o === b);
+        });
+        return b;
+      };
+      return h('div', { class: 'tv-row' }, h('span', { class: 'tv-name' }, label), h('div', { class: 'tv-seg' }, opt('wait', waitText), opt('skip', 'Just roll')));
+    };
     this.vol = h('div', { class: 'tomcat-vol', tabindex: '-1', style: { left: `${Math.max(8, Math.min(b.x, this.game.W - PANEL_W - 258))}px`, top: `${b.y + b.h + 6}px` } }, // stays off the scope
-      h('div', { class: 'tv-head' }, 'SOUND'), row('flare', 'Chaff / flares'), row('missile', 'Missile launch'), row('rwr', 'Merge warning'), note);
+      h('div', { class: 'tv-head' }, 'SOUND'), row('flare', 'Chaff / flares'), row('missile', 'Missile launch'), row('rwr', 'Merge warning'), note,
+      h('div', { class: 'tv-head tv-sep' }, 'MERGE'),
+      merge('manual', 'Flying it yourself', 'Minigame'),
+      merge('auto', 'On auto', 'Wait for me'),
+      h('div', { class: 'tv-hint' }, 'Minigame: the fight waits until you open the game, then it’s 3-2-1 and click. Just roll: no clicks, straight to the 50/50 roll.'));
     this.vol.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key.toLowerCase() === 'v') { e.preventDefault(); e.stopPropagation(); this.closeVolume(); } });
     this.offVol = (e) => { if (this.vol && !this.vol.contains(e.target) && e.target !== this.canvas) this.closeVolume(); };
     document.addEventListener('pointerdown', this.offVol, true);
@@ -1849,7 +1872,7 @@ export class TomcatEditor extends BaseEditor {
   status() {
     const s = this.app.settings.tomcat || {};
     return {
-      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · V volume · H carrier (between sorties) · P pause · R restart' }],
+      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · V settings · H carrier (between sorties) · P pause · R restart' }],
       right: [{ text: `high score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()}` }],
     };
   }
