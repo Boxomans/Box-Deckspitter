@@ -5,7 +5,7 @@
 // DPAPI protection Chrome uses). That switch ("fuse") lives inside electron.exe and can only be flipped while the
 // app is closed, so until it's on the browser runs on an in-memory session and the fuse is flipped right after quit.
 //
-// Also: unpacked Chrome extensions, permission prompts, external app links (nxm:// for Vortex, steam://…) behind a
+// Also: the built-in ad blocker (adblock.js), unpacked Chrome extensions, permission prompts, external app links (nxm:// for Vortex, steam://…) behind a
 // prompt, and right-click → media dump / doc dump straight into the app's dump folders.
 
 'use strict';
@@ -83,6 +83,8 @@ module.exports = function createBrowser({ root, isAppSender }) {
   const MEDIA_DUMP = path.join(root, 'media-dump');
   const DOC_DUMP = path.join(root, 'doc-dump');
 
+  let adblock = null; // created in setup(), with the session
+
   const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
   const writeJSON = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); const t = f + '.tmp'; fs.writeFileSync(t, JSON.stringify(v, null, 2)); fs.renameSync(t, f); };
 
@@ -106,31 +108,47 @@ module.exports = function createBrowser({ root, isAppSender }) {
   const fuse = fuseState();
   const partition = fuse.on ? PERSIST : MEMORY;
 
-  /** After the app has fully closed: flip the fuse in electron.exe (PowerShell, waits until the file is free). */
-  function scheduleFusePatch() {
-    if (fuse.on || fuse.offset < 0 || process.platform !== 'win32') return;
+  /**
+   * After the app has fully closed: flip the fuse in electron.exe (PowerShell, waits until the file is free).
+   * With `relaunch` ({ args }) it then starts the app again: an in-app restart (updates) can't use app.relaunch()
+   * while the fuse is off, because the new copy would hold electron.exe open before it could be patched.
+   * Returns whether the job was started.
+   */
+  function scheduleFusePatch(relaunch) {
+    if (fuse.on || fuse.offset < 0 || process.platform !== 'win32') return false;
+    const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
+    // one Windows command line for the relaunch (each argument quoted the way programs split it)
+    const winArg = (a) => (a && !/[\s"]/.test(a) ? a : `"${a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`);
+    const again = relaunch
+      ? `Start-Process -FilePath $exe -WorkingDirectory ${q(process.cwd())} -ArgumentList ${q([process.argv[1] ? path.resolve(process.argv[1]) : '', ...(relaunch.args || [])].filter(Boolean).map(winArg).join(' '))}`
+      : '';
     const ps = `
-$exe = '${process.execPath.replace(/'/g, "''")}'; $off = ${fuse.offset}; $at = ${fuse.offset - COOKIE_FUSE - 2 - FUSE_SENTINEL.length}; $sent = '${FUSE_SENTINEL.toString()}'
+$exe = ${q(process.execPath)}; $off = ${fuse.offset}; $at = ${fuse.offset - COOKIE_FUSE - 2 - FUSE_SENTINEL.length}; $sent = '${FUSE_SENTINEL.toString()}'
 for ($n = 0; $n -lt 120; $n++) {
   Start-Sleep -Milliseconds 500
+  $done = $false
   try {
     $f = [IO.File]::Open($exe, 'Open', 'ReadWrite', 'None')
     try {
+      $done = $true
       # the sentinel must still sit where it was when the offset was found (else this is a different exe: leave it)
       $chk = New-Object byte[] 32; $f.Position = $at; [void]$f.Read($chk, 0, 32)
-      if ([Text.Encoding]::ASCII.GetString($chk) -ne $sent) { exit 2 }
-      $f.Position = $off; $b = $f.ReadByte()
-      if ($b -eq 0x30) { $f.Position = $off; $f.WriteByte(0x31) }
-      exit 0
+      if ([Text.Encoding]::ASCII.GetString($chk) -eq $sent) {
+        $f.Position = $off; $b = $f.ReadByte()
+        if ($b -eq 0x30) { $f.Position = $off; $f.WriteByte(0x31) }
+      }
     } finally { $f.Close() }
   } catch { }
-}`;
+  if ($done) { break }
+}
+${again}`;
     // detached so it outlives the app (plain children die with it); but a detached PowerShell has no console and
     // silently does nothing, so cmd's `start` gives it one of its own (hidden).
     const cmd = `start "" /min powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand ${Buffer.from(ps, 'utf16le').toString('base64')}`;
     try {
       spawn(process.env.ComSpec || 'cmd.exe', [`/d /s /c "${cmd}"`], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
-    } catch { /* next quit tries again */ }
+      return true;
+    } catch { return false; /* next quit tries again */ }
   }
 
   // ---------------------------------------------------------------- session setup
@@ -164,6 +182,10 @@ for ($n = 0; $n -lt 120; $n++) {
       remembered.set(key, response === 0);
       cb(response === 0);
     });
+    try {
+      adblock = require('./adblock.js')({ stateDir: STATE, onCount: (id, count) => { const wc = webContents.fromId(id); if (wc && !wc.isDestroyed()) send(wc, { type: 'adblock', count }); } });
+      adblock.attach(ses);
+    } catch (e) { adblock = null; console.log(`[browser] ad blocker not started: ${e.message}`); }
     for (const dir of readJSON(EXT_FILE, [])) {
       try { await exts().loadExtension(dir, { allowFileAccess: false }); } catch (e) { console.log(`[browser] extension not loaded: ${dir} (${e.message})`); }
     }
@@ -299,6 +321,9 @@ for ($n = 0; $n -lt 120; $n++) {
     });
     wc.on('context-menu', (_e, p) => contextMenu(wc, p));
     wc.on('dom-ready', () => pushEq(wc));
+    wc.on('did-start-navigation', (e) => { if (e.isMainFrame && !e.isSameDocument) adblock?.reset(wc.id); });
+    const wcId = wc.id;
+    wc.once('destroyed', () => adblock?.reset(wcId));
     // browser keys work while a page has focus
     wc.on('before-input-event', (e, i) => {
       if (i.type !== 'keyDown') return;
@@ -345,6 +370,15 @@ for ($n = 0; $n -lt 120; $n++) {
           if (x) { exts().removeExtension(x.id); writeJSON(EXT_FILE, readJSON(EXT_FILE, []).filter((p) => path.resolve(p) !== path.resolve(x.path))); }
           return { ok: true };
         }
+        case 'adblock': {
+          if (!adblock) return { ok: false, error: 'The ad blocker didn’t start.' };
+          const wc = req.id != null ? guestOf(e, req.id) : null;
+          if (req.set === 'enabled') adblock.setEnabled(req.value);
+          else if (req.set === 'allow') adblock.setAllowed(wc?.getURL() || '', !!req.value);
+          else if (req.set === 'unallow') adblock.removeAllowed(String(req.value || ''));
+          else if (req.set === 'update') await adblock.update();
+          return { ok: true, ...adblock.status(wc?.getURL() || '', wc?.id), allowList: adblock.allowList() };
+        }
         case 'savePage':
           return { ok: true, file: await toDocDump(guestOf(e, req.id)) };
         case 'eq':
@@ -363,11 +397,13 @@ for ($n = 0; $n -lt 120; $n++) {
     } catch (err) { return { ok: false, error: err.message }; }
   });
 
-  app.on('will-quit', scheduleFusePatch);
+  app.on('will-quit', () => scheduleFusePatch());
 
   return {
     partition,
     setup,
+    /** Restarts the app through the fuse patch when it's still off (true), else leaves the restart to the caller. */
+    relaunchPatched: (args) => scheduleFusePatch({ args }),
     /** Locks down every <webview> the app page attaches: no preload, no Node, sandboxed, the browser's session only. */
     guardWebview(e, prefs, params) {
       delete prefs.preload;

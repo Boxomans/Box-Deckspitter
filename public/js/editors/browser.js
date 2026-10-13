@@ -57,8 +57,12 @@ export class BrowserEditor extends BaseEditor {
     this.addr.addEventListener('focus', () => this.addr.select());
     this.addr.addEventListener('input', () => { this.typed = true; });
     const save = btn('file-pdf', 'Save page to doc dump (PDF)', () => this.savePage());
+    // the ad blocker: a shield with this page's blocked count; click for on/off and allowing this site
+    this.adCount = h('span', { class: 'bw-ad-count' });
+    this.adBtn = h('button', { class: 'bw-btn bw-ad', title: 'Ad blocker' }, icon('shield', 'sm'), this.adCount);
+    this.adBtn.addEventListener('click', (e) => this.adMenu(e.currentTarget));
     const more = btn('more', 'Browser menu', (e) => showMenu(this.menuItems(), { anchor: e.currentTarget }));
-    this.bar = h('div', { class: 'bw-bar' }, this.backBtn, this.fwdBtn, this.reloadBtn, h('div', { class: 'bw-addr-wrap' }, this.lock, this.addr), save, more);
+    this.bar = h('div', { class: 'bw-bar' }, this.backBtn, this.fwdBtn, this.reloadBtn, h('div', { class: 'bw-addr-wrap' }, this.lock, this.addr), this.adBtn, save, more);
     this.views = h('div', { class: 'bw-views' });
     this.note = this.persistent ? null : h('div', { class: 'bw-note' },
       icon('lock', 'sm'), 'Logins aren’t kept yet: Box-DocSpitter turns on encrypted storage for them the next time it closes. Until then nothing from the web is written to disk.');
@@ -80,7 +84,7 @@ export class BrowserEditor extends BaseEditor {
   // ---- pages
 
   newPage(url, { background = false } = {}) {
-    const p = { url: url || SEARCH[this.engine()].home, title: 'New tab', favicon: null, loading: true };
+    const p = { url: url || SEARCH[this.engine()].home, title: 'New tab', favicon: null, loading: true, blocked: 0 };
     p.view = h('webview', { class: 'bw-view', partition: this.partition, allowpopups: '', src: p.url });
     p.fav = h('img', { class: 'bw-fav', alt: '' });
     p.label = h('span', { class: 'bw-title' }, p.title);
@@ -96,7 +100,7 @@ export class BrowserEditor extends BaseEditor {
     v.addEventListener('page-favicon-updated', (e) => { p.favicon = e.favicons?.[0] || null; upd(); });
     v.addEventListener('did-start-loading', () => { p.loading = true; upd(); });
     v.addEventListener('did-stop-loading', () => { p.loading = false; upd(); this.saveTabs(); });
-    v.addEventListener('did-navigate', (e) => { p.url = e.url; p.favicon = null; upd(); });
+    v.addEventListener('did-navigate', (e) => { p.url = e.url; p.favicon = null; upd(); this.syncAd(); });
     v.addEventListener('did-navigate-in-page', (e) => { if (e.isMainFrame) { p.url = e.url; upd(); } });
     v.addEventListener('did-fail-load', (e) => {
       if (!e.isMainFrame || e.errorCode === -3) return; // -3: cancelled (a new navigation, a download)
@@ -121,6 +125,7 @@ export class BrowserEditor extends BaseEditor {
     for (const x of this.pages) { x.view.classList.toggle('active', x === p); x.tab.classList.toggle('active', x === p); }
     p.tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     this.syncBar();
+    this.syncAd();
     this.refreshStatus();
     this.saveTabs();
     setTimeout(() => { if (this.active === p && document.activeElement !== this.addr) p.view.focus(); }, 0);
@@ -241,6 +246,57 @@ export class BrowserEditor extends BaseEditor {
     else if (ev.type === 'key') this.combo(ev.combo);
     else if (ev.type === 'saved') this.saved(ev.where, ev.file);
     else if (ev.type === 'error') toast(ev.message, { type: 'error', timeout: 5000 });
+    else if (ev.type === 'adblock') { p.blocked = ev.count; if (p === this.active) this.paintAd(); }
+  }
+
+  // ---- the ad blocker (electron/adblock.js)
+
+  async adState(extra = {}) {
+    const r = await bridge?.browser?.({ op: 'adblock', id: this.active?.wcId, ...extra }).catch(() => null);
+    if (r?.ok) this.ad = r;
+    else if (r?.error && extra.set) toast(r.error, { type: 'error', timeout: 5000 });
+    return r?.ok ? r : null;
+  }
+
+  async syncAd() {
+    if (!this.active) return;
+    const p = this.active;
+    const st = await this.adState();
+    if (st && p === this.active) { if (st.count > p.blocked) p.blocked = st.count; }
+    this.paintAd();
+  }
+
+  paintAd() {
+    const st = this.ad, p = this.active;
+    const off = !st || !st.enabled || st.allowed;
+    const n = p?.blocked || 0;
+    this.adBtn.classList.toggle('off', off);
+    this.adCount.textContent = !off && n ? (n > 99 ? '99+' : String(n)) : '';
+    this.adBtn.title = !st ? 'Ad blocker (not running)'
+      : !st.enabled ? 'Ad blocker: off'
+      : st.allowed ? `Ad blocker: ads allowed on ${st.host}`
+      : !st.ready ? 'Ad blocker: downloading the filter lists…'
+      : `Ad blocker: ${n} blocked on this page`;
+  }
+
+  async adMenu(anchor) {
+    const st = await this.adState();
+    if (!st) { toast('The ad blocker isn’t running.', { type: 'error' }); return; }
+    const reload = () => { try { this.active?.view.reload(); } catch { /* not ready */ } };
+    const set = async (what, value, then) => { if (await this.adState({ set: what, value })) { this.paintAd(); then?.(); } };
+    const ago = (t) => { const d = Math.round((Date.now() - t) / 86400e3); return d < 1 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; };
+    const p = this.active;
+    showMenu([
+      { label: 'Block ads and trackers', checked: st.enabled, action: () => set('enabled', !st.enabled, () => this.pages.forEach((x) => { try { x.view.reload(); } catch { /* not ready */ } })) },
+      ...(st.host ? [{ label: st.allowed ? `Block ads on ${st.host} again` : `Allow ads on ${st.host}`, disabled: !st.enabled, action: () => set('allow', !st.allowed, reload) }] : []),
+      { sep: true },
+      { label: 'Update the filter lists', icon: 'refresh', action: async () => { toast('Updating the filter lists…', { timeout: 2000 }); if (await this.adState({ set: 'update' })) toast('Filter lists updated', { type: 'ok' }); } },
+      ...(st.allowList.length ? [{ label: 'Allowed sites', submenu: st.allowList.map((h) => ({ label: h, submenu: [{ label: 'Block ads here again', action: () => set('unallow', h, () => this.syncAd()) }] })) }] : []),
+      { sep: true },
+      { note: !st.enabled ? 'Off: nothing is blocked.'
+        : !st.ready ? (st.error ? `Couldn’t download the filter lists (${st.error}). It tries again next start.` : 'Downloading the filter lists (EasyList, EasyPrivacy, uBlock Origin)…')
+        : `${p?.blocked || 0} blocked on this page.\nEasyList, EasyPrivacy and uBlock Origin’s lists, updated ${ago(st.updated)}.` },
+    ], { anchor });
   }
 
   saved(where, file) {

@@ -1499,7 +1499,11 @@ export class Flight {
     this.mini.style.top = `${clamp(y, 0, innerHeight - ht)}px`;
   }
 
-  /** Drag to move; drop on the right sidebar to fold it there; drag a folded one out to float it; a click opens the game. */
+  /**
+   * Drag to move; drop on the right sidebar to fold it there, at the height it was let go (like everything else in
+   * the sidebar: an outline shows where, and the others make room); drag a folded one out to float it, or along the
+   * sidebar to move it there; a click opens the game.
+   */
   dragMini(e) {
     if (e.button !== 0 || e.target.closest('.tm-btn')) return;
     const m = this.mini, rail = document.getElementById('rightrail');
@@ -1526,6 +1530,7 @@ export class Flight {
       this.placeMini(ev.clientX - dx, ev.clientY - dy);
       if (rail.classList.contains('rail-empty')) rail.classList.toggle('peek', ev.clientX > innerWidth - 260);
       rail.classList.toggle('fling-hot', overRail(ev.clientX, ev.clientY));
+      this.app.railMarker?.(ev, m);
     };
     const up = (ev) => {
       m.removeEventListener('pointermove', move);
@@ -1533,8 +1538,13 @@ export class Flight {
       m.removeEventListener('pointercancel', up);
       rail.classList.remove('fling-target', 'fling-hot', 'peek');
       m.classList.remove('dragging');
+      this.app.railMarker?.(null, m);
       if (!dragging) { this.app.newDocument('tomcat'); return; }
-      if (overRail(ev.clientX, ev.clientY)) return this.setMini({ docked: true });
+      if (overRail(ev.clientX, ev.clientY)) {
+        this.setMini({ docked: true });
+        this.app.railMove?.(m, ev.clientY); // its spot in the sidebar
+        return;
+      }
       const q = m.getBoundingClientRect();
       this.setMini({ docked: false, x: Math.round(q.left), y: Math.round(q.top) });
     };

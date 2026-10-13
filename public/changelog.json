@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.0.29",
+    "date": "2026-10-12",
+    "notes": [
+      "Browser: built-in ad blocker (EasyList, EasyPrivacy and uBlock Origin lists, updated weekly). The shield in the address bar shows what was blocked, turns it off, or allows ads on a site.",
+      "Browser: logins are now kept after an in-app restart (updates) too, not only after closing the app.",
+      "Setup: if Node.js is missing, the launcher offers to install it with winget.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.28",
     "date": "2026-10-12",
     "notes": [

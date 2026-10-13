@@ -67,9 +67,10 @@ new. **Download** fetches it and checks every file for errors first; **Restart &
 
 The repo holds only the source (about 2 MB). The libraries and the Electron runtime come from npm:
 
-1. Install **Node.js 18+** (`winget install OpenJS.NodeJS.LTS`) and download or clone this repo.
+1. Download or clone this repo.
 2. Double-click `Box-DocSpitter.exe`. On first run it does `npm install` (a few hundred MB), then opens the
-   app. Or run `npm install` yourself in the folder.
+   app. If Node.js 18+ isn't installed, it asks first and installs it with `winget install OpenJS.NodeJS.LTS`
+   (or points you to nodejs.org if winget isn't there). Or install Node.js and run `npm install` yourself.
 3. Optional: `winget install yt-dlp` and `winget install Gyan.FFmpeg` for BoxVidKlep, BoxTape and faster video
    exports.
 
@@ -89,8 +90,8 @@ optionally the media dump. Then it restarts the app as a fresh copy. Your own fi
 To update a copy that's older than 1.0.3 (before the in-app updater existed), copy the new version over it
 once, keeping its `data\` and dump folders. From then on it updates itself from Settings → Updates.
 Needs Windows 10 or 11 (64-bit). PDF export uses Edge if it's installed, otherwise the app window's own
-renderer. If `node_modules` wasn't copied, the launcher offers to download it, which needs Node.js and internet
-once.
+renderer. If `node_modules` wasn't copied, the launcher offers to download it, which needs internet once and
+Node.js (it offers to install that too, with winget).
 
 ## Modes
 

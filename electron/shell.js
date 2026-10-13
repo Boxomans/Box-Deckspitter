@@ -81,7 +81,10 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
       if (m && m.type === 'relaunch') {
         quitting = true;
         try { server?.kill(); } catch { /* gone */ }
-        app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--rollback' && !fileArgs([process.argv[0], a]).length) });
+        const args = process.argv.slice(1).filter((a) => a !== '--rollback' && !fileArgs([process.argv[0], a]).length);
+        // logins in the browser aren't kept until electron.exe is patched, which needs the app closed: a restart is
+        // the moment (app.exit skips will-quit, where that normally happens)
+        if (!browser.relaunchPatched(args.slice(1))) app.relaunch({ args });
         app.exit(0);
       }
       if (m && m.type === 'open' && typeof m.url === 'string') {
