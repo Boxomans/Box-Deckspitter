@@ -170,6 +170,9 @@ const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) =>
 // side panels that can move between the right sidebar and the top bar
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
+// tabs that are a tool (opened with newDocument(mode)), and the new-document kind for an untitled tab of each mode
+const TOOL_KINDS = new Set(['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'browser']);
+const NEW_KIND = { doc: 'doc', text: 'text', code: 'code', sheet: 'sheet', pdf: 'pdf', cut: 'cut', paint: 'paint' };
 const TOP_TOOLS = ['btn-music', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
 // tool modes and the home-card name they're renamed by
 // files the video editor can use
@@ -212,6 +215,10 @@ class App {
       throw e;
     }
     configureFiles({ info: this.info, settings: this.settings });
+    // several app windows can be open: the one-per-app things run in the main one (see shell.js)
+    const win = await window.bdsShell?.winInfo?.().catch(() => null);
+    this.mainWindow = win ? !!win.main : true;
+    window.bdsShell?.onMainWindow?.(() => { this.mainWindow = true; this.syncTomcat(); });
     this.applyTheme(this.settings.theme, false);
     this.setupAppLock(); // before anything is drawn: the lock screen covers it straight away
     this.presence = createPresence(this);
@@ -237,6 +244,7 @@ class App {
     this.afterStartup();
 
     const params = new URLSearchParams(location.search);
+    if (params.get('adopt')) { history.replaceState(null, '', '/'); await this.adoptTabs(params.get('adopt')); }
     const opens = params.getAll('open');
     if (opens.length) {
       history.replaceState(null, '', '/');
@@ -342,7 +350,7 @@ class App {
 
   /** The F-14 button shows, and the sortie flies, only while the easter egg is turned on (Settings → Easter eggs). */
   syncTomcat() {
-    const on = !!this.settings.tomcatEnabled;
+    const on = !!this.settings.tomcatEnabled && this.mainWindow !== false; // one sortie per app: in the main window
     $('#btn-tomcat').hidden = !on || !!this.tomcatLaunched; // after the first take-off the radar stands in for it
     $('#btn-tomcat').title = 'F-14F Super Tomcat · P pauses · drag or flick it to the right sidebar to dock it there';
     if (on) this.tomcatFlight();
@@ -1106,14 +1114,16 @@ class App {
     for (const t of this.tabs) {
       const el = h('div', {
         class: `tab ${t === this.active ? 'active' : ''} ${t.dirty ? 'dirty' : ''}`,
-        role: 'tab', title: t.path || t.title, draggable: 'true',
+        role: 'tab', title: t.path || t.title,
       },
       h('span', { class: 'tab-icon' }, icon(t.mode ? (t.mode === 'code' ? iconForName(t.title) : MODE_ICON[t.mode]) : 'file', 'sm')),
       h('span', { class: 'tab-title' }, t.title),
       h('button', { class: 'tab-close', title: 'Close (Alt+W)', onclick: (e) => { e.stopPropagation(); this.closeTab(t); } }, icon('x', 'sm')));
-      el.addEventListener('mousedown', (e) => {
-        if (e.button === 1) { e.preventDefault(); this.closeTab(t); }
-        else if (e.button === 0 && !e.target.closest('.tab-close')) this.activate(t);
+      el.addEventListener('mousedown', (e) => { if (e.button === 1) { e.preventDefault(); this.closeTab(t); } });
+      el.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || e.target.closest('.tab-close')) return;
+        this.activate(t);
+        this.dragTab(e, t, el);
       });
       el.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Close', action: () => this.closeTab(t) },
@@ -1123,26 +1133,128 @@ class App {
         { label: 'Copy path', disabled: !t.path, action: () => navigator.clipboard.writeText(t.path) },
         { label: 'Show in folder', disabled: !t.path, action: () => api.reveal(t.path) },
       ]));
-      el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/bds-tab', t.id); e.dataTransfer.effectAllowed = 'move'; });
-      el.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/bds-tab')) { e.preventDefault(); el.classList.add('drag-over'); } });
-      el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
-      el.addEventListener('drop', (e) => {
-        el.classList.remove('drag-over');
-        const id = e.dataTransfer.getData('text/bds-tab');
-        if (!id) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const from = this.tabs.findIndex((x) => x.id === id);
-        const to = this.tabs.indexOf(t);
-        if (from < 0 || from === to) return;
-        const [moved] = this.tabs.splice(from, 1);
-        this.tabs.splice(to, 0, moved);
-        this.renderTabs();
-      });
+      el._tab = t;
       host.append(el);
       if (t === this.active) requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
     }
     $('#btn-home').classList.toggle('active', !this.active);
+  }
+
+  // ---- dragging a tab: along the bar to reorder; up, down or out of the window to give it a window of its own
+  //      (shell.js opens it under the pointer); with only one tab, the drag moves the whole window instead.
+
+  dragTab(e, t, el) {
+    const shellWin = !!window.bdsShell?.tearOff;
+    const single = this.tabs.length === 1 && shellWin;
+    const sx = e.screenX, sy = e.screenY;
+    let mode = null, winPos = null, target = null, ghost = null, out = false, lastX = e.clientX, lastY = e.clientY;
+    if (single) window.bdsShell.winInfo().then((w) => { winPos = w?.pos || null; }).catch(() => {});
+    // renderTabs (activate) rebuilt the bar: follow the pointer on the tab's new element
+    el = [...$$('#tabs .tab')].find((x) => x._tab === t) || el;
+    try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const clearMarks = () => { for (const x of $$('#tabs .tab')) x.classList.remove('drag-over', 'drag-over-end'); };
+    const move = (ev) => {
+      lastX = ev.clientX; lastY = ev.clientY;
+      const dx = ev.screenX - sx, dy = ev.screenY - sy;
+      if (!mode) {
+        if (Math.hypot(dx, dy) < 6) return;
+        mode = single ? 'window' : 'tab';
+        el.classList.add('tab-dragging');
+        document.body.classList.add('tab-drag');
+      }
+      if (mode === 'window') { if (winPos) window.bdsShell.moveWindow(winPos[0], winPos[1], dx, dy); return; }
+      const b = $('#tabbar').getBoundingClientRect();
+      out = shellWin && (ev.clientY < b.top - 28 || ev.clientY > b.bottom + 44 || ev.clientX < 0 || ev.clientX > innerWidth);
+      clearMarks();
+      target = null;
+      if (out) {
+        if (!ghost) {
+          ghost = h('div', { class: 'tab-ghost' }, el.querySelector('.tab-icon')?.cloneNode(true) || '', h('span', {}, t.title), h('span', { class: 'tab-ghost-hint' }, 'new window'));
+          document.body.append(ghost);
+        }
+        ghost.hidden = false;
+        ghost.style.left = `${Math.round(ev.clientX + 12)}px`;
+        ghost.style.top = `${Math.round(ev.clientY + 10)}px`;
+        return;
+      }
+      if (ghost) ghost.hidden = true;
+      // the tab the pointer is over: the dragged one goes before it (or after the last one)
+      const tabs = $$('#tabs .tab');
+      const over = tabs.find((x) => { const r = x.getBoundingClientRect(); return ev.clientX < r.left + r.width / 2; });
+      target = over ? over._tab : null;
+      if (over && over !== el) over.classList.add('drag-over');
+      else if (!over && tabs.at(-1) !== el) tabs.at(-1)?.classList.add('drag-over-end');
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.classList.remove('tab-dragging');
+      document.body.classList.remove('tab-drag');
+      clearMarks();
+      ghost?.remove();
+      if (mode !== 'tab') return;
+      if (out) return this.tearOff(t, lastX, lastY);
+      const from = this.tabs.indexOf(t);
+      if (from < 0) return;
+      this.tabs.splice(from, 1);
+      const to = target ? this.tabs.indexOf(target) : this.tabs.length;
+      this.tabs.splice(to < 0 ? from : to, 0, t);
+      this.renderTabs();
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  /** What a tab needs to open again in another window, or why it can't (said to the user). */
+  tabHandoff(t) {
+    if (t.mode === 'tomcat') return { why: 'That one stays in the main window.' };
+    const item = { title: t.title, path: t.path || null, ext: t.ext, mode: t.mode, lang: t.lang, untitled: !!t.untitled, dirty: !!t.dirty };
+    if (TOOL_KINDS.has(t.mode)) return { item };
+    if (t.dirty || (t.untitled && !NEW_KIND[t.mode])) {
+      let content = null;
+      try { content = t.editor?.getDraft?.(); } catch { /* none */ }
+      if (content == null) return { why: t.dirty ? 'Save it first: this kind of tab can’t move to another window with unsaved changes.' : 'This tab can’t move to another window.' };
+      item.content = content;
+    }
+    return { item };
+  }
+
+  /** (cx, cy): where it was let go, in this page's coordinates (outside the window is fine). */
+  async tearOff(t, cx, cy) {
+    const { item, why } = this.tabHandoff(t);
+    if (!item) return toast(why, { type: 'warn' });
+    const el = [...$$('#tabs .tab')].find((x) => x._tab === t);
+    el?.classList.add('tab-leaving');
+    const ok = await window.bdsShell.tearOff({ tabs: [item], cx, cy }).catch(() => false);
+    el?.classList.remove('tab-leaving');
+    if (!ok) return toast('The new window didn’t open.', { type: 'error' });
+    // it's open over there now: close it here without asking (its unsaved changes went with it)
+    this.draftHashes.delete(t.id);
+    await this.closeTab(t, { force: true });
+  }
+
+  /** In a window just opened for tabs dragged out of another one: open them here. */
+  async adoptTabs(token) {
+    const items = await window.bdsShell?.adopt?.(token).catch(() => null);
+    for (const it of items || []) {
+      try {
+        if (it.content != null) {
+          const tab = this.createTab({ title: it.title, path: it.path, ext: it.ext });
+          tab.mode = it.mode;
+          tab.lang = it.lang;
+          tab.untitled = it.untitled;
+          this.activate(tab);
+          await this.mountEditor(tab, null, { lang: it.lang, isNew: true, draft: it.content });
+          tab.editor.restoreDraft(it.content);
+          if (it.path) { const st = await api.stat(it.path).catch(() => ({})); tab.mtime = st.mtime || null; }
+          this.setDirty(tab, !!it.dirty);
+        } else if (TOOL_KINDS.has(it.mode)) await this.newDocument(it.mode, { another: true });
+        else if (it.path) await this.openPath(it.path);
+        else if (NEW_KIND[it.mode]) await this.newDocument(NEW_KIND[it.mode], { lang: it.lang });
+      } catch (e) { errorToast(e, `Could not open ${it.title}`); }
+    }
   }
 
   activate(tab) {
@@ -1853,7 +1965,7 @@ class App {
 
     try {
       const openIds = new Set(this.tabs.map((t) => t.id));
-      const drafts = (await api.drafts()).filter((d) => !openIds.has(d.id));
+      const drafts = (await api.drafts()).filter((d) => !openIds.has(d.id) && !(d.live && d.client !== this.clientId));
       if (drafts.length) {
         draftsHost.append(h('div', { class: 'banner' },
           icon('history'),
@@ -1892,7 +2004,7 @@ class App {
         const sig = content.length + ':' + content.slice(0, 64) + content.slice(-64);
         if (this.draftHashes.get(t.id) === sig) continue;
         this.draftHashes.set(t.id, sig);
-        api.saveDraft({ id: t.id, title: t.title, path: t.path, mode: t.mode, ext: t.ext, lang: t.lang, content }).catch(() => {});
+        api.saveDraft({ id: t.id, title: t.title, path: t.path, mode: t.mode, ext: t.ext, lang: t.lang, content, client: this.clientId }).catch(() => {});
       }
     }, 15000);
   }
@@ -2453,6 +2565,9 @@ class App {
 
   /** After the app is up: say how an update/rollback went, then the first-run welcome or "what's new". */
   async afterStartup() {
+    // Ctrl+right-click on a file in Files / recents / BoxSpaces sends it to the tool that's open
+    window.addEventListener('bds:send-files', (e) => this.sendToActive(e.detail?.paths || []));
+    if (this.mainWindow === false) return; // update notices and the welcome: the main window has them
     const H = { 'X-BDS-Token': api.token };
     const version = window.BDS?.version || '';
     try {
@@ -2465,8 +2580,6 @@ class App {
       }
     } catch { /* browser mode or old server */ }
     this.launchUpdateCheck();
-    // Ctrl+right-click on a file in Files / recents / BoxSpaces sends it to the tool that's open
-    window.addEventListener('bds:send-files', (e) => this.sendToActive(e.detail?.paths || []));
     const last = this.settings.lastSeenVersion;
     if (!this.settings.welcomed) {
       this.saveSettings({ welcomed: true, lastSeenVersion: version });

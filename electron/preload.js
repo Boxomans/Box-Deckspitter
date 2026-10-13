@@ -19,4 +19,10 @@ contextBridge.exposeInMainWorld('bdsShell', {
   // the built-in browser: requests ({ op, ... } → { ok, ... }) and events from its pages (new tab, keys, saved…)
   browser: (req) => ipcRenderer.invoke('bds:browser', req),
   onBrowser: (cb) => { ipcRenderer.on('bds:browser-event', (_e, ev) => cb(ev)); },
+  // several app windows: which one this is, dragging it by a tab, and tabs dragged out into a window of their own
+  winInfo: () => ipcRenderer.invoke('bds:win-info'),
+  moveWindow: (x, y, dx, dy) => ipcRenderer.send('bds:move-window', [x, y, dx, dy]),
+  tearOff: (req) => ipcRenderer.invoke('bds:tear-off', req),
+  adopt: (token) => ipcRenderer.invoke('bds:adopt', token),
+  onMainWindow: (cb) => { ipcRenderer.on('bds:main-window', () => cb()); },
 });

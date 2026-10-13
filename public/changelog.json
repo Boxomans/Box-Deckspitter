@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.30",
+    "date": "2026-10-12",
+    "notes": [
+      "Tabs: drag a tab up, down or out of the window to open it in a window of its own (unsaved changes go with it). With one tab, dragging it moves the whole window. The windows share one taskbar button.",
+      "Browser: the “Logins aren’t kept yet” notice now goes away after the next restart, even if the app is reopened right after closing."
+    ]
+  },
+  {
     "version": "1.0.29",
     "date": "2026-10-12",
     "notes": [

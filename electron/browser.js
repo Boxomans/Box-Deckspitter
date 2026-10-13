@@ -2,8 +2,10 @@
 // their own, never with the app's bridge, Node or preload (shell.js enforces that when a webview attaches).
 //
 // Logins: cookies and site data are only kept on disk once Electron's cookie encryption is on (the same Windows
-// DPAPI protection Chrome uses). That switch ("fuse") lives inside electron.exe and can only be flipped while the
-// app is closed, so until it's on the browser runs on an in-memory session and the fuse is flipped right after quit.
+// DPAPI protection Chrome uses). That switch ("fuse") lives inside electron.exe, which can't be written while the app
+// runs, so until it's on the browser runs on an in-memory session. It's switched on in a copy of electron.exe that is
+// swapped in while the app runs (Windows lets a running program's file be renamed, not written), so the next start
+// has it. If that fails, a job flips it in place after quit (and on an in-app restart, before starting again).
 //
 // Also: the built-in ad blocker (adblock.js), unpacked Chrome extensions, permission prompts, external app links (nxm:// for Vortex, steam://…) behind a
 // prompt, and right-click → media dump / doc dump straight into the app's dump folders.
@@ -109,13 +111,47 @@ module.exports = function createBrowser({ root, isAppSender }) {
   const partition = fuse.on ? PERSIST : MEMORY;
 
   /**
+   * While the app runs: copy electron.exe, switch the fuse on in the copy, and swap the copy in (the running file is
+   * renamed to electron.exe.old, deleted on a later start). Doesn't depend on the app closing, or staying closed long
+   * enough for a file to come free: reopening it straight away beat the after-quit job every time.
+   */
+  async function swapInPatchedExe() {
+    const exe = process.execPath;
+    const old = `${exe}.old`, tmp = `${exe}.patching`;
+    await fsp.rm(old, { force: true }).catch(() => {}); // the one swapped out last time (still in use if that copy runs)
+    if (fuse.on || fuse.offset < 0 || process.platform !== 'win32') return;
+    try {
+      await fsp.copyFile(exe, tmp);
+      const fh = await fsp.open(tmp, 'r+');
+      try {
+        const at = fuse.offset - COOKIE_FUSE - 2 - FUSE_SENTINEL.length;
+        const chk = Buffer.alloc(FUSE_SENTINEL.length + 3 + COOKIE_FUSE);
+        await fh.read(chk, 0, chk.length, at);
+        // the sentinel where it was found, and the fuse still off: else this isn't the file we measured
+        if (!chk.subarray(0, FUSE_SENTINEL.length).equals(FUSE_SENTINEL) || chk[chk.length - 1] !== 0x30) throw new Error('unexpected layout');
+        await fh.write(Buffer.from('1'), 0, 1, fuse.offset);
+        await fh.sync();
+      } finally { await fh.close(); }
+      await fsp.rename(exe, old);
+      try { await fsp.rename(tmp, exe); } catch (e) { await fsp.rename(old, exe).catch(() => {}); throw e; }
+      // the copy keeps the original's size and date, so the cache can't tell them apart: record it directly
+      const st = fs.statSync(exe);
+      writeJSON(FUSE_FILE, { exe, size: st.size, mtime: st.mtimeMs, offset: fuse.offset, on: true });
+      fuse.swapped = true;
+      console.log('[browser] cookie encryption switched on for the next start');
+    } catch (e) {
+      console.log(`[browser] couldn’t switch cookie encryption on yet (${e.message}); it's tried again after quit`);
+    } finally { await fsp.rm(tmp, { force: true }).catch(() => {}); }
+  }
+
+  /**
    * After the app has fully closed: flip the fuse in electron.exe (PowerShell, waits until the file is free).
    * With `relaunch` ({ args }) it then starts the app again: an in-app restart (updates) can't use app.relaunch()
    * while the fuse is off, because the new copy would hold electron.exe open before it could be patched.
    * Returns whether the job was started.
    */
   function scheduleFusePatch(relaunch) {
-    if (fuse.on || fuse.offset < 0 || process.platform !== 'win32') return false;
+    if (fuse.on || fuse.swapped || fuse.offset < 0 || process.platform !== 'win32') return false;
     const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
     // one Windows command line for the relaunch (each argument quoted the way programs split it)
     const winArg = (a) => (a && !/[\s"]/.test(a) ? a : `"${a.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`);
@@ -398,6 +434,8 @@ ${again}`;
   });
 
   app.on('will-quit', () => scheduleFusePatch());
+  // a little after start-up, so the 200 MB copy doesn't slow the window opening
+  app.whenReady().then(() => setTimeout(() => { swapInPatchedExe(); }, 15000).unref?.());
 
   return {
     partition,

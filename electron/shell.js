@@ -2,7 +2,7 @@
 // (own icon, own taskbar entry, no browser chrome). Everything still talks to 127.0.0.1 with the per-launch token.
 // Loaded by electron/main.js (the boot file), which applies updates and rolls them back if this doesn't start.
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeImage, clipboard, ClipboardItem, powerMonitor } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeImage, clipboard, ClipboardItem, powerMonitor, screen } = require('electron');
 const { fork } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -128,9 +128,21 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
   }
 
-  function createWindow(url) {
+  // ---- app windows. Several can be open (a tab dragged out of one becomes a window of its own; they share the
+  // taskbar button, like browser windows). One of them is the main window: the one-per-app things (the easter egg,
+  // update notices) run there, and when it closes the next one takes over.
+  const appWins = new Set();
+  let mainWinId = null;
+  function nextMainWindow() {
+    const next = [...appWins].find((w) => !w.isDestroyed());
+    mainWinId = next ? next.id : null;
+    if (next) next.webContents.send('bds:main-window');
+  }
+
+  function createWindow(url, bounds = null) {
     const win = new BrowserWindow({
       width: 1480, height: 940, minWidth: 720, minHeight: 460,
+      ...(bounds || {}),
       show: false,
       title: 'Box-DocSpitter',
       icon: nativeImage.createFromPath(ICON),
@@ -159,6 +171,10 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
         });
       } catch { /* older Windows: pinning just won't carry the details */ }
     }
+    appWins.add(win);
+    if (mainWinId == null) mainWinId = win.id;
+    const id = win.id;
+    win.on('closed', () => { appWins.delete(win); if (mainWinId === id) nextMainWindow(); });
     win.once('ready-to-show', () => win.show());
     win.loadURL(url);
 
@@ -199,6 +215,49 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
 
   // Bridge for the page (see preload.js).
   const winOf = (e) => BrowserWindow.fromWebContents(e.sender);
+
+  // ---- tabs dragged out into windows of their own, and a one-tab window dragged around by its tab
+  ipcMain.handle('bds:win-info', (e) => {
+    const win = winOf(e);
+    if (!win) return null;
+    return { main: win.id === mainWinId, pos: win.getPosition(), maximized: win.isMaximized() };
+  });
+  // [x, y] where the drag started (from win-info) and how far the pointer has moved since, in page pixels (the
+  // page's zoom makes those differ from screen pixels)
+  ipcMain.on('bds:move-window', (e, m) => {
+    const win = winOf(e);
+    if (!win || !Array.isArray(m) || m.length !== 4 || !m.every(Number.isFinite)) return;
+    if (win.isMaximized()) win.unmaximize();
+    const z = e.sender.getZoomFactor() || 1;
+    win.setPosition(Math.round(m[0] + m[2] * z), Math.round(m[1] + m[3] * z));
+  });
+  const adoptions = new Map(); // token → { tabs, done }
+  // the tabs go to the new window, which asks for them once it's loaded; the old window closes them only after that
+  ipcMain.handle('bds:tear-off', (e, req) => {
+    const src = winOf(e);
+    if (!src || !fromApp(e) || !origin || !Array.isArray(req?.tabs) || !req.tabs.length) return false;
+    const token = require('crypto').randomBytes(12).toString('hex');
+    const [w, h] = src.isMaximized() ? [1280, 860] : src.getSize();
+    // where it was let go: the page's coordinates (cx, cy) → the screen's
+    const cb = src.getContentBounds(), z = e.sender.getZoomFactor() || 1;
+    const px = cb.x + (Number(req.cx) || 0) * z, py = cb.y + (Number(req.cy) || 0) * z;
+    // the new window's tab bar under the pointer, on the screen the pointer is on
+    const area = screen.getDisplayNearestPoint({ x: Math.round(px), y: Math.round(py) }).workArea;
+    const x = Math.round(Math.min(Math.max(px - Math.min(160, w / 2), area.x), area.x + area.width - Math.min(w, area.width)));
+    const y = Math.round(Math.min(Math.max(py - 60, area.y), area.y + area.height - Math.min(h, area.height)));
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { adoptions.delete(token); resolve(false); }, 30000);
+      adoptions.set(token, { tabs: req.tabs, done: () => { clearTimeout(timer); resolve(true); } });
+      createWindow(`${origin}/?adopt=${token}`, { x, y, width: Math.min(w, area.width), height: Math.min(h, area.height) });
+    });
+  });
+  ipcMain.handle('bds:adopt', (e, token) => {
+    const a = fromApp(e) ? adoptions.get(String(token)) : null;
+    if (!a) return null;
+    adoptions.delete(String(token));
+    a.done();
+    return a.tabs;
+  });
 
   ipcMain.handle('bds:titlebar', (e, { color, symbolColor, theme }) => {
     const win = winOf(e);

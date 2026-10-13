@@ -1802,7 +1802,8 @@ const routes = {
     const out = [];
     for (const f of files) {
       const d = readJSON(path.join(dir, f), null);
-      if (d) out.push({ id: d.id, title: d.title, path: d.path, mode: d.mode, ext: d.ext, savedAt: d.savedAt, size: (d.content || '').length });
+      // live: saved by a window that's still open (another app window's tab, not something to recover)
+      if (d) out.push({ id: d.id, title: d.title, path: d.path, mode: d.mode, ext: d.ext, savedAt: d.savedAt, size: (d.content || '').length, client: d.client || null, live: !!d.client && clients.has(d.client) });
     }
     return out.sort((a, b) => b.savedAt - a.savedAt);
   },
