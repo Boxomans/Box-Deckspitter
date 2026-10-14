@@ -7,6 +7,7 @@ import {
   showMenu, closeMenus, menusOpen, contextMenu, modal, modalOpen, alertDialog, confirmDialog, promptDialog,
   choiceDialog, toast, errorToast, hoverKeys, renameInline, rubberSelect, PATHS_MIME, draggedPaths,
 } from './core/ui.js';
+import { applyCustom, normalizeCustom, CUSTOM_PRESETS } from './core/custom-theme.js';
 import { detectMode, extForLang, LANGUAGES, MODE_ICON, MODE_LABEL, iconForName, OPEN_FILTERS, VIDEO_FILTERS } from './core/filetypes.js';
 import { pickOpen, pickSave, configureFiles, setLastDir, getLastDir } from './core/files.js';
 import { createPresence } from './core/presence.js';
@@ -169,8 +170,8 @@ function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
 }
 
 const DISCORD_INVITE = 'https://discord.gg/3qxNWFErAV';
-const THEME_NEXT = { dark: 'light', light: 'pbj', pbj: 'dark' };
-const THEME_NAME = { dark: 'Dark', light: 'Light', pbj: 'PB&J' };
+const THEME_NEXT = { dark: 'light', light: 'pbj', pbj: 'custom', custom: 'dark' };
+const THEME_NAME = { dark: 'Dark', light: 'Light', pbj: 'PB&J', custom: 'Custom' };
 const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) => [b, a]));
 // side panels that can move between the right sidebar and the top bar
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
@@ -1031,17 +1032,20 @@ class App {
   }
 
   applyTheme(theme, persist = true) {
+    if (!THEME_NAME[theme]) theme = 'dark';
     this.settings.theme = theme;
-    document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem('bds-theme', theme); } catch { /* ignore */ }
+    // a custom theme sits on its base (dark or light): the base's own rules apply, the palette's colours win
+    const shown = theme === 'custom' ? applyCustom(normalizeCustom(this.settings.customTheme)) : (applyCustom(null), theme);
+    document.documentElement.dataset.theme = shown;
+    try { localStorage.setItem('bds-theme', shown); } catch { /* ignore */ }
     const b = $('#btn-theme');
-    clear(b).append(icon(theme === 'dark' ? 'sun' : theme === 'light' ? 'star' : 'moon'));
+    clear(b).append(icon(theme === 'dark' ? 'sun' : theme === 'light' ? 'star' : theme === 'pbj' ? 'palette' : 'moon'));
     b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[THEME_NEXT[theme] || 'dark']}, right-click for ${THEME_NAME[THEME_PREV[theme] || 'dark']}`;
     if (persist) this.saveSettings({ theme });
     for (const t of this.tabs) t.editor?.onThemeChange?.(theme);
     if (window.bdsShell) {
       const cs = getComputedStyle(document.documentElement);
-      window.bdsShell.setTitlebar((cs.getPropertyValue('--titlebar-solid') || cs.getPropertyValue('--bg-1')).trim(), cs.getPropertyValue('--text-2').trim(), theme).catch(() => {});
+      window.bdsShell.setTitlebar((cs.getPropertyValue('--titlebar-solid') || cs.getPropertyValue('--bg-1')).trim(), cs.getPropertyValue('--text-2').trim(), shown).catch(() => {});
     }
   }
 
@@ -1215,6 +1219,8 @@ class App {
       { label: 'Dark theme', icon: 'moon', checked: this.settings.theme === 'dark', action: () => this.applyTheme('dark') },
       { label: 'Light theme', icon: 'sun', checked: this.settings.theme === 'light', action: () => this.applyTheme('light') },
       { label: 'PB&J theme', icon: 'star', checked: this.settings.theme === 'pbj', action: () => this.applyTheme('pbj') },
+      { label: 'Custom theme', icon: 'palette', checked: this.settings.theme === 'custom', action: () => this.applyTheme('custom') },
+      { label: 'Edit custom theme…', action: () => this.showPanel('settings') },
       { label: 'Sounds', icon: 'volume', checked: this.settings.sounds !== false, action: () => { this.sounds.toggle(); this.syncSoundButton(); } },
       ...(extra.length ? [{ sep: true }, ...extra] : []),
     ];
@@ -2686,11 +2692,14 @@ class App {
       cb.addEventListener('change', () => { this.saveSettings({ [key]: cb.checked }); onChange?.(cb.checked); });
       return h('label', { class: 'check' }, cb, label);
     };
+    const customBox = this.customThemeSettings();
+    customBox.hidden = s.theme !== 'custom';
     p.append(
       h('div', { class: 'panel-head' }, 'Settings', h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
       h('div', { class: 'panel-body' }, h('div', { class: 'settings-panel' },
         h('div', { class: 'settings-group' }, h('h4', {}, 'Appearance'),
-          sel('theme', [['dark', 'Dark — neon dusk'], ['light', 'Light — lavender'], ['pbj', 'PB&J — grape & peanut butter']], (v) => this.applyTheme(v)),
+          sel('theme', [['dark', 'Dark — neon dusk'], ['light', 'Light — lavender'], ['pbj', 'PB&J — grape & peanut butter'], ['custom', 'Custom — your own palette']], (v) => { this.applyTheme(v); customBox.hidden = v !== 'custom'; }),
+          customBox,
           check('sounds', 'Sounds', () => this.syncSoundButton()),
           check('soundTyping', 'Typing sounds'),
           check('soundHover', 'Hover sounds'),
@@ -2734,6 +2743,45 @@ class App {
         h('div', { class: 'settings-group' }, h('h4', {}, 'Community'),
           h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Questions, ideas or bugs? Come say hi.'),
           h('button', { class: 'btn sm', onclick: () => window.open(DISCORD_INVITE, '_blank', 'noopener') }, icon('external', 'sm'), 'Join the Discord')))));
+  }
+
+  /** Settings → Appearance → Custom: a few colours (or a preset) and everything else is worked out from them. */
+  customThemeSettings() {
+    const box = h('div', { class: 'ct-box' });
+    const draw = () => {
+      const c = normalizeCustom(this.settings.customTheme);
+      const set = (patch) => {
+        this.saveSettings({ customTheme: { ...normalizeCustom(this.settings.customTheme), ...patch } });
+        if (this.settings.theme === 'custom') this.applyTheme('custom', false);
+      };
+      const pick = (key, label) => {
+        const inp = h('input', { type: 'color', value: c[key] });
+        inp.addEventListener('input', () => set({ [key]: inp.value }));
+        return h('label', { class: 'ct-pick' }, inp, label);
+      };
+      const tone = (v, label) => h('button', { class: c.base === v ? 'on' : '', onclick: () => {
+        // flipping dark / light keeps the hue of the background but moves it to the other end
+        const flip = c.base !== v ? (v === 'light' ? '#f4f2f7' : '#121016') : c.bg;
+        set({ base: v, bg: c.base !== v ? blendBg(c.bg, flip) : c.bg }); draw();
+      } }, label);
+      clear(box).append(
+        h('div', { class: 'ct-presets' }, ...CUSTOM_PRESETS.map((p) => h('button', {
+          class: 'ct-preset' + (p.bg === c.bg && p.accent === c.accent && p.accent2 === c.accent2 ? ' on' : ''),
+          'data-tip': p.name, style: { background: p.bg },
+          onclick: () => { set({ base: p.base, bg: p.bg, accent: p.accent, accent2: p.accent2 }); draw(); },
+        }, h('span', { style: { background: p.accent } }), h('span', { style: { background: p.accent2 } })))),
+        h('div', { class: 'ct-row' }, h('div', { class: 'seg ct-tone' }, tone('dark', 'Dark'), tone('light', 'Light')),
+          pick('bg', 'Background'), pick('accent', 'Accent'), pick('accent2', 'Highlight')),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Pick a preset or your own three colours; every other shade is worked out from them.'));
+    };
+    // keep a little of the old background's colour when switching between dark and light
+    const blendBg = (from, to) => {
+      const a = parseInt(from.slice(1), 16), b = parseInt(to.slice(1), 16);
+      const ch = (n, s) => (n >> s) & 255;
+      return '#' + [16, 8, 0].map((s) => Math.round(ch(b, s) + (ch(a, s) - ch(b, s)) * 0.12).toString(16).padStart(2, '0')).join('');
+    };
+    draw();
+    return box;
   }
 
   async factoryReset() {
@@ -3470,7 +3518,7 @@ class App {
     const d = w.document;
     d.open();
     d.write(`<!doctype html><html><head><meta charset="utf-8"><title>Box-DocSpitter — README</title><style>
-      :root { color-scheme: ${this.settings.theme === 'light' ? 'light' : 'dark'}; }
+      :root { color-scheme: ${document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'}; }
       body { margin: 0; background: ${v('--bg-0')}; color: ${v('--text')}; font: 14px/1.6 Inter, "Segoe UI", system-ui, sans-serif; }
       main { max-width: 860px; margin: 0 auto; padding: 28px 32px 60px; }
       h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 0.6em; }

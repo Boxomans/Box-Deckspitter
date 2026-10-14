@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.33",
+    "date": "2026-10-14",
+    "notes": [
+      "Custom theme: Settings → Appearance → Custom. Pick dark or light, a background, an accent and a highlight (or start from one of nine presets) and the rest of the colours are worked out from them, code editor included.",
+      "BoxSpaces: hover a recent space and click × to take it off the list (the folder itself isn't touched)."
+    ]
+  },
+  {
     "version": "1.0.32",
     "date": "2026-10-14",
     "notes": [

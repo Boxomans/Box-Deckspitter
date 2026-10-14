@@ -323,6 +323,7 @@ svg.i.xl { width: 28px; height: 28px; stroke-width: 1.5; }
 }
 .btn.primary:hover { filter: brightness(1.08); }
 [data-theme="light"] .btn.primary { color: #fff; }
+:root.custom-theme .btn.primary { color: var(--accent-text, #fff); }
 .btn.ghost { background: none; border-color: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--bg-4); color: var(--text); }
 .btn.danger { color: var(--danger); }
@@ -664,6 +665,9 @@ body.rail-grabbing, body.rail-grabbing * { cursor: grabbing !important; user-sel
 .file-row .fr-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-row .fr-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); }
 .file-row.muted { opacity: 0.55; }
+.file-row .fr-x { display: inline-flex; padding: 2px; border-radius: 4px; color: var(--text-3); opacity: 0; }
+.file-row:hover .fr-x { opacity: 1; }
+.file-row .fr-x:hover { color: var(--text); background: var(--bg-4, var(--bg-2)); }
 .empty-note { padding: 18px; color: var(--text-3); font-size: 12px; text-align: center; }
 
 /* ---------------------------------------------------------------- BoxSpaces */
@@ -1599,3 +1603,20 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 .tomcat-hangar .th-bar span { display: block; height: 100%; background: #54ff6b; }
 .tomcat-hangar .th-badge-val { min-width: 110px; text-align: right; font-size: 12px; color: #ffd36b; }
 .tomcat-hangar .th-badge:not(.on) .th-badge-val { color: #8bd88b; }
+
+/* Settings → Appearance → custom theme */
+.ct-box { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-2); }
+.ct-box[hidden] { display: none; }
+.ct-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.ct-preset { width: 34px; height: 24px; padding: 0 4px; border: 1px solid var(--line-2); border-radius: 5px; display: flex; align-items: center; justify-content: center; gap: 3px; cursor: pointer; }
+.ct-preset span { width: 9px; height: 9px; border-radius: 50%; }
+.ct-preset:hover { border-color: var(--text-3); }
+.ct-preset.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ct-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.ct-tone { display: inline-flex; border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+.ct-tone button { border: 0; background: none; color: var(--text-2); padding: 3px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+.ct-tone button.on { background: var(--accent-soft-2); color: var(--text); }
+.ct-pick { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.ct-pick input[type="color"] { width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-2); border-radius: 4px; background: none; cursor: pointer; }
+.ct-pick input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+.ct-pick input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }

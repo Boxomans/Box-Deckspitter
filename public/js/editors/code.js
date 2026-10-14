@@ -10,7 +10,34 @@ import { api } from '../core/api.js';
 let monacoPromise = null;
 
 /** The Monaco colour theme that goes with the app theme. */
-export const monacoTheme = (t) => (t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : 'bds-dark');
+export const monacoTheme = (t) => (t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : 'bds-dark');
+
+let themeDefs = null; // the built-in definitions, kept to build the custom one from
+/** Re-made each time (the palette may have changed): the base theme's syntax colours on the palette's backgrounds. */
+function customMonaco() {
+  const light = document.documentElement.dataset.theme === 'light';
+  if (!window.monaco || !themeDefs) return light ? 'bds-light' : 'bds-dark';
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n) => cs.getPropertyValue(n).trim();
+  const def = light ? themeDefs.light : themeDefs.dark;
+  const bg = light ? v('--bg-2') : mix(v('--bg-1'), v('--bg-0'));
+  const acc = v('--accent'), acc2 = v('--accent-2');
+  window.monaco.editor.defineTheme('bds-custom', {
+    ...def,
+    colors: {
+      ...def.colors,
+      'editor.background': bg, 'editorGutter.background': bg, 'minimap.background': bg, 'editor.foreground': v('--text'),
+      'editorLineNumber.foreground': v('--text-3') + '88', 'editorLineNumber.activeForeground': acc, 'editorCursor.foreground': acc2,
+      'editor.selectionBackground': acc + '38', 'editor.inactiveSelectionBackground': acc + '1f', 'editor.selectionHighlightBackground': acc + '1a',
+      'editor.findMatchHighlightBackground': acc + '33', 'editorBracketMatch.background': acc + '22', 'editorBracketMatch.border': acc + '66',
+      'editorIndentGuide.activeBackground1': acc + '40', 'focusBorder': acc + '88', 'editorSuggestWidget.selectedBackground': acc + '2e',
+      'editorWidget.background': v('--bg-3'), 'editorWidget.border': v('--line-2'), 'editorSuggestWidget.background': v('--bg-3'),
+      'editorHoverWidget.background': v('--bg-3'), 'input.background': v('--bg-2'), 'input.border': v('--line-2'),
+    },
+  });
+  return 'bds-custom';
+}
+const mix = (a, b) => '#' + [1, 3, 5].map((i) => Math.round((parseInt(a.slice(i, i + 2), 16) + parseInt(b.slice(i, i + 2), 16)) / 2).toString(16).padStart(2, '0')).join('');
 
 export function loadMonaco() {
   if (monacoPromise) return monacoPromise;
@@ -95,6 +122,7 @@ function defineThemes(monaco) {
     },
   };
   monaco.editor.defineTheme('bds-dark', darkDef);
+  themeDefs = { dark: darkDef };
   // PB&J: the dark syntax colours on a plum background
   monaco.editor.defineTheme('bds-pbj', {
     ...darkDef,
@@ -105,7 +133,7 @@ function defineThemes(monaco) {
       'editorCursor.foreground': '#f0b232', 'editor.selectionBackground': '#5865f255', 'editorWidget.background': '#391f38', 'editorWidget.border': '#5f3a59',
     },
   });
-  monaco.editor.defineTheme('bds-light', {
+  monaco.editor.defineTheme('bds-light', themeDefs.light = {
     base: 'vs', inherit: true,
     rules: [
       { token: 'comment', foreground: '8d84a0', fontStyle: 'italic' },
@@ -245,7 +273,7 @@ export class CodeEditor extends BaseEditor {
       if (!this.frame || this.frame.dataset.kind !== 'md') {
         clear(this.previewHost);
         this.frame = h('iframe', { class: 'code-frame', sandbox: 'allow-same-origin', dataset: { kind: 'md' }, title: 'Preview' });
-        this.frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8">${baseTag}<style>${markdownCss(this.app.settings.theme)}</style></head><body><article class="md"></article></body></html>`;
+        this.frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8">${baseTag}<style>${markdownCss(document.documentElement.dataset.theme)}</style></head><body><article class="md"></article></body></html>`;
         this.previewHost.append(this.frame);
         await new Promise((r) => this.frame.addEventListener('load', r, { once: true }));
       }
