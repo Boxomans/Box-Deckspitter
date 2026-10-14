@@ -221,6 +221,7 @@ svg.i.xl { width: 28px; height: 28px; stroke-width: 1.5; }
 
 /* Desktop shell: the titlebar is the window's drag handle; native min/max/close sit at the right edge. */
 .in-shell #titlebar { -webkit-app-region: drag; padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 144px)) + 6px); }
+.in-shell.app-full #titlebar { padding-right: 8px; }
 .in-shell #titlebar button, .in-shell #titlebar nav, .in-shell #titlebar .brand, .in-shell #titlebar input { -webkit-app-region: no-drag; }
 
 /* ---------------------------------------------------------------- menubar */
@@ -480,6 +481,11 @@ body.tab-drag, body.tab-drag * { cursor: grabbing !important; }
 .rail-btn:hover { color: var(--text); background: var(--bg-3); }
 .rail-btn.active { color: var(--accent-strong); background: var(--accent-soft); }
 .rail-btn.active::before { content: ''; position: absolute; left: -5px; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
+.rail-btn.rail-dragging { background: var(--accent-soft); color: var(--accent-strong); box-shadow: 0 0 0 1px var(--accent), 0 6px 16px rgba(0,0,0,0.35); cursor: grabbing; z-index: 5; }
+#rail .rail-btn { touch-action: none; user-select: none; }
+body.rail-grabbing, body.rail-grabbing * { cursor: grabbing !important; user-select: none !important; }
+.rail-btn.rail-dragging { position: relative; }
+.top-marker { position: fixed; width: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px var(--accent); pointer-events: none; z-index: 1200; }
 .rail-spacer { flex: 1; }
 
 #sidepanel {
@@ -1172,6 +1178,47 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .music-tab.on { color: var(--text); background: var(--accent-soft); border-color: var(--accent-line); }
 .music-tab.drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft-2); }
 .music-tabs + .music-list { border-top: 0; }
+.music-tabs + .music-pls + .music-list, .music-pls + .music-list { border-top: 0; }
+/* playlists: a row of chips over the song list (drop a song on one to move it there) */
+.music-pls { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; padding: 2px 0 4px; }
+.music-pls::-webkit-scrollbar { display: none; }
+.music-pls[hidden] { display: none; }
+.music-pl { flex-shrink: 0; gap: 5px; max-width: 180px; }
+.music-pl .music-pl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-pl .mono { font-size: 10px; }
+.music-pl.on { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+.music-pl.drop { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); color: var(--text); }
+.music-pl-add { flex-shrink: 0; }
+.music-track-pl { flex-shrink: 0; max-width: 90px; margin-left: auto; padding: 1px 6px; border-radius: 9px; background: var(--bg-3); color: var(--text-3); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-track-pl + .music-qadd { margin-left: 4px; }
+.tape-dest { max-width: 220px; }
+
+/* full-screen player */
+.music-full { position: fixed; inset: 0; z-index: 790; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 25% 15%, color-mix(in srgb, var(--accent) 22%, var(--bg-0)) 0%, var(--bg-0) 65%); -webkit-app-region: no-drag; animation: music-full-in 0.22s ease-out; }
+.music-page { position: relative; height: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 18px; overflow: hidden; background: radial-gradient(ellipse at 25% 15%, color-mix(in srgb, var(--accent) 16%, var(--bg-0)) 0%, var(--bg-0) 65%); }
+.music-page .music-pop.full { width: min(1500px, 100%) !important; height: 100% !important; max-height: 1000px; }
+.music-stage .music-tab-btn { display: none; }
+.music-pop.docked .music-tab-btn { display: none; }
+.music-dock-note { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; padding: 20px; color: var(--text-3); font-size: 12px; text-align: center; }
+@keyframes music-full-in { from { opacity: 0; transform: scale(0.985); } }
+.music-viz { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 55%; opacity: 0.32; pointer-events: none; }
+.music-stage .music-pop.full { position: relative !important; inset: auto !important; top: auto !important; right: auto !important; z-index: 1; width: min(1500px, 92vw) !important; height: min(1000px, 88vh) !important; max-height: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); grid-template-rows: auto minmax(0, 1fr); gap: 14px 44px; padding: 18px 26px 22px; border: 1px solid var(--line-2); border-radius: 20px; background: color-mix(in srgb, var(--bg-1) 72%, transparent); backdrop-filter: blur(20px); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5); overflow: hidden; }
+.music-stage .music-pop.full > .music-head { grid-column: 1 / -1; font-size: 12px; }
+.music-stage .music-head .icon-btn[data-tip^="Close"] { display: none; }
+.music-full-main { display: flex; flex-direction: column; justify-content: center; gap: 16px; min-height: 0; overflow-y: auto; padding: 4px; }
+.music-full-main > * { flex-shrink: 0; }
+.music-full-side { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.music-full-side > .music-tabs { border-top: 0; padding-top: 0; }
+.music-stage .music-list { max-height: none !important; min-height: 0 !important; flex: 1 1 auto !important; overflow-y: auto !important; }
+.music-art { --hue: 270; align-self: center; width: min(420px, 38vh); aspect-ratio: 1; border-radius: 22px; display: grid; place-items: center; background: linear-gradient(135deg, hsl(var(--hue) 75% 62%), hsl(calc(var(--hue) + 70) 70% 55%) 55%, hsl(calc(var(--hue) + 140) 80% 60%)); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45); transform: scale(calc(1 + var(--beat, 0) * 0.05)); transition: transform 0.08s linear, background 0.6s; }
+.music-art span { font-size: min(120px, 13vh); line-height: 1; color: rgba(255, 255, 255, 0.92); text-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); }
+.music-stage .music-title { font-size: clamp(22px, 3.2vh, 34px); white-space: normal; line-height: 1.25; }
+.music-stage .music-sub { font-size: 12px; margin-top: 4px; }
+.music-stage .music-controls { gap: 18px; }
+.music-stage .music-play { transform: scale(1.2); }
+.music-stage .music-volrow { max-width: 440px; width: 100%; align-self: center; }
+.music-stage .music-time { max-width: 640px; width: 100%; align-self: center; }
+.music-stage .music-eq { align-self: center; }
 .music-track .music-track-name { flex: 1; min-width: 0; }
 .music-qadd { display: none; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--text-3); }
 .music-track:hover .music-qadd { display: grid; }
@@ -1260,6 +1307,51 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .icon-btn.in-rail::after { content: attr(data-rlabel); writing-mode: vertical-rl; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; }
 .icon-btn.in-rail.muted { color: var(--text-3); opacity: 0.75; }
 [data-theme="pbj"] .icon-btn.in-rail { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.1); }
+
+/* clock: the time next to its icon in the top bar, or down the side in the sidebar */
+#btn-clock:not(.in-rail) { width: auto; padding: 0 8px; gap: 6px; }
+#btn-clock .clock-now { font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+#btn-clock.in-rail .clock-now { display: none; }
+#btn-clock.in-rail::after { text-transform: none; letter-spacing: 0.08em; }
+#btn-clock.timing, #btn-clock.timing .clock-now { color: var(--accent); }
+#btn-clock.on { background: var(--bg-4); color: var(--text); }
+.clock-pop { position: fixed; z-index: 890; width: 330px; max-height: calc(100vh - 70px); overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 14px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--bg-1); box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5); font-size: 12.5px; -webkit-app-region: no-drag; }
+.clock-pop[hidden] { display: none; }
+.clock-head { position: relative; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.clock-big { font-size: 30px; font-weight: 600; letter-spacing: 0.02em; color: var(--text); }
+.clock-24 { position: absolute; top: 4px; right: 0; display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-3); }
+.clock-sec { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 8px; border-bottom: 1px solid var(--line); }
+.clock-sec:last-child { border-bottom: 0; padding-bottom: 0; }
+.clock-sec-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-3); }
+.clock-sec-title .faint { text-transform: none; letter-spacing: 0; }
+.clock-list { display: flex; flex-direction: column; gap: 2px; }
+.clock-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 7px; }
+.clock-row:hover { background: var(--bg-2); }
+.clock-row.off { opacity: 0.55; }
+.clock-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.clock-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.clock-row-sub { font-size: 11px; }
+.clock-row-time { font-size: 14px; color: var(--text); }
+.clock-row .icon-btn { width: 22px; height: 22px; opacity: 0; }
+.clock-row:hover .icon-btn { opacity: 1; }
+.clock-empty { padding: 2px 6px; font-size: 11.5px; }
+.clock-add { display: flex; align-items: center; gap: 6px; }
+.clock-add input[type="text"] { flex: 1; min-width: 0; }
+.clock-add input[type="time"] { flex: 1; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-2); color: var(--text); color-scheme: dark; font: inherit; }
+[data-theme="light"] .clock-add input[type="time"] { color-scheme: light; }
+.clock-timer-set input[type="number"] { width: 58px; }
+.clock-timer-set .btn { margin-left: auto; }
+.clock-presets { display: flex; gap: 4px; flex-wrap: wrap; }
+.clock-presets .btn { flex: 1; }
+.clock-timer { font-size: 34px; font-weight: 600; text-align: center; color: var(--accent); }
+.clock-timer-bar { height: 4px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+.clock-timer-bar i { display: block; height: 100%; background: var(--accent); transition: width 1s linear; }
+.clock-ring { position: fixed; z-index: 3000; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--accent-line); border-radius: 12px; background: var(--bg-1); box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55); animation: clock-ring-in 0.25s ease-out; }
+.clock-ring-ico { color: var(--accent); animation: clock-shake 0.5s ease-in-out infinite; }
+.clock-ring-ico .i { width: 22px; height: 22px; }
+.clock-ring-text { display: flex; flex-direction: column; min-width: 120px; }
+@keyframes clock-ring-in { from { transform: translate(-50%, 12px); opacity: 0; } }
+@keyframes clock-shake { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }
 
 /* drag-to-select */
 .rubber-box { position: fixed; z-index: 2500; pointer-events: none; border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 3px; }
@@ -1436,3 +1528,65 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 
 /* a read-only note at the bottom of a context menu (e.g. a BoxSwap description) */
 .menu-note { max-width: 280px; padding: 6px 12px 7px; color: var(--text-2); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---- calendar (left sidebar) */
+.cal-body { display: flex; flex-direction: column; gap: 10px; padding: 8px 10px 14px; }
+.cal-nav { display: flex; align-items: center; gap: 4px; }
+.cal-title { flex: 1; text-align: center; font-size: 13px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal-wd { text-align: center; font: 600 10px var(--font-mono); color: var(--text-3); padding: 2px 0 4px; }
+.cal-day { position: relative; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font-size: 12px; cursor: pointer; padding: 0; }
+.cal-day:hover { background: var(--bg-3); }
+.cal-day.other { color: var(--text-3); opacity: 0.55; }
+.cal-day.off .cal-n { color: var(--accent-strong); font-weight: 600; }
+.cal-day.today .cal-n { background: var(--accent); color: var(--bg-0); border-radius: 999px; min-width: 20px; height: 20px; line-height: 20px; font-weight: 700; }
+.cal-day.picked { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-soft); }
+.cal-dots { display: flex; gap: 2px; height: 4px; }
+.cal-dots i { width: 4px; height: 4px; border-radius: 50%; }
+.cal-dots .cal-hol-dot { background: var(--text-3); }
+.cal-agenda { display: flex; flex-direction: column; gap: 3px; }
+.cal-agenda-head { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 2px; border-top: 1px solid var(--border); padding-top: 8px; }
+.cal-item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 7px; font-size: 12px; cursor: pointer; }
+.cal-item:hover { background: var(--bg-3); }
+.cal-item.hol { cursor: default; color: var(--text-2); }
+.cal-item.hol:hover { background: transparent; }
+.cal-item.hol.off { color: var(--accent-strong); }
+.cal-bar { width: 3px; align-self: stretch; border-radius: 3px; background: var(--c); flex: none; }
+.cal-item-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.cal-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-item-sub { font-size: 11px; }
+.cal-when { margin-left: auto; font-size: 11px; white-space: nowrap; }
+.cal-tag { margin-left: auto; font: 10px var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; }
+.cal-empty { font-size: 12px; padding: 4px 6px; }
+.cal-form { display: flex; flex-direction: column; gap: 10px; min-width: 340px; }
+.cal-form-row { display: grid; grid-template-columns: 70px auto 1fr; align-items: center; gap: 8px; }
+.cal-form-row > :nth-child(2):last-child { grid-column: 2 / 4; }
+.cal-ends { font-size: 12px; }
+.cal-swatches { display: flex; gap: 6px; }
+.cal-swatch { width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.cal-swatch.on { border-color: var(--text); }
+/* today's events in the clock */
+.clock-sec-title { display: flex; align-items: center; gap: 4px; }
+.clock-sec-title .btn { text-transform: none; letter-spacing: 0; font-family: var(--font-ui, inherit); }
+.clock-ev { cursor: pointer; }
+.clock-ev:hover { background: var(--bg-3); }
+.clock-ev-bar { width: 3px; align-self: stretch; border-radius: 3px; background: var(--c); flex: none; }
+.clock-ev-when { font-size: 11px; white-space: nowrap; }
+.clock-ev-ring { opacity: 0.45; }
+.clock-ev-ring.on { opacity: 1; color: var(--accent-strong); }
+
+/* New BoxSpace dialog */
+.spaces-empty-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.spaces-where-row { display: flex; gap: 6px; align-items: center; }
+.spaces-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-2); font-size: 12px; direction: rtl; text-align: left; }
+.spaces-where-full { font-size: 12px; margin-top: 4px; word-break: break-all; }
+
+/* ---- tabs: one width everywhere (app and browser); pinned ones shrink to an icon at the front ---- */
+.tab, .bw-tab { flex: 0 0 180px; width: 180px; min-width: 0; max-width: none; }
+.tab.pinned, .bw-tab.pinned { flex: 0 0 40px; width: 40px; padding: 0; justify-content: center; gap: 0; }
+.tab.pinned .tab-title, .tab.pinned .tab-close, .bw-tab.pinned .bw-title, .bw-tab.pinned .bw-close { display: none; }
+.tab.pinned + .tab:not(.pinned), .bw-tab.pinned + .bw-tab:not(.pinned) { margin-left: 8px; }
+.tab.pinned .tab-icon { position: relative; }
+.tab.pinned.dirty .tab-icon::after { content: ''; position: absolute; right: -4px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); }
+.bw-globe { display: inline-flex; color: var(--text-3); }
+.bw-globe[hidden] { display: none; }

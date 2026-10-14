@@ -797,6 +797,13 @@ export class PdfEditor extends BaseEditor {
     el._capture.addEventListener('pointerdown', (e) => this.onCaptureDown(el, e));
     el._capture.addEventListener('pointermove', (e) => { if (this.tool === 'edittext') this.hoverText(el, e); });
     el._capture.addEventListener('pointerleave', () => { el._hover.hidden = true; });
+    // pictures that are part of the PDF: a move cursor over them (select tool), to show they can be dragged
+    el.addEventListener('pointermove', (e) => {
+      if (this.tool !== 'select' || !this.canEditMarks || e.buttons) return;
+      if (e.target.closest('[data-aid], [data-handle], .pdf-field')) { el.classList.remove('over-image'); return; }
+      this.imageAt(el, e).then((it) => el.classList.toggle('over-image', !!it)).catch(() => {});
+    });
+    el.addEventListener('pointerleave', () => el.classList.remove('over-image'));
     // selecting / moving existing annotations (select tool)
     el.addEventListener('pointerdown', (e) => {
       if (this.tool !== 'select' || !this.canEditMarks) return;
@@ -811,7 +818,9 @@ export class PdfEditor extends BaseEditor {
         this.startMove(el, e, id);
         return;
       }
-      if (!e.target.closest('.pdf-field')) this.selectAnnot(null);
+      if (e.target.closest('.pdf-field')) return;
+      this.selectAnnot(null);
+      if (el.classList.contains('over-image')) { e.preventDefault(); this.dragPdfImage(el, e); }
     });
     el.addEventListener('dblclick', (e) => {
       const hit = e.target.closest('[data-aid]');
@@ -1185,6 +1194,142 @@ export class PdfEditor extends BaseEditor {
   }
 
   // =================================================================== images & signatures
+
+  /**
+   * The pictures drawn on a page (from pdf.js's drawing list), with where each one sits in raw page points.
+   * Only upright ones (not rotated or skewed); a flipped one is noted so it can be drawn the right way round.
+   */
+  async imageItems(pm) {
+    if (pm.src === 'blank') return [];
+    if (pm._imgs) return pm._imgs;
+    const page = await this.pdfPage(pm);
+    const items = [];
+    if (page) {
+      const O = this.pdfjs.OPS;
+      const ops = await page.getOperatorList();
+      const v = pm.view;
+      const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+      let m = [1, 0, 0, 1, 0, 0];
+      const stack = [];
+      for (let i = 0; i < ops.fnArray.length; i++) {
+        const fn = ops.fnArray[i], args = ops.argsArray[i];
+        if (fn === O.save) stack.push(m);
+        else if (fn === O.restore) m = stack.pop() || m;
+        else if (fn === O.transform) m = mul(m, args);
+        else if (fn === O.paintFormXObjectBegin) { stack.push(m); if (args?.[0]) m = mul(m, args[0]); }
+        else if (fn === O.paintFormXObjectEnd) m = stack.pop() || m;
+        else if (fn === O.paintImageXObject || fn === O.paintInlineImageXObject) {
+          if (Math.abs(m[1]) > 1e-3 * Math.abs(m[0]) || Math.abs(m[2]) > 1e-3 * Math.abs(m[3])) continue;
+          const xs = [m[4], m[4] + m[0]], ys = [m[5], m[5] + m[3]];
+          const w = Math.abs(m[0]), hh = Math.abs(m[3]);
+          if (w < 2 || hh < 2) continue;
+          items.push({
+            x: Math.min(...xs) - v[0], y: v[3] - Math.max(...ys), w, h: hh,
+            flipX: m[0] < 0, flipY: m[3] < 0,
+            ...(fn === O.paintImageXObject ? { objId: args[0] } : { inline: args[0] }),
+          });
+        }
+      }
+    }
+    Object.defineProperty(pm, '_imgs', { value: items, enumerable: false, configurable: true, writable: true });
+    return items;
+  }
+
+  /** The PDF's own picture under the pointer (the topmost), unless it has already been lifted off. */
+  async imageAt(el, e) {
+    const pm = el._pm;
+    const [x, y] = this.pointOn(el, e).raw;
+    const items = await this.imageItems(pm);
+    const lifted = (it) => pm.annots.some((a) => a.type === 'whiteout' && a.lift && Math.abs(a.x - it.x) < 1 && Math.abs(a.y - it.y) < 1 && Math.abs(a.w - it.w) < 1);
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h && !lifted(it)) return it;
+    }
+    return null;
+  }
+
+  /** A picture as the PDF has it (full resolution), as a PNG data URL. */
+  async imagePixels(pm, it) {
+    let img = it.inline;
+    if (!img) {
+      const page = await this.pdfPage(pm);
+      const store = it.objId.startsWith('g_') ? page.commonObjs : page.objs;
+      img = await new Promise((res, rej) => { try { store.get(it.objId, res); } catch (e) { rej(e); } setTimeout(() => rej(new Error('image not loaded')), 8000); });
+    }
+    const { width: W, height: H } = img;
+    const src = document.createElement('canvas');
+    src.width = W; src.height = H;
+    const sctx = src.getContext('2d');
+    if (img.bitmap) sctx.drawImage(img.bitmap, 0, 0);
+    else if (img.data) {
+      const out = sctx.createImageData(W, H);
+      const d = img.data, o = out.data;
+      if (img.kind === 1) { // 1 bit per pixel, rows padded to whole bytes; a set bit is white
+        const row = (W + 7) >> 3;
+        for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) {
+          const on = (d[yy * row + (xx >> 3)] >> (7 - (xx & 7))) & 1;
+          const p = (yy * W + xx) * 4; o[p] = o[p + 1] = o[p + 2] = on ? 255 : 0; o[p + 3] = 255;
+        }
+      } else if (img.kind === 2) { // RGB
+        for (let p = 0, q = 0; q < W * H * 4; p += 3, q += 4) { o[q] = d[p]; o[q + 1] = d[p + 1]; o[q + 2] = d[p + 2]; o[q + 3] = 255; }
+      } else o.set(d.subarray(0, o.length)); // RGBA
+      sctx.putImageData(out, 0, 0);
+    } else throw new Error('unsupported image');
+    if (!it.flipX && !it.flipY) return src.toDataURL('image/png');
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    ctx.translate(it.flipX ? W : 0, it.flipY ? H : 0);
+    ctx.scale(it.flipX ? -1 : 1, it.flipY ? -1 : 1);
+    ctx.drawImage(src, 0, 0);
+    return c.toDataURL('image/png');
+  }
+
+  /**
+   * Drag one of the PDF's own pictures: once the pointer has moved a little, the picture is lifted off the page as
+   * an image mark (moved, resized and deleted like any other) and a whiteout covers where it was. The whiteout is
+   * its own mark: delete it to keep the original there too (a copy instead of a move).
+   */
+  async dragPdfImage(el, e) {
+    const pm = el._pm;
+    const it = await this.imageAt(el, e);
+    if (!it) return;
+    const sx = e.clientX, sy = e.clientY;
+    let lifting = null, done = false;
+    const lift = async () => {
+      let url;
+      try { url = await this.imagePixels(pm, it); } catch (err) { toast('That picture can’t be moved (its format isn’t supported).', { type: 'warn' }); return null; }
+      const asset = await assetFromDataUrl(url);
+      const id = 'img' + uid('');
+      this.assets.set(id, asset);
+      // lift: tells imageAt this one's been taken (matched on its box), so it isn't picked up again
+      const cover = { id: uid('a'), type: 'whiteout', x: it.x, y: it.y, w: it.w, h: it.h, color: this.props.whiteout, lift: true };
+      const ann = { id: uid('a'), type: 'image', x: it.x, y: it.y, w: it.w, h: it.h, rot: 0, asset: id };
+      this.change(() => { pm.annots.push(cover, ann); }, { pages: [pm] });
+      this.selectAnnot(ann.id);
+      return ann;
+    };
+    const move = (ev) => {
+      if (lifting || Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      lifting = lift().then((ann) => {
+        if (!ann || done) return;
+        // carry on as an ordinary move of the new image mark, from where the drag started
+        this.startMove(el, { clientX: sx, clientY: sy }, ann.id);
+        window.dispatchEvent(new PointerEvent('pointermove', { clientX: lastX, clientY: lastY }));
+      });
+    };
+    let lastX = sx, lastY = sy;
+    const track = (ev) => { lastX = ev.clientX; lastY = ev.clientY; };
+    const up = () => {
+      done = true;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointermove', track);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', track);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   async placeImageFromDisk(el, pt) {
     const paths = await pickOpen({ title: 'Choose image', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] }] });

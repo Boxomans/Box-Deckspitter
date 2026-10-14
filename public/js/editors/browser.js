@@ -4,7 +4,7 @@
 import { BaseEditor } from './base.js';
 import { h } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { toast, showMenu, closeMenus, confirmDialog, modal } from '../core/ui.js';
+import { toast, showMenu, closeMenus, confirmDialog, modal, contextMenu } from '../core/ui.js';
 import { BANDS, PRESETS, MIN_HZ, MAX_HZ, hzToPos, posToHz, hzLabel } from '../core/music.js';
 import { api } from '../core/api.js';
 
@@ -74,7 +74,8 @@ export class BrowserEditor extends BaseEditor {
     // the tabs from last time (this PC only: they aren't part of setup exports)
     const saved = (this.app.settings.browserTabs || []).filter((u) => typeof u === 'string');
     if (saved.length) {
-      saved.forEach((u) => this.newPage(u, { background: true }));
+      const pins = this.app.settings.browserPinned || 0; // the first ones were pinned
+      saved.forEach((u, i) => this.newPage(u, { background: true, pinned: i < pins }));
       this.activate(this.pages[Math.min(this.app.settings.browserActive || 0, this.pages.length - 1)]);
     } else this.newPage();
   }
@@ -83,21 +84,31 @@ export class BrowserEditor extends BaseEditor {
 
   // ---- pages
 
-  newPage(url, { background = false } = {}) {
+  newPage(url, { background = false, pinned = false } = {}) {
     const p = { url: url || SEARCH[this.engine()].home, title: 'New tab', favicon: null, loading: true, blocked: 0 };
     p.view = h('webview', { class: 'bw-view', partition: this.partition, allowpopups: '', src: p.url });
     p.fav = h('img', { class: 'bw-fav', alt: '' });
+    p.fav.addEventListener('error', () => { p.fav.hidden = true; p.globe.hidden = false; }); // a broken icon → the globe
     p.label = h('span', { class: 'bw-title' }, p.title);
     const close = h('button', { class: 'bw-close', title: 'Close tab (Ctrl+W)' }, icon('x', 'sm'));
     close.addEventListener('click', (e) => { e.stopPropagation(); this.closePage(p); });
-    p.tab = h('div', { class: 'bw-tab', title: p.url }, p.fav, p.label, close);
+    p.globe = h('span', { class: 'bw-globe' }, icon('globe', 'sm'));
+    p.tab = h('div', { class: 'bw-tab', title: p.url }, p.fav, p.globe, p.label, close);
     p.tab.addEventListener('mousedown', (e) => { if (e.button === 1) { e.preventDefault(); this.closePage(p); } });
     p.tab.addEventListener('click', () => this.activate(p));
+    p.tab.addEventListener('contextmenu', (e) => contextMenu(e, [
+      { label: p.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => this.pinPage(p, !p.pinned) },
+      { label: 'Duplicate', icon: 'copy', action: () => this.newPage(p.url) },
+      { label: 'Reload', icon: 'refresh', action: () => { try { p.view.reload(); } catch { /* not ready */ } } },
+      { sep: true },
+      { label: 'Close', action: () => this.closePage(p) },
+      { label: 'Close other tabs', disabled: this.pages.length < 2, action: () => this.pages.filter((x) => x !== p && !x.pinned).forEach((x) => this.closePage(x)) },
+    ]));
     const v = p.view;
     const upd = () => { if (p === this.active) { this.syncBar(); this.refreshStatus(); } this.renderTab(p); };
     v.addEventListener('did-attach', () => { p.wcId = v.getWebContentsId(); });
     v.addEventListener('page-title-updated', (e) => { p.title = e.title; upd(); });
-    v.addEventListener('page-favicon-updated', (e) => { p.favicon = e.favicons?.[0] || null; upd(); });
+    v.addEventListener('page-favicon-updated', (e) => { p.favicon = (e.favicons || []).find((u) => u && u !== 'data:,') || null; upd(); });
     v.addEventListener('did-start-loading', () => { p.loading = true; upd(); });
     v.addEventListener('did-stop-loading', () => { p.loading = false; upd(); this.saveTabs(); });
     v.addEventListener('did-navigate', (e) => { p.url = e.url; p.favicon = null; upd(); this.syncAd(); });
@@ -108,9 +119,18 @@ export class BrowserEditor extends BaseEditor {
       if (p === this.active) toast(`${e.errorDescription || 'Couldn’t load the page'} — ${e.validatedURL}`, { type: 'error', timeout: 5000 });
     });
     v.addEventListener('focus', () => closeMenus());
-    this.pages.push(p);
+    if (pinned) {
+      // pinned pages sit together at the front
+      p.pinned = true;
+      p.tab.classList.add('pinned');
+      const at = this.pages.filter((x) => x.pinned).length;
+      this.strip.insertBefore(p.tab, this.pages[at]?.tab || null);
+      this.pages.splice(at, 0, p);
+    } else {
+      this.pages.push(p);
+      this.strip.append(p.tab);
+    }
     this.views.append(v);
-    this.strip.append(p.tab);
     this.renderTab(p);
     if (!background || !this.active) this.activate(p);
     if (!url && !background) setTimeout(() => this.addr.focus(), 50);
@@ -148,6 +168,19 @@ export class BrowserEditor extends BaseEditor {
     p.tab.title = `${p.title}\n${p.url}`;
     p.tab.classList.toggle('loading', p.loading);
     if (p.favicon) { p.fav.src = p.favicon; p.fav.hidden = false; } else p.fav.hidden = true;
+    p.globe.hidden = !!p.favicon;
+  }
+
+  /** Pinned: just the icon, at the front, and it comes back next time (like every tab here). */
+  pinPage(p, on) {
+    if (!!p.pinned === on) return;
+    p.pinned = on;
+    p.tab.classList.toggle('pinned', on);
+    this.pages.splice(this.pages.indexOf(p), 1);
+    const at = this.pages.filter((x) => x.pinned).length;
+    this.pages.splice(at, 0, p);
+    this.strip.insertBefore(p.tab, this.pages[at + 1]?.tab || null);
+    this.saveTabs();
   }
 
   syncBar() {
@@ -190,8 +223,8 @@ export class BrowserEditor extends BaseEditor {
   saveTabs() {
     clearTimeout(this.saveT);
     this.saveT = setTimeout(() => {
-      const tabs = this.pages.map((p) => p.url).filter((u) => /^(https?|chrome-extension):/i.test(u));
-      this.app.saveSettings({ browserTabs: tabs, browserActive: Math.max(0, this.pages.indexOf(this.active)) });
+      const keep = this.pages.filter((p) => /^(https?|chrome-extension):/i.test(p.url));
+      this.app.saveSettings({ browserTabs: keep.map((p) => p.url), browserPinned: keep.filter((p) => p.pinned).length, browserActive: Math.max(0, this.pages.indexOf(this.active)) });
     }, 800);
   }
 
@@ -243,6 +276,7 @@ export class BrowserEditor extends BaseEditor {
     if (!p) return;
     if (ev.type === 'open') this.newPage(ev.url, { background: !!ev.background });
     else if (ev.type === 'search') this.newPage(toUrl(ev.text, this.engine()));
+    else if (ev.type === 'klep') this.app.newDocument('klep').then((t) => t?.editor?.grab?.(ev.url, { all: !!ev.all }));
     else if (ev.type === 'key') this.combo(ev.combo);
     else if (ev.type === 'saved') this.saved(ev.where, ev.file);
     else if (ev.type === 'error') toast(ev.message, { type: 'error', timeout: 5000 });

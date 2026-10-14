@@ -1,5 +1,22 @@
 [
   {
+    "version": "1.0.31",
+    "date": "2026-10-14",
+    "notes": [
+      "Clock in the title bar with alarms, and a calendar whose events can set alarms.",
+      "Music: a Music tab, playlists (also in BoxTape), and the song you're playing can show on Discord (never titles of documents or pages).",
+      "Paint: zoom up to 6400%, an accuracy slider, and “Image (paint)” in the + menu.",
+      "Images: choose the file type (PNG, JPG, WebP, GIF) when making or opening an image, with a warning when transparency or frames would be lost. Image settings: quality, GIF colours and looping, size tools, and seeing or removing hidden info like location.",
+      "GIF editor: GIFs open with their frames. Edit each frame or have every stroke add a new one, with a frame strip to reorder, time, duplicate and play them.",
+      "PDF: drag images out of a PDF.",
+      "BoxSpaces: “+ New BoxSpace” makes a folder (in data\\BoxSpaces by default, or anywhere you choose).",
+      "Tabs: pin app tabs and browser tabs to keep them small at the left and bring them back next time. All tabs are now one size.",
+      "Browser: right-click a page to get its video, or every video on it, with BoxVidKlep.",
+      "Ctrl+Z / Ctrl+Y work everywhere, full-screen mode for the app, and the side bar can be reordered.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.30",
     "date": "2026-10-12",
     "notes": [

@@ -2,11 +2,13 @@
 // mixer (EQ) running through Web Audio. Keeps playing while the panel is closed; media keys work too.
 // A queue (separate from the library, reorder by dragging) plays before the library carries on, and the
 // song, position, volume and play/pause survive closing the app, restarts and updates.
+// Playlists are the folders in the audio dump: pick one and the player (next, shuffle, loop) stays inside it.
+// Full screen fills the window with the player, a big cover and a visualizer.
 
 import { api } from './api.js';
 import { h, clear, formatBytes, stripExt, extOf } from './dom.js';
 import { icon } from './icons.js';
-import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal } from './ui.js';
+import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal, promptDialog, confirmDialog } from './ui.js';
 import { pickOpen } from './files.js';
 
 // 10-band graphic EQ (±18 dB) between a low cut (high-pass) and a high cut (low-pass).
@@ -39,6 +41,9 @@ export const posToHz = (pos) => Math.round(MIN_HZ * Math.pow(MAX_HZ / MIN_HZ, po
 export const hzLabel = (hz) => (hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)}k` : String(hz));
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|weba)$/i;
 const fmt = (t) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00');
+// a song's name in the dump may have its playlist (folder) in front: "Road trip/Song.mp3"
+const songTitle = (name) => stripExt(String(name || '').split('/').pop());
+const plOf = (name) => (String(name).includes('/') ? String(name).split('/')[0] : '');
 
 export function createMusic(app) {
   const s = app.settings;
@@ -49,6 +54,7 @@ export function createMusic(app) {
   let filters = [];
   let lowCut = null;
   let highCut = null;
+  let analyser = null;
   const state = {
     tracks: [], idx: -1, order: [],
     shuffle: !!s.musicShuffle,
@@ -61,7 +67,12 @@ export function createMusic(app) {
     queue: Array.isArray(s.musicQueue) ? s.musicQueue.filter((x) => typeof x === 'string') : [], // file names, in play order
     libIdx: -1, // where the library is up to (queued songs don't move it)
     view: s.musicView === 'queue' ? 'queue' : 'library',
+    // null: every song · '': songs not in a playlist · 'name': that playlist (a folder in the audio dump)
+    playlist: typeof s.musicPlaylist === 'string' ? s.musicPlaylist : null,
+    playlists: [],
   };
+  const inList = (t) => !!t && (state.playlist == null || plOf(t.name) === state.playlist);
+  const visible = () => state.tracks.map((t, i) => i).filter((i) => inList(state.tracks[i]));
   let restored = false;
   let ui = null;
 
@@ -87,7 +98,10 @@ export function createMusic(app) {
     gain.gain.value = state.volume;
     let node = source.connect(lowCut);
     for (const f of filters) { node.connect(f); node = f; }
-    node.connect(highCut).connect(gain).connect(ctx.destination);
+    analyser = ctx.createAnalyser(); // for the full-screen visualizer
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.78;
+    node.connect(highCut).connect(gain).connect(analyser).connect(ctx.destination);
   }
 
   // A steep-ish slope (Q 0.9) so cutting really removes the lows / highs; at the ends they're bypassed.
@@ -102,13 +116,26 @@ export function createMusic(app) {
   // ---------------------------------------------------------------- playlist
   async function refresh() {
     let items = [];
+    let folders = [];
     let ok = false;
-    try { items = (await api.dump('audio')).items; ok = true; } catch { /* ignore */ }
+    try {
+      const [all, top] = await Promise.all([api.dump('audio'), api.dump('audio', '').catch(() => ({ folders: [] }))]);
+      items = all.items;
+      folders = top.folders || [];
+      ok = true;
+    } catch { /* ignore */ }
     const current = state.tracks[state.idx]?.name;
     const libName = state.tracks[state.libIdx]?.name;
     state.tracks = items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
     state.idx = current ? state.tracks.findIndex((t) => t.name === current) : state.tracks.findIndex((t) => t.name === s.musicLast);
     state.libIdx = libName ? state.tracks.findIndex((t) => t.name === libName) : state.idx;
+    if (ok) {
+      // playlists: the top folders (empty ones too)
+      const names = new Set(folders.map((f) => f.base));
+      for (const t of state.tracks) { const p = plOf(t.name); if (p) names.add(p); }
+      state.playlists = [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+      if (state.playlist && !names.has(state.playlist)) { state.playlist = null; app.saveSettings({ musicPlaylist: null }); }
+    }
     if (ok) {
       // songs that were removed or renamed outside the player drop out of the queue
       const have = new Set(state.tracks.map((t) => t.name));
@@ -247,19 +274,19 @@ export function createMusic(app) {
    * (new songs slot in at random places), and you can rearrange it in the Queue tab. `fresh` deals a new one.
    */
   function reshuffle(fresh = false) {
-    const n = state.tracks.length;
-    if (!state.shuffle) { state.order = [...Array(n).keys()]; return; }
+    const mine = visible(); // only the songs in the playlist that's picked
+    if (!state.shuffle) { state.order = mine; return; }
     const at = new Map(state.tracks.map((t, i) => [t.name, i]));
-    const kept = fresh ? [] : (state.orderNames || s.musicShuffleOrder || []).filter((nm) => at.has(nm)).map((nm) => at.get(nm));
+    const kept = fresh ? [] : (state.orderNames || s.musicShuffleOrder || []).filter((nm) => at.has(nm) && inList(state.tracks[at.get(nm)])).map((nm) => at.get(nm));
     const seen = new Set(kept);
     if (kept.length) {
       state.order = kept;
-      for (let i = 0; i < n; i++) if (!seen.has(i)) state.order.splice(Math.floor(Math.random() * (state.order.length + 1)), 0, i);
+      for (const i of mine) if (!seen.has(i)) state.order.splice(Math.floor(Math.random() * (state.order.length + 1)), 0, i);
     } else {
-      state.order = [...Array(n).keys()];
-      for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [state.order[i], state.order[j]] = [state.order[j], state.order[i]]; }
+      state.order = [...mine];
+      for (let i = state.order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [state.order[i], state.order[j]] = [state.order[j], state.order[i]]; }
       // keep the current song first so shuffle doesn't jump away from it
-      if (state.idx >= 0) state.order = [state.idx, ...state.order.filter((x) => x !== state.idx)];
+      if (state.idx >= 0 && inList(state.tracks[state.idx])) state.order = [state.idx, ...state.order.filter((x) => x !== state.idx)];
     }
     saveOrder();
   }
@@ -272,13 +299,16 @@ export function createMusic(app) {
 
   function setSource(t) {
     audio.src = `/api/stream?token=${encodeURIComponent(api.token)}&path=${encodeURIComponent(t.path)}`;
-    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: stripExt(t.name), artist: 'audio-dump', album: 'Box-DocSpitter' });
+    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: songTitle(t.name), artist: plOf(t.name) || 'audio-dump', album: 'Box-DocSpitter' });
   }
 
   /** fromQueue: a queued song doesn't move the library's place, so the library carries on where it was after. */
-  function play(i = state.idx < 0 ? (state.order[0] ?? 0) : state.idx, { fromQueue = false } = {}) {
+  function play(i = state.idx < 0 ? (state.order[0] ?? -1) : state.idx, { fromQueue = false } = {}) {
     const t = state.tracks[i];
-    if (!t) { toast('Put some music in the audio dump first — drop files on the player or use Add songs.', { timeout: 3200 }); return; }
+    if (!t) {
+      toast(state.tracks.length ? 'Nothing in this playlist yet — drag songs onto its name, or drop files on the player.' : 'Put some music in the audio dump first — drop files on the player or use Add songs.', { timeout: 3200 });
+      return;
+    }
     graph();
     if (!fromQueue) state.libIdx = i;
     if (i !== state.idx || !audio.src) {
@@ -317,7 +347,7 @@ export function createMusic(app) {
     if (state.loop === 'one') { audio.currentTime = 0; audio.play(); return; }
     advance(false);
   });
-  for (const ev of ['play', 'pause']) audio.addEventListener(ev, () => { render(); app.syncMusicButton?.(!audio.paused); savePos(true); });
+  for (const ev of ['play', 'pause']) audio.addEventListener(ev, () => { render(); app.syncMusicButton?.(!audio.paused); savePos(true); app.presence?.update(); });
   audio.addEventListener('seeked', () => savePos(true));
   audio.addEventListener('timeupdate', () => { updateTime(); if (!audio.paused) savePos(); });
   audio.addEventListener('loadedmetadata', () => updateTime());
@@ -358,7 +388,7 @@ export function createMusic(app) {
     let n = 0;
     for (const f of files) {
       if (!AUDIO_RE.test(f.name || '')) continue;
-      try { await api.dumpAdd(f.name, new Uint8Array(await f.arrayBuffer()), 'audio'); n++; } catch (e) { errorToast(e, f.name); }
+      try { await api.dumpAdd(intoPl(f.name), new Uint8Array(await f.arrayBuffer()), 'audio'); n++; } catch (e) { errorToast(e, f.name); }
     }
     if (n) { toast(`Added ${n} song${n > 1 ? 's' : ''}`, { type: 'ok' }); refresh(); } else if (files.length) toast('Only audio files (mp3, m4a, wav, flac, ogg…) go in the audio dump.', { type: 'warn' });
   }
@@ -366,9 +396,230 @@ export function createMusic(app) {
     const paths = await pickOpen({ multi: true, title: 'Add songs to the audio dump', filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus'] }] });
     let n = 0;
     for (const p of paths || []) {
-      try { const { bytes } = await api.read(p); await api.dumpAdd(p.split(/[\\/]/).pop(), bytes, 'audio'); n++; } catch (e) { errorToast(e); }
+      try { const { bytes } = await api.read(p); await api.dumpAdd(intoPl(p.split(/[\\/]/).pop()), bytes, 'audio'); n++; } catch (e) { errorToast(e); }
     }
     if (n) { toast(`Added ${n} song${n > 1 ? 's' : ''}`, { type: 'ok' }); refresh(); }
+  }
+
+  /** A new song's name: inside the playlist that's picked, if one is. */
+  const intoPl = (name) => (state.playlist ? `${state.playlist}/${name}` : name);
+
+  // ---------------------------------------------------------------- playlists
+  function setPlaylist(p) {
+    state.playlist = p;
+    app.saveSettings({ musicPlaylist: p });
+    reshuffle(true);
+    // the library carries on from the start of the new playlist (the song playing now keeps playing)
+    if (!inList(state.tracks[state.libIdx])) state.libIdx = -1;
+    setView('library');
+  }
+  const askName = async (title, value = '') => {
+    ui?.el.classList.add('behind');
+    const n = await promptDialog(title, 'Name', value, { placeholder: 'e.g. Road trip' });
+    ui?.el.classList.remove('behind');
+    return n == null ? null : String(n).trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/[. ]+$/, '').slice(0, 80);
+  };
+  /**
+   * Songs were renamed or moved ([[old, new], …]): the queue, the shuffle and the song playing follow them.
+   */
+  async function relocate(changes) {
+    if (!changes.length) return refresh();
+    const map = new Map(changes);
+    const cur = state.tracks[state.idx];
+    const curMoved = !!(cur && audio.src && map.has(cur.name));
+    const at = audio.currentTime;
+    const wasPlaying = !audio.paused;
+    if (state.queue.some((n) => map.has(n))) { state.queue = state.queue.map((n) => map.get(n) ?? n); app.saveSettings({ musicQueue: [...state.queue] }); }
+    if (state.orderNames) state.orderNames = state.orderNames.map((n) => map.get(n) ?? n);
+    for (const t of state.tracks) if (map.has(t.name)) t.name = map.get(t.name); // so refresh() keeps the same song picked
+    await refresh();
+    const t = state.tracks[state.idx];
+    if (curMoved && t) {
+      // the old stream URL points at the old file, so pick up from the same spot at the new one
+      setSource(t);
+      audio.addEventListener('loadedmetadata', () => { audio.currentTime = at; if (wasPlaying) audio.play().catch(() => {}); }, { once: true });
+      app.saveSettings({ musicLast: t.name });
+    }
+  }
+  /** Move songs into a playlist ('' = out of any playlist). */
+  async function moveSongs(names, to) {
+    const changes = [];
+    for (const n of names) {
+      if (plOf(n) === to && n.split('/').length === (to ? 2 : 1)) continue;
+      try { const r = await api.dumpMove([n], to, 'audio'); if (r.moved?.[0]) changes.push([n, r.moved[0]]); } catch (e) { errorToast(e, songTitle(n)); }
+    }
+    await relocate(changes);
+    if (changes.length) toast(`${changes.length === 1 ? songTitle(changes[0][0]) : `${changes.length} songs`} → ${to ? `“${to}”` : 'no playlist'}`, { timeout: 1800 });
+  }
+  async function newPlaylist(songs = null) {
+    const name = await askName('New playlist');
+    if (!name) return;
+    try { await api.dumpFolder(name, 'audio'); } catch (e) { if (!/taken/i.test(e.message)) return errorToast(e); }
+    if (songs?.length) await moveSongs(songs, name);
+    else { await refresh(); setPlaylist(name); }
+  }
+  async function renamePlaylist(p) {
+    const name = await askName('Rename playlist', p);
+    if (!name || name === p) return;
+    try { await api.dumpRename(p, name, 'audio'); } catch (e) { return errorToast(e); }
+    if (state.playlist === p) { state.playlist = name; app.saveSettings({ musicPlaylist: name }); }
+    await relocate(state.tracks.filter((t) => plOf(t.name) === p).map((t) => [t.name, name + t.name.slice(p.length)]));
+  }
+  async function deletePlaylist(p, withSongs) {
+    const songs = state.tracks.filter((t) => plOf(t.name) === p);
+    ui?.el.classList.add('behind');
+    const ok = !songs.length || await confirmDialog(withSongs ? `Remove “${p}” and its songs?` : `Delete the playlist “${p}”?`,
+      withSongs ? `Its ${songs.length} song${songs.length === 1 ? '' : 's'} move to audio-dump\\.removed with it (nothing is deleted for good).`
+        : `Its ${songs.length} song${songs.length === 1 ? ' stays' : 's stay'} in the audio dump, just not in a playlist.`,
+      { okLabel: withSongs ? 'Remove' : 'Delete playlist', danger: withSongs });
+    ui?.el.classList.remove('behind');
+    if (!ok) return;
+    if (!withSongs) await moveSongs(songs.map((t) => t.name), '');
+    else if (plOf(state.tracks[state.idx]?.name || '') === p) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
+    try { await api.dumpRemove(p, 'audio'); } catch (e) { errorToast(e); }
+    if (state.playlist === p) setPlaylist(null);
+    refresh();
+  }
+  function playPlaylist(p, shuffle = null) {
+    if (state.playlist !== p) setPlaylist(p);
+    if (shuffle != null && shuffle !== state.shuffle) setShuffle(shuffle);
+    reshuffle(true);
+    if (state.order.length) play(state.order[0]);
+  }
+  function renderPlaylists() {
+    const count = (p) => state.tracks.filter((t) => p == null || plOf(t.name) === p).length;
+    const chip = (p, label) => {
+      const b = h('button', { class: `chip music-pl ${state.playlist === p ? 'on' : ''}`, onclick: () => setPlaylist(p) },
+        p ? icon('folder', 'sm') : null, h('span', { class: 'music-pl-name' }, label), h('span', { class: 'mono faint' }, String(count(p))));
+      b.title = p == null ? 'Every song in the audio dump' : p === '' ? 'Songs that aren’t in a playlist' : `Playlist “${p}” · drop songs here to move them in · right-click for more`;
+      if (p != null) {
+        // drag a song from the list onto a playlist to move it there
+        b.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/bds-song')) { e.preventDefault(); b.classList.add('drop'); } });
+        b.addEventListener('dragleave', () => b.classList.remove('drop'));
+        b.addEventListener('drop', (e) => { b.classList.remove('drop'); const n = e.dataTransfer.getData('text/bds-song'); if (n) { e.preventDefault(); moveSongs([n], p); } });
+      }
+      if (p) {
+        b.addEventListener('contextmenu', (e) => contextMenu(e, [
+          { label: 'Play', icon: 'play', action: () => playPlaylist(p, false) },
+          { label: 'Shuffle play', icon: 'shuffle', action: () => playPlaylist(p, true) },
+          { sep: true },
+          { label: 'Rename…', icon: 'edit', action: () => renamePlaylist(p) },
+          { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('audio', p) },
+          { sep: true },
+          { label: 'Delete playlist (keep the songs)', icon: 'x', action: () => deletePlaylist(p, false) },
+          { label: 'Remove playlist and its songs', icon: 'trash', action: () => deletePlaylist(p, true) },
+        ]));
+      }
+      return b;
+    };
+    clear(ui.pls).append(
+      chip(null, 'All songs'),
+      state.playlists.length ? chip('', 'No playlist') : null,
+      ...state.playlists.map((p) => chip(p, p)),
+      h('button', { class: 'chip music-pl-add', 'data-tip': 'New playlist', onclick: () => newPlaylist() }, icon('plus', 'sm'), state.playlists.length ? null : 'New playlist'));
+    ui.pls.querySelector('.music-pl.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  // ---------------------------------------------------------------- big layout: full screen, or the Music tab
+  // The player is one element. Normally it's the drop-down under the ♪ button (or docked in the right sidebar);
+  // while the Music tab is showing it lays out big inside that tab, and full screen puts it over everything.
+  let full = null; // the full-screen overlay
+  let tabHost = null; // the Music tab's page, while that tab is showing
+  let dockHost = null; // the right-sidebar panel, when the player is docked there
+  let wide = null; // { holder, viz, art, main, side, raf } while laid out big
+  let vizData = null;
+  const dockNote = h('div', { class: 'music-dock-note' }, h('span', { class: 'music-note' }, '♪'), h('span', {}, 'The player is open in the Music tab'));
+  function relayout() {
+    if (!ui) return;
+    const want = full || tabHost;
+    if (wide && wide.holder === want) { render(); return; }
+    if (wide) {
+      cancelAnimationFrame(wide.raf);
+      ui.el.classList.remove('full');
+      ui.el.append(...ui.parts); // back in their usual order
+      wide.main.remove();
+      wide.side.remove();
+      wide.viz.remove();
+      wide = null;
+    }
+    if (want) {
+      const viz = h('canvas', { class: 'music-viz' });
+      const art = h('div', { class: 'music-art' }, h('span', {}, '♪'));
+      const main = h('div', { class: 'music-full-main' }, art, ui.nowEl, ui.timeEl, ui.controlsEl, ui.volEl, ui.eqWrap);
+      const side = h('div', { class: 'music-full-side' }, ui.tabs, ui.pls, ui.list);
+      ui.el.classList.add('full');
+      ui.el.append(main, side);
+      ui.el.hidden = false;
+      want.append(viz, ui.el);
+      wide = { holder: want, viz, art, main, side };
+      if (dockHost) dockHost.append(dockNote);
+      drawViz();
+      refresh();
+    } else {
+      dockNote.remove();
+      if (state.docked && dockHost) { dockHost.append(ui.el); ui.el.hidden = false; } else { document.body.append(ui.el); ui.el.hidden = !state.open; }
+    }
+    render();
+  }
+  function setFull(on) {
+    if (!ui || !!full === on) return;
+    if (on) {
+      graph();
+      full = h('div', { class: 'music-full music-stage' });
+      document.body.append(full);
+      relayout();
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      const f = full;
+      full = null;
+      relayout();
+      f.remove();
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    }
+  }
+  /** The Music tab shows (host = its page) or hides (null). */
+  function showInTab(host) {
+    if (!ui) build();
+    tabHost = host;
+    if (host && state.open && !state.docked) { state.open = false; document.getElementById('btn-music')?.classList.remove('on'); }
+    relayout();
+  }
+  // leaving the window's full screen (Esc, F11) leaves the full-screen player too
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && full) setFull(false); });
+  function drawViz() {
+    if (!wide) return;
+    wide.raf = requestAnimationFrame(drawViz);
+    const c = wide.viz;
+    const dpr = devicePixelRatio || 1;
+    const W = Math.round(c.clientWidth * dpr), H = Math.round(c.clientHeight * dpr);
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, W, H);
+    if (!analyser || !W || !H) return;
+    const n = analyser.frequencyBinCount;
+    if (!vizData || vizData.length !== n) vizData = new Uint8Array(n);
+    analyser.getByteFrequencyData(vizData);
+    const bars = 72;
+    const used = Math.floor(n * 0.72);
+    const bw = W / bars;
+    const grad = g.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, '#6ee7e0'); grad.addColorStop(0.5, '#b48cff'); grad.addColorStop(1, '#ff7ac6');
+    g.fillStyle = grad;
+    let bass = 0;
+    for (let i = 0; i < bars; i++) {
+      // low notes get more room (spaced roughly like pitch, not like raw frequency)
+      const lo = Math.floor(Math.pow(i / bars, 1.7) * used);
+      const hi = Math.max(lo + 1, Math.floor(Math.pow((i + 1) / bars, 1.7) * used));
+      let v = 0;
+      for (let k = lo; k < hi; k++) v = Math.max(v, vizData[k]);
+      if (i < 6) bass += v / 6;
+      const bh = Math.max(2 * dpr, (v / 255) ** 1.4 * H * 0.95);
+      const x = i * bw + bw * 0.18;
+      g.globalAlpha = 0.85;
+      g.fillRect(x, H - bh, bw * 0.64, bh);
+    }
+    g.globalAlpha = 1;
+    wide.holder.style.setProperty('--beat', audio.paused ? '0' : (bass / 255).toFixed(3));
   }
 
   // ---------------------------------------------------------------- queue
@@ -376,7 +627,7 @@ export function createMusic(app) {
   function enqueue(name, front = false) {
     if (front) state.queue.unshift(name); else state.queue.push(name);
     saveQueue();
-    toast(front ? `Plays next: ${stripExt(name)}` : `Added to the queue: ${stripExt(name)}`, { timeout: 1600 });
+    toast(front ? `Plays next: ${songTitle(name)}` : `Added to the queue: ${songTitle(name)}`, { timeout: 1600 });
   }
   function setView(v) { state.view = v; app.saveSettings({ musicView: v }); render(); }
 
@@ -506,32 +757,36 @@ export function createMusic(app) {
     queueTab.addEventListener('drop', (e) => { queueTab.classList.remove('drop'); const n = e.dataTransfer.getData('text/bds-song'); if (n) { e.preventDefault(); enqueue(n); } });
     const tabs = h('div', { class: 'music-tabs' }, libTab, queueTab);
     const dupeBtn = h('button', { class: 'music-dupes', hidden: true, 'data-tip': 'Songs that are in the audio dump more than once', onclick: () => showDuplicates() });
-    el.append(
-      h('div', { class: 'music-head' }, h('span', { class: 'music-note' }, '♪'), h('span', { class: 'mono' }, 'audio-dump/'), h('div', { class: 'grow' }),
-        h('button', { class: 'icon-btn', 'data-tip': 'Add songs', onclick: () => addFromDisk() }, icon('plus', 'sm')),
-        dupeBtn,
-        h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => refresh() }, icon('refresh', 'sm')),
-        h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio') }, icon('external', 'sm')),
-        h('button', { class: 'icon-btn', 'data-tip': 'Close (music keeps playing)', onclick: () => setOpen(false) }, icon('x', 'sm'))),
-      h('div', { class: 'music-now' }, title, sub),
-      h('div', { class: 'music-time' }, cur, seek, dur),
-      h('div', { class: 'music-controls' }, shuffleB, btn('skip-back', 'Previous', () => prev()), playB, btn('skip-forward', 'Next', () => next()), loopB),
-      h('div', { class: 'music-volrow' }, icon('volume', 'sm'), vol, mixerB),
-      eqWrap,
-      tabs,
-      list);
+    const pls = h('div', { class: 'music-pls' });
+    pls.addEventListener('wheel', (e) => { if (e.deltaY && pls.scrollWidth > pls.clientWidth) { e.preventDefault(); pls.scrollLeft += e.deltaY; } }, { passive: false });
+    const fullB = h('button', { class: 'icon-btn music-full-btn', 'data-tip': 'Full screen', onclick: () => setFull(!full) }, icon('maximize', 'sm'));
+    const head = h('div', { class: 'music-head' }, h('span', { class: 'music-note' }, '♪'), h('span', { class: 'mono' }, 'audio-dump/'), h('div', { class: 'grow' }),
+      h('button', { class: 'icon-btn', 'data-tip': 'Add songs', onclick: () => addFromDisk() }, icon('plus', 'sm')),
+      dupeBtn,
+      h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => refresh() }, icon('refresh', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio', state.playlist || undefined) }, icon('external', 'sm')),
+      h('button', { class: 'icon-btn music-tab-btn', 'data-tip': 'Open as a tab', onclick: () => { setOpen(false); app.newDocument('music'); } }, icon('window', 'sm')),
+      fullB,
+      h('button', { class: 'icon-btn', 'data-tip': 'Close (music keeps playing)', onclick: () => setOpen(false) }, icon('x', 'sm')));
+    const nowEl = h('div', { class: 'music-now' }, title, sub);
+    const timeEl = h('div', { class: 'music-time' }, cur, seek, dur);
+    const controlsEl = h('div', { class: 'music-controls' }, shuffleB, btn('skip-back', 'Previous', () => prev()), playB, btn('skip-forward', 'Next', () => next()), loopB);
+    const volEl = h('div', { class: 'music-volrow' }, icon('volume', 'sm'), vol, mixerB);
+    const parts = [head, nowEl, timeEl, controlsEl, volEl, eqWrap, tabs, pls, list];
+    el.append(...parts);
     document.body.append(el);
-    ui = { el, title, sub, seek, cur, dur, playB, shuffleB, loopB, list, dupeBtn, libTab, queueTab, isSeeking: () => seeking };
-    document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music')) setOpen(false); }, true);
+    ui = { el, title, sub, seek, cur, dur, playB, shuffleB, loopB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
+    document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && !wide && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music')) setOpen(false); }, true);
     document.addEventListener('keydown', (e) => {
-      if (!state.open || (state.docked && !el.contains(e.target) && e.target !== document.body)) return;
-      if (e.key === 'Escape' && !state.docked) setOpen(false);
+      if (full && e.key === 'Escape' && !document.querySelector('.modal-backdrop, .menu')) { e.preventDefault(); setFull(false); return; }
+      if ((!state.open && !wide) || ((state.docked || wide) && !el.contains(e.target) && e.target !== document.body)) return;
+      if (e.key === 'Escape' && !state.docked && !wide) setOpen(false);
       if (e.key === ' ' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !e.target.isContentEditable) { e.preventDefault(); toggle(); }
     });
   }
 
   function updateTime() {
-    if (!ui || !state.open) return;
+    if (!ui || (!state.open && !wide)) return;
     ui.cur.textContent = ui.isSeeking() ? ui.cur.textContent : fmt(audio.currentTime);
     ui.dur.textContent = fmt(audio.duration);
     if (!ui.isSeeking()) ui.seek.value = String(audio.duration ? Math.round((audio.currentTime / audio.duration) * 1000) : 0);
@@ -540,10 +795,24 @@ export function createMusic(app) {
   function render() {
     if (!ui) return;
     const t = state.tracks[state.idx];
-    ui.title.textContent = t ? stripExt(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
-    const upNext = state.queue[0] ? ` · up next: ${stripExt(state.queue[0])}` : '';
-    ui.sub.textContent = t ? `${state.idx + 1} of ${state.tracks.length}${upNext}` : state.tracks.length ? `${state.tracks.length} songs in the audio dump` : 'drop mp3s here or put them in Box-DocSpitter\\audio-dump';
-    clear(ui.libTab).append('Library ', h('span', { class: 'mono faint' }, String(state.tracks.length)));
+    const vis = visible();
+    const plName = state.playlist == null ? '' : state.playlist || 'no playlist';
+    ui.title.textContent = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
+    const upNext = state.queue[0] ? ` · up next: ${songTitle(state.queue[0])}` : '';
+    const at = vis.indexOf(state.idx);
+    ui.sub.textContent = t ? `${at >= 0 ? `${at + 1} of ${vis.length}` : plOf(t.name) ? `from “${plOf(t.name)}”` : 'not in this playlist'}${plName ? ` · ${plName}` : ''}${upNext}`
+      : state.tracks.length ? `${vis.length} song${vis.length === 1 ? '' : 's'}${plName ? ` in ${plName}` : ' in the audio dump'}` : 'drop mp3s here or put them in Box-DocSpitter\\audio-dump';
+    clear(ui.libTab).append(state.playlist ? 'Playlist ' : 'Library ', h('span', { class: 'mono faint' }, String(vis.length)));
+    ui.pls.hidden = state.view !== 'library' || !state.tracks.length && !state.playlists.length;
+    if (!ui.pls.hidden) renderPlaylists();
+    ui.fullB.dataset.tip = full ? 'Leave full screen (Esc)' : 'Full screen';
+    clear(ui.fullB).append(icon(full ? 'x' : 'maximize', 'sm'));
+    if (wide) {
+      // a cover colour of its own for each song
+      let hsh = 0;
+      for (const ch of t?.name || '') hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+      wide.art.style.setProperty('--hue', String(hsh % 360));
+    }
     clear(ui.queueTab).append('Queue ', h('span', { class: 'mono faint' }, String(state.queue.length)));
     ui.libTab.classList.toggle('on', state.view === 'library');
     ui.queueTab.classList.toggle('on', state.view === 'queue');
@@ -557,25 +826,36 @@ export function createMusic(app) {
     if (!state.tracks.length) {
       ui.list.append(h('div', { class: 'music-empty' }, 'Drop music files here, use ', h('b', {}, '+'), ', or put files in the ', h('span', { class: 'mono' }, 'audio-dump'), ' folder (', h('a', { href: '#', onclick: (e) => { e.preventDefault(); api.dumpReveal('audio'); } }, 'open it'), ').'));
     }
-    state.tracks.forEach((tr, i) => {
-      const nameEl = h('span', { class: 'music-track-name' }, stripExt(tr.name));
+    if (state.tracks.length && !vis.length) {
+      ui.list.append(h('div', { class: 'music-empty' }, state.playlist ? 'Nothing in this playlist yet. Drag songs from All songs onto its name above, right-click a song → ' : 'Every song is in a playlist. ',
+        state.playlist ? h('b', {}, 'Move to playlist') : null, state.playlist ? ', or drop music files here.' : null));
+    }
+    vis.forEach((i, k) => {
+      const tr = state.tracks[i];
+      const nameEl = h('span', { class: 'music-track-name' }, songTitle(tr.name));
       const qAdd = h('span', { class: 'music-qadd', role: 'button', title: 'Add to the queue' }, icon('plus', 'sm'));
       qAdd.addEventListener('click', (e) => { e.stopPropagation(); enqueue(tr.name); });
       const row = h('button', { class: `music-track ${i === state.idx ? 'on' : ''}`, draggable: 'true', title: `${tr.name} · ${formatBytes(tr.size)}\nF2: rename · Del: remove · drag onto Queue to queue it` },
-        h('span', { class: 'music-track-n mono' }, i === state.idx && !audio.paused ? '♪' : String(i + 1)),
-        nameEl, qAdd);
+        h('span', { class: 'music-track-n mono' }, i === state.idx && !audio.paused ? '♪' : String(k + 1)),
+        nameEl, state.playlist == null && plOf(tr.name) ? h('span', { class: 'music-track-pl' }, plOf(tr.name)) : null, qAdd);
       row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/bds-song', tr.name); e.dataTransfer.effectAllowed = 'copy'; });
       const remove = async () => {
         if (i === state.idx) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
         try { await api.dumpRemove(tr.name, 'audio'); toast(`Moved ${tr.name} to audio-dump\\.removed`, { timeout: 3000 }); refresh(); } catch (err) { errorToast(err); }
       };
-      hoverKeys(row, { nameEl, value: () => stripExt(tr.name), commit: (n) => renameTrack(i, n), remove });
+      hoverKeys(row, { nameEl, value: () => songTitle(tr.name), commit: (n) => renameTrack(i, n), remove });
       row.addEventListener('click', () => (i === state.idx ? toggle() : play(i)));
       row.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Play', icon: 'play', action: () => play(i) },
         { label: 'Play next', icon: 'skip-forward', action: () => enqueue(tr.name, true) },
         { label: 'Add to queue', icon: 'plus', action: () => enqueue(tr.name) },
         { sep: true },
+        { label: 'Move to playlist', icon: 'folder', submenu: [
+          ...state.playlists.filter((p) => p !== plOf(tr.name)).map((p) => ({ label: p, action: () => moveSongs([tr.name], p) })),
+          ...(plOf(tr.name) ? [{ label: 'Out of the playlist', icon: 'x', action: () => moveSongs([tr.name], '') }] : []),
+          ...(state.playlists.length ? [{ sep: true }] : []),
+          { label: 'New playlist…', icon: 'plus', action: () => newPlaylist([tr.name]) },
+        ] },
         { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => renameInline(row) },
         { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('audio', tr.name) },
         { label: 'Remove from audio dump', icon: 'trash', shortcut: 'Del', action: remove },
@@ -619,13 +899,13 @@ export function createMusic(app) {
   const qRow = (n, name, extra = null) => h('div', { class: 'music-q-row', title: name },
     h('span', { class: 'music-q-grip' }, icon('grip', 'sm')),
     h('span', { class: 'music-track-n mono' }, String(n)),
-    h('span', { class: 'music-track-name' }, stripExt(name)), extra);
+    h('span', { class: 'music-track-name' }, songTitle(name)), extra);
 
   /** The Queue tab: what's playing, songs you queued, then (with shuffle on) the shuffled library. All draggable. */
   function renderQueue() {
     const L = ui.list;
     const now = state.tracks[state.idx];
-    if (now) L.append(h('div', { class: 'music-q-now' }, h('span', { class: 'faint' }, audio.paused ? 'Paused' : 'Now playing'), h('span', {}, stripExt(now.name))));
+    if (now) L.append(h('div', { class: 'music-q-now' }, h('span', { class: 'faint' }, audio.paused ? 'Paused' : 'Now playing'), h('span', {}, songTitle(now.name))));
 
     // songs you queued
     if (state.queue.length) {
@@ -655,7 +935,7 @@ export function createMusic(app) {
     if (!state.shuffle || !state.tracks.length) return;
     const base = state.order.indexOf(state.libIdx >= 0 ? state.libIdx : state.idx);
     const upcoming = [...state.order.slice(base + 1), ...(state.loop === 'all' ? state.order.slice(0, Math.max(0, base)) : [])];
-    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, `${state.queue.length ? 'Then from' : 'Up next from'} the library (shuffled) · drag to reorder`), h('div', { class: 'grow' }),
+    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, `${state.queue.length ? 'Then from' : 'Up next from'} ${state.playlist ? `“${state.playlist}”` : state.playlist === '' ? 'songs not in a playlist' : 'the library'} (shuffled) · drag to reorder`), h('div', { class: 'grow' }),
       h('button', { class: 'chip', title: 'Deal a new random order', onclick: () => { reshuffle(true); render(); } }, icon('shuffle', 'sm'), 'Reshuffle')));
     if (!upcoming.length) { L.append(h('div', { class: 'music-empty' }, state.loop === 'off' ? 'That’s the last song — turn on Loop to keep going.' : 'Nothing else to play.')); return; }
     const shown = upcoming.slice(0, 300);
@@ -687,20 +967,9 @@ export function createMusic(app) {
     const tr = state.tracks[i];
     const ext = extOf(tr.name);
     const to = ext && !name.toLowerCase().endsWith('.' + ext.toLowerCase()) ? `${name}.${ext}` : name;
-    const current = i === state.idx && audio.src;
-    const at = audio.currentTime;
-    const wasPlaying = !audio.paused;
-    await api.dumpRename(tr.name, to, 'audio');
-    if (state.queue.includes(tr.name)) { state.queue = state.queue.map((n) => (n === tr.name ? to : n)); app.saveSettings({ musicQueue: [...state.queue] }); }
-    tr.name = to; // so refresh() keeps this song selected
-    await refresh();
-    const t = state.tracks[state.idx];
-    if (current && t) {
-      // the old stream URL points at the old file name, so pick up from the same spot under the new one
-      audio.src = `/api/stream?token=${encodeURIComponent(api.token)}&path=${encodeURIComponent(t.path)}`;
-      audio.addEventListener('loadedmetadata', () => { audio.currentTime = at; if (wasPlaying) audio.play().catch(() => {}); }, { once: true });
-      app.saveSettings({ musicLast: t.name });
-    }
+    // a name without "/" stays in the same playlist
+    const r = await api.dumpRename(tr.name, to, 'audio');
+    await relocate([[tr.name, r.name || to]]);
   }
 
   function position() {
@@ -712,6 +981,7 @@ export function createMusic(app) {
 
   function setOpen(open) {
     if (!ui) build();
+    if (wide && !state.docked) return; // it's showing big (the Music tab or full screen)
     state.open = open;
     if (open) state.openedAt = performance.now();
     ui.el.hidden = !open;
@@ -724,7 +994,14 @@ export function createMusic(app) {
   function dockInto(host) {
     if (!ui) build();
     state.docked = !!host;
+    dockHost = host || null;
     ui.el.classList.toggle('docked', !!host);
+    if (wide) {
+      // showing big right now: it goes to the sidebar when the tab / full screen is done
+      state.open = !!host;
+      if (host) host.append(dockNote); else dockNote.remove();
+      return;
+    }
     if (host) {
       host.append(ui.el);
       state.open = true;
@@ -747,8 +1024,17 @@ export function createMusic(app) {
   }
 
   return {
-    toggleOpen: () => (state.docked ? app.toggleRightPanel(app.rightPanel === 'music' ? null : 'music') : setOpen(!state.open)),
+    toggleOpen: () => (tabHost ? undefined : state.docked ? app.toggleRightPanel(app.rightPanel === 'music' ? null : 'music') : setOpen(!state.open)),
     open: () => (state.docked ? (app.rightPanel !== 'music' && app.toggleRightPanel('music')) : setOpen(true)),
     dockInto, get docked() { return !!state.docked; },
-    refresh, play, playByName, pause, toggle, next, prev, enqueue, get queue() { return [...state.queue]; }, get playing() { return !audio.paused; } };
+    /** Playlists (folders in the audio dump), for BoxTape's "save to". */
+    get playlists() { return [...state.playlists]; },
+    fullscreen: (on = true) => { if (!ui) build(); setFull(on); },
+    showInTab,
+    refresh, play, playByName, pause, toggle, next, prev, enqueue, get queue() { return [...state.queue]; }, get playing() { return !audio.paused; },
+    /** The song that's playing, as a tidy title (no extension or download junk), or null when nothing is. */
+    get nowPlaying() {
+      const t = !audio.paused && state.tracks[state.idx];
+      return t ? songTitle(t.name).replace(JUNK, ' ').replace(/\s*\(\d+\)\s*$/, '').replace(/\s+/g, ' ').trim() || null : null;
+    } };
 }

@@ -5,7 +5,9 @@
 import { BaseEditor } from './base.js';
 import { h, clear, uid, clamp, stripExt, blobToDataURL, basename } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { tbButton, tbSep, toast, errorToast, modal, promptDialog, showMenu, colorPopover, hoverKeys, renameInline } from '../core/ui.js';
+import { tbButton, tbSep, toast, errorToast, modal, promptDialog, showMenu, colorPopover, hoverKeys, renameInline, contextMenu } from '../core/ui.js';
+import { encodeGif, decodeGif } from '../core/gif.js';
+import { OUT_FORMATS, outKind, defaultOut, formatSelect, formatNote, warnFormat, imageSettings, encodeCanvas, copyCanvas, readMeta } from './image-out.js';
 import { api } from '../core/api.js';
 import { pickOpen } from '../core/files.js';
 import { DumpDock, DUMP_MIME } from './doc/image-dump.js';
@@ -15,10 +17,36 @@ const TOOLS = [
   ['rect', 'square', 'Rectangle', 'R'], ['ellipse', 'circle', 'Ellipse', 'O'], ['fill', 'bucket', 'Paint bucket', 'F'],
   ['text', 'type', 'Text', 'T'], ['picker', 'pipette', 'Colour picker', 'K'], ['select', 'select', 'Rectangle select', 'S'], ['move', 'move', 'Move layer', 'M'],
 ];
-const ZOOMS = [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
+const ZOOMS = [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 const MAX_UNDO = 30;
+const UNDO_BYTES = 768 * 1024 * 1024; // frames make snapshots big: older steps are dropped past this
 
 const mkCanvas = (w, h2) => { const c = document.createElement('canvas'); c.width = w; c.height = h2; return c; };
+/**
+ * Accuracy: fewer half-coloured (anti-aliased) pixels along edges. 0 = smooth as drawn, 100 = every pixel is either
+ * fully painted or not at all. In between, edges get sharper. color (optional): the one colour that was drawn, so the
+ * kept pixels get it exactly (a faint pixel's colour can't be read back precisely).
+ */
+function harden(canvas, acc, rect = null, color = null) {
+  if (!(acc > 0)) return;
+  const x0 = Math.max(0, Math.floor(rect ? rect.x : 0)), y0 = Math.max(0, Math.floor(rect ? rect.y : 0));
+  const x1 = Math.min(canvas.width, Math.ceil(rect ? rect.x + rect.w : canvas.width)), y1 = Math.min(canvas.height, Math.ceil(rect ? rect.y + rect.h : canvas.height));
+  if (x1 <= x0 || y1 <= y0) return;
+  const c = canvas.getContext('2d');
+  const img = c.getImageData(x0, y0, x1 - x0, y1 - y0);
+  const d = img.data;
+  const rgb = /^#[0-9a-f]{6}$/i.test(color || '') ? hexToRgba(color) : null;
+  const k = acc >= 100 ? 0 : 1 + Math.pow(acc / 100, 2) * 24; // contrast on the edge's alpha
+  for (let i = 3; i < d.length; i += 4) {
+    const a = d[i];
+    if (a === 0 || (a === 255 && !rgb)) continue;
+    const na = a === 255 ? 255 : k === 0 ? (a >= 128 ? 255 : 0) : Math.max(0, Math.min(255, Math.round((a - 128) * k + 128)));
+    d[i] = na;
+    if (rgb && na) { d[i - 3] = rgb[0]; d[i - 2] = rgb[1]; d[i - 1] = rgb[2]; }
+  }
+  c.putImageData(img, x0, y0);
+}
+
 const hexToRgba = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 255]; };
 
 export class PaintEditor extends BaseEditor {
@@ -31,9 +59,19 @@ export class PaintEditor extends BaseEditor {
     this.opacity = 1;
     this.shapeMode = s.paintShape || 'stroke'; // stroke | fill | both
     this.tolerance = s.paintTolerance ?? 24;
+    this.accuracy = s.paintAccuracy ?? 0;
     this.primary = s.paintPrimary || '#1d1b22';
     this.secondary = s.paintSecondary || '#ffffff';
     this.zoomLevel = 1;
+    // an image is a list of frames (one, unless it's an animation); each frame has its own layers
+    this.frames = [{ id: uid('F'), layers: [], active: 0, delay: 100 }];
+    this.fi = 0;
+    this.frameMode = 'each'; // each: edits change the frame you're on · add: every edit goes on a new frame
+    this.onion = s.paintOnion ?? true;
+    const own = this.tab.ext;
+    this.out = defaultOut(this.app, bytes?.length ? (outKind(own) ? own : 'png') : null);
+    this.meta = bytes?.length ? readMeta(bytes) : null;
+    this.fresh = true; // every save is a brand-new file: hidden info never comes along
     this.layers = [];
     this.active = 0;
     this.sel = null; // {x,y,w,h} in image pixels
@@ -41,15 +79,30 @@ export class PaintEditor extends BaseEditor {
     this.redoStack = [];
     this.buildDom();
     if (bytes && bytes.length) {
-      const bmp = await createImageBitmap(new Blob([bytes]));
-      this.newImage(bmp.width, bmp.height, 'transparent');
-      this.layers[0].canvas.getContext('2d').drawImage(bmp, 0, 0);
-      this.layers[0].name = 'Background';
+      let anim = null;
+      if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) { try { anim = await decodeGif(bytes); } catch { anim = null; } }
+      if (anim && anim.frames.length > 1) {
+        this.newImage(anim.width, anim.height, 'transparent');
+        this.frames = anim.frames.map((f) => {
+          const L = this.makeLayer('Background');
+          L.canvas.getContext('2d').drawImage(f.canvas, 0, 0);
+          return { id: uid('F'), layers: [L], active: 0, delay: f.delay };
+        });
+        this.fi = 0;
+        this.out.loop = anim.loop;
+      } else {
+        const bmp = await createImageBitmap(new Blob([bytes]));
+        this.newImage(bmp.width, bmp.height, 'transparent');
+        this.layers[0].canvas.getContext('2d').drawImage(bmp, 0, 0);
+        this.layers[0].name = 'Background';
+      }
     } else {
       const spec = await this.askNewSize();
       this.newImage(spec.w, spec.h, spec.bg);
+      this.setOutExt(spec.ext, { quiet: true, init: true });
     }
     this.renderLayers();
+    this.renderStrip();
     this.composite();
     requestAnimationFrame(() => this.zoom('fit'));
   }
@@ -82,7 +135,8 @@ export class PaintEditor extends BaseEditor {
           h('button', { class: 'btn sm ghost', onclick: () => this.mergeDown() }, 'Merge down'))));
     this.dumps = new DumpDock({ app: this.app, onInsert: async (url, name) => this.addImageLayer(await (await fetch(url)).blob(), name || 'From dump') });
     this.main = h('div', { class: 'paint-root' }, this.scroller, this.side);
-    this.root = h('div', { class: 'paint-wrap' }, this.main, this.dumps.el);
+    this.strip = h('div', { class: 'paint-strip', hidden: true });
+    this.root = h('div', { class: 'paint-wrap' }, this.main, this.strip, this.dumps.el);
     this.pane.append(this.root);
 
     // pointer
@@ -91,7 +145,7 @@ export class PaintEditor extends BaseEditor {
     this.overlay.addEventListener('pointermove', (e) => this.onMove(e));
     this.overlay.addEventListener('pointerup', (e) => this.onUp(e));
     this.overlay.addEventListener('pointerleave', () => { if (!this.drag) this.drawOverlay(); });
-    this.scroller.addEventListener('wheel', (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.zoom(e.deltaY < 0 ? 1 : -1); } }, { passive: false });
+    this.scroller.addEventListener('wheel', (e) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); this.zoom(e.deltaY < 0 ? 1 : -1, e); } }, { passive: false });
     // drop / paste images as new layers
     this.main.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(DUMP_MIME)) e.preventDefault(); });
     this.main.addEventListener('drop', async (e) => {
@@ -137,6 +191,10 @@ export class PaintEditor extends BaseEditor {
     this.tolIn = h('input', { type: 'range', min: '0', max: '128', value: String(this.tolerance), class: 'paint-tol', 'data-tip': 'Fill tolerance' });
     this.tolIn.addEventListener('input', () => { this.tolerance = Number(this.tolIn.value); this.syncProps(); });
     this.tolIn.addEventListener('change', () => this.app.saveSettings({ paintTolerance: this.tolerance }));
+    this.accIn = h('input', { type: 'range', min: '0', max: '100', value: String(this.accuracy), class: 'paint-acc', 'data-tip': 'Accuracy: how crisp edges are. Higher = fewer half-coloured pixels; 100 = none (pixel-art edges)' });
+    this.accLabel = h('span', { class: 'mono paint-size-label' });
+    this.accIn.addEventListener('input', () => { this.accuracy = Number(this.accIn.value); this.syncProps(); this.drawOverlay(); });
+    this.accIn.addEventListener('change', () => this.app.saveSettings({ paintAccuracy: this.accuracy }));
     this.propLabel = h('span', { class: 'mono faint paint-proplabel' });
     this.zoomLabel = h('span', { class: 'mono paint-zoomlabel' });
     const tb = h('div', { class: 'toolbar paint-toolbar' },
@@ -149,10 +207,15 @@ export class PaintEditor extends BaseEditor {
       tbSep(),
       h('span', { class: 'faint paint-lbl' }, 'size'), this.sizeIn, this.sizeLabel,
       h('span', { class: 'faint paint-lbl' }, 'opacity'), this.opIn,
+      h('span', { class: 'faint paint-lbl' }, 'accuracy'), this.accIn, this.accLabel,
       this.shapeSel,
       h('span', { class: 'faint paint-lbl paint-tolwrap' }, 'tolerance'), this.tolIn,
       this.propLabel,
       h('div', { class: 'grow' }),
+      (this.fmtSel = formatSelect(this)),
+      tbButton('settings', 'Image settings — file type, quality, GIF options, hidden info', () => this.openSettings()),
+      tbButton('pages', 'Frames — make an animated GIF', () => { this.stripOpen = !this.stripOpen; this.renderStrip(); }),
+      tbSep(),
       tbButton('image', 'Image: crop, resize, flip, rotate', (e) => showMenu(this.imageMenu(), { anchor: e.currentTarget })),
       tbButton('sliders', 'Adjustments', (e) => showMenu(this.adjustMenu(), { anchor: e.currentTarget })),
       tbSep(),
@@ -180,6 +243,9 @@ export class PaintEditor extends BaseEditor {
     show(this.opIn, op); show(this.opIn.previousSibling, op);
     show(this.shapeSel, t === 'rect' || t === 'ellipse');
     show(this.tolIn, t === 'fill'); show(this.tolIn.previousSibling, t === 'fill');
+    const acc = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'text'].includes(t);
+    show(this.accIn, acc); show(this.accIn.previousSibling, acc); show(this.accLabel, acc);
+    this.accLabel.textContent = `${this.accuracy}%`;
     this.propLabel.textContent = t === 'fill' ? String(this.tolerance) : t === 'select' && this.sel ? `${Math.round(this.sel.w)}×${Math.round(this.sel.h)}` : '';
     this.overlay.style.cursor = { picker: 'copy', move: 'move', text: 'text', select: 'crosshair', fill: 'cell' }[t] || 'crosshair';
   }
@@ -203,18 +269,31 @@ export class PaintEditor extends BaseEditor {
     const w = h('input', { type: 'number', min: '1', max: '10000', value: String(this.app.settings.paintW || 1280) });
     const hh = h('input', { type: 'number', min: '1', max: '10000', value: String(this.app.settings.paintH || 720) });
     const bg = h('select', {}, h('option', { value: '#ffffff' }, 'White'), h('option', { value: 'transparent' }, 'Transparent'), h('option', { value: '#000000' }, 'Black'));
+    const type = h('select', {}, ...OUT_FORMATS.map((f) => h('option', { value: f.ext }, `${f.label} — ${f.name}`)));
+    type.value = outKind(this.app.settings.paintExt) || 'png';
+    const note = h('div', { class: 'imgset-note', style: { gridColumn: '1 / -1' } });
+    const sync = () => {
+      const see = bg.value === 'transparent';
+      const n = formatNote(type.value, { transparent: see, partial: see });
+      note.className = `imgset-note ${n.warn ? 'warn' : ''}`;
+      clear(note).append(icon(n.warn ? 'alert' : 'info', 'sm'), h('span', {}, n.text));
+    };
+    type.addEventListener('change', sync);
+    bg.addEventListener('change', sync);
+    sync();
     const presets = h('div', { class: 'row', style: { flexWrap: 'wrap' } }, [['1280×720', 1280, 720], ['1920×1080', 1920, 1080], ['1080×1080', 1080, 1080], ['800×600', 800, 600], ['Letter 2550×3300', 2550, 3300]].map(([l, a, b]) =>
       h('button', { class: 'chip', onclick: () => { w.value = a; hh.value = b; } }, l)));
     const res = await modal({
       title: 'New image', dismissable: false,
-      body: h('div', { class: 'form-grid' }, h('label', {}, 'Width (px)'), w, h('label', {}, 'Height (px)'), hh, h('label', {}, 'Background'), bg, h('span'), presets),
+      body: h('div', { class: 'form-grid' }, h('label', {}, 'Width (px)'), w, h('label', {}, 'Height (px)'), hh, h('label', {}, 'Background'), bg, h('span'), presets,
+        h('label', {}, 'Save as'), type, note),
       buttons: [{ label: 'Create', value: 'ok', primary: true }],
     });
     void res;
     const W = clamp(Math.round(Number(w.value) || 1280), 1, 10000);
     const H = clamp(Math.round(Number(hh.value) || 720), 1, 10000);
-    this.app.saveSettings({ paintW: W, paintH: H });
-    return { w: W, h: H, bg: bg.value };
+    this.app.saveSettings({ paintW: W, paintH: H, paintExt: type.value });
+    return { w: W, h: H, bg: bg.value, ext: type.value };
   }
 
   newImage(w, h2, bg) {
@@ -229,12 +308,21 @@ export class PaintEditor extends BaseEditor {
   }
 
   makeLayer(name) { return { id: uid('L'), name, canvas: mkCanvas(this.W, this.H), visible: true, opacity: 1 }; }
+  get frame() { return this.frames?.[this.fi]; }
+  get layers() { return this.frame?.layers || []; }
+  set layers(v) { if (this.frame) this.frame.layers = v; }
+  get active() { return this.frame?.active ?? 0; }
+  set active(v) { if (this.frame) this.frame.active = v; }
+  /** Every layer of every frame (resize, crop, rotate… apply to all of them). */
+  allLayers() { return this.frames.flatMap((f) => f.layers); }
   get layer() { return this.layers[this.active]; }
   ctxOf(L = this.layer) { return L.canvas.getContext('2d', { willReadFrequently: true }); }
 
   composite() {
     const c = this.view.getContext('2d');
     c.clearRect(0, 0, this.W, this.H);
+    const onion = this.onionFrame();
+    if (onion) { c.globalAlpha = 0.3; c.drawImage(onion, 0, 0); }
     for (const L of this.layers) {
       if (!L.visible) continue;
       c.globalAlpha = L.opacity;
@@ -244,39 +332,63 @@ export class PaintEditor extends BaseEditor {
     c.globalAlpha = 1;
   }
 
-  /** Flattened image (all visible layers). */
-  flatten(background = null) {
+  /** Flattened image (all visible layers) of a frame (the one you're on unless given). */
+  flatten(background = null, frame = this.frame) {
     const c = mkCanvas(this.W, this.H);
-    const x = c.getContext('2d');
+    const x = c.getContext('2d', { willReadFrequently: true });
     if (background) { x.fillStyle = background; x.fillRect(0, 0, this.W, this.H); }
-    for (const L of this.layers) { if (!L.visible) continue; x.globalAlpha = L.opacity; x.drawImage(L.canvas, 0, 0); }
+    for (const L of frame.layers) { if (!L.visible) continue; x.globalAlpha = L.opacity; x.drawImage(L.canvas, 0, 0); }
+    x.globalAlpha = 1;
     return c;
+  }
+
+  /** The frame before, shown faintly under this one while you draw (onion skin). */
+  onionFrame() {
+    if (!this.onion || this.playing || !this.frames || this.fi === 0 || this.frames.length < 2) return null;
+    const prev = this.frames[this.fi - 1];
+    const key = `${prev.id}:${this.fi}`;
+    if (this._onionKey !== key) { this._onionCanvas = this.flatten(null, prev); this._onionKey = key; }
+    return this._onionCanvas;
   }
 
   // ================================================================ undo
 
   snapshot(kind = 'pixels') {
     const L = this.layer;
-    if (kind === 'pixels') return { kind, id: L.id, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H) };
-    return { kind: 'all', W: this.W, H: this.H, active: this.active, layers: this.layers.map((x) => ({ ...x, data: this.ctxOf(x).getImageData(0, 0, this.W, this.H) })) };
+    const one = this.W * this.H * 4;
+    if (kind === 'pixels') return { kind, id: L.id, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H), bytes: one };
+    const frames = this.frames.map((f) => ({ id: f.id, delay: f.delay, active: f.active, layers: f.layers.map((x) => ({ id: x.id, name: x.name, visible: x.visible, opacity: x.opacity, data: this.ctxOf(x).getImageData(0, 0, this.W, this.H) })) }));
+    return { kind: 'all', W: this.W, H: this.H, fi: this.fi, frames, bytes: one * this.allLayers().length };
   }
   restore(s) {
     if (s.kind === 'pixels') {
-      const L = this.layers.find((x) => x.id === s.id);
-      if (L) this.ctxOf(L).putImageData(s.data, 0, 0);
+      this.frames.forEach((f, k) => {
+        const L = f.layers.find((x) => x.id === s.id);
+        if (!L) return;
+        this.ctxOf(L).putImageData(s.data, 0, 0);
+        if (k !== this.fi) { this.fi = k; this.renderStrip(); } // undo shows you the frame it changed
+      });
     } else {
       this.W = s.W; this.H = s.H;
       this.view.width = this.overlay.width = s.W;
       this.view.height = this.overlay.height = s.H;
-      this.layers = s.layers.map((x) => { const c = mkCanvas(s.W, s.H); c.getContext('2d').putImageData(x.data, 0, 0); return { id: x.id, name: x.name, visible: x.visible, opacity: x.opacity, canvas: c }; });
-      this.active = clamp(s.active, 0, this.layers.length - 1);
+      this.frames = s.frames.map((f) => ({
+        id: f.id, delay: f.delay, active: clamp(f.active, 0, f.layers.length - 1),
+        layers: f.layers.map((x) => { const c = mkCanvas(s.W, s.H); c.getContext('2d').putImageData(x.data, 0, 0); return { id: x.id, name: x.name, visible: x.visible, opacity: x.opacity, canvas: c }; }),
+      }));
+      this.fi = clamp(s.fi, 0, this.frames.length - 1);
       this.fitStage();
+      this.renderStrip();
     }
   }
   checkpoint(kind = 'pixels') {
-    this.undoStack.push(this.snapshot(kind));
-    if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
+    // "Add frames": a change to the picture goes on a new frame, a copy of this one
+    const adding = kind === 'pixels' && this.frameMode === 'add';
+    this.undoStack.push(this.snapshot(adding ? 'all' : kind));
+    let total = this.undoStack.reduce((n, x) => n + (x.bytes || 0), 0);
+    while (this.undoStack.length > MAX_UNDO || (this.undoStack.length > 1 && total > UNDO_BYTES)) total -= this.undoStack.shift().bytes || 0;
     this.redoStack = [];
+    if (adding) this.spawnFrame(true);
     this.markDirty();
   }
   undo() {
@@ -293,8 +405,8 @@ export class PaintEditor extends BaseEditor {
     this.restore(s);
     this.after();
   }
-  snapshotOf(id) { const L = this.layers.find((x) => x.id === id) || this.layer; return { kind: 'pixels', id: L.id, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H) }; }
-  after() { this.composite(); this.renderLayers(); this.drawOverlay(); this.syncProps(); }
+  snapshotOf(id) { const L = this.allLayers().find((x) => x.id === id) || this.layer; return { kind: 'pixels', id: L.id, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H), bytes: this.W * this.H * 4 }; }
+  after() { this._onionKey = null; this.composite(); this.renderLayers(); this.drawOverlay(); this.syncProps(); this.refreshThumb(); this.refreshStatus(); }
 
   // ================================================================ pointer
 
@@ -303,11 +415,25 @@ export class PaintEditor extends BaseEditor {
     return { x: ((e.clientX - r.left) / r.width) * this.W, y: ((e.clientY - r.top) / r.height) * this.H };
   }
 
+  /** At full accuracy, painting snaps to the pixel grid (odd sizes to pixel centres) so edges land on whole pixels. */
+  snap(p) {
+    if (this.accuracy < 100 || !['brush', 'eraser', 'line', 'rect', 'ellipse'].includes(this.tool)) return p;
+    const odd = Math.round(this.size) % 2 === 1;
+    const f = (v) => (odd ? Math.floor(v) + 0.5 : Math.round(v));
+    return { x: f(p.x), y: f(p.y) };
+  }
+  /** The area a brush segment from a to b touches. */
+  segRect(a, b) {
+    const r = this.size / 2 + 2;
+    return { x: Math.min(a.x, b.x) - r, y: Math.min(a.y, b.y) - r, w: Math.abs(a.x - b.x) + r * 2, h: Math.abs(a.y - b.y) + r * 2 };
+  }
+
   onDown(e) {
     if (e.button === 1) return; // middle: let the scroller pan
+    if (this.playing) this.togglePlay();
     e.preventDefault();
     this.overlay.setPointerCapture(e.pointerId);
-    const p = this.pt(e);
+    const p = this.snap(this.pt(e));
     const color = e.button === 2 ? this.secondary : this.primary;
     const L = this.layer;
     if (!L) return;
@@ -323,6 +449,7 @@ export class PaintEditor extends BaseEditor {
         c.strokeStyle = c.fillStyle = this.tool === 'eraser' ? '#000' : color;
         c.lineWidth = this.size;
         c.beginPath(); c.arc(p.x, p.y, this.size / 2, 0, Math.PI * 2); c.fill();
+        if (this.accuracy >= 100) harden(sc, 100, this.segRect(p, p), this.stroke.erase ? '#000000' : color);
         if (this.stroke.erase) this.previewErase(); else this.composite();
         break;
       }
@@ -339,7 +466,7 @@ export class PaintEditor extends BaseEditor {
         this.after();
         break;
       case 'picker': {
-        const d = this.view.getContext('2d').getImageData(clamp(Math.floor(p.x), 0, this.W - 1), clamp(Math.floor(p.y), 0, this.H - 1), 1, 1).data;
+        const d = this.flatten().getContext('2d').getImageData(clamp(Math.floor(p.x), 0, this.W - 1), clamp(Math.floor(p.y), 0, this.H - 1), 1, 1).data;
         const hex = '#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
         if (e.button === 2) this.secondary = hex; else this.primary = hex;
         this.syncProps();
@@ -351,11 +478,14 @@ export class PaintEditor extends BaseEditor {
   }
 
   onMove(e) {
-    const p = this.pt(e);
+    const p = this.snap(this.pt(e));
     this.cursor = p;
     if (this.stroke) {
+      if (p.x === this.stroke.last.x && p.y === this.stroke.last.y) return;
       const c = this.stroke.canvas.getContext('2d');
       c.beginPath(); c.moveTo(this.stroke.last.x, this.stroke.last.y); c.lineTo(p.x, p.y); c.stroke();
+      // full accuracy shows crisp while drawing (doing it again never changes a pixel); in between, it's done at the end
+      if (this.accuracy >= 100) harden(this.stroke.canvas, 100, this.segRect(this.stroke.last, p), this.stroke.erase ? '#000000' : this.stroke.color);
       this.stroke.last = p;
       if (this.stroke.erase) this.previewErase(); else this.composite();
       this.drawOverlay();
@@ -379,6 +509,7 @@ export class PaintEditor extends BaseEditor {
     if (this.stroke) {
       const s = this.stroke;
       this.stroke = null;
+      if (this.accuracy > 0 && this.accuracy < 100) harden(s.canvas, this.accuracy, null, s.erase ? '#000000' : s.color);
       const c = this.ctxOf();
       if (s.erase) { c.globalCompositeOperation = 'destination-out'; c.drawImage(s.canvas, 0, 0); c.globalCompositeOperation = 'source-over'; } else { c.globalAlpha = s.alpha; c.drawImage(s.canvas, 0, 0); c.globalAlpha = 1; }
       this.after();
@@ -404,6 +535,25 @@ export class PaintEditor extends BaseEditor {
 
   /** Shapes: Outline uses the button's colour; Fill / both fill with the other colour (Paint.NET style). */
   drawShape(c, a, b, strokeColor, fillColor, square) {
+    if (this.accuracy > 0 && this.tool !== 'text') {
+      a = this.snap(a); b = this.snap(b);
+      if (this._sheet?.width !== this.W || this._sheet?.height !== this.H) this._sheet = mkCanvas(this.W, this.H);
+      const sheet = this._sheet;
+      sheet.getContext('2d').clearRect(0, 0, this.W, this.H);
+      const keep = this.opacity;
+      this.opacity = 1;
+      try { this.drawShapeOn(sheet.getContext('2d'), a, b, strokeColor, fillColor, square); } finally { this.opacity = keep; }
+      const pad = this.size + 2;
+      const one = this.tool === 'line' || this.shapeMode !== 'both' || strokeColor === fillColor;
+      harden(sheet, this.accuracy, { x: Math.min(a.x, b.x) - pad, y: Math.min(a.y, b.y) - pad, w: Math.abs(a.x - b.x) + pad * 2 + (square ? Math.abs(a.x - b.x) + Math.abs(a.y - b.y) : 0), h: Math.abs(a.y - b.y) + pad * 2 + (square ? Math.abs(a.x - b.x) + Math.abs(a.y - b.y) : 0) },
+        one ? (this.shapeMode === 'fill' || this.tool === 'line' || this.shapeMode === 'stroke' ? strokeColor : null) : null);
+      c.save(); c.globalAlpha = this.opacity; c.drawImage(sheet, 0, 0); c.restore();
+      return;
+    }
+    this.drawShapeOn(c, a, b, strokeColor, fillColor, square);
+  }
+
+  drawShapeOn(c, a, b, strokeColor, fillColor, square) {
     c.save();
     c.globalAlpha = this.opacity;
     c.lineWidth = this.size;
@@ -706,8 +856,36 @@ export class PaintEditor extends BaseEditor {
   cropToSel() {
     const s = this.sel;
     if (!s) return toast('Draw a selection first (S).', { type: 'warn' });
+    this.cropRect(s);
+  }
+
+  /** Cut off the empty border: see-through edges, or (on a solid picture) edges the same colour as the corner. */
+  trimEdges() {
+    const W = this.W, H = this.H;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    let mode = null, bg = null;
+    for (const f of this.frames) {
+      const d = this.flatten(null, f).getContext('2d').getImageData(0, 0, W, H).data;
+      if (!mode) { mode = d[3] < 255 ? 'alpha' : 'colour'; bg = [d[0], d[1], d[2]]; }
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = (y * W + x) * 4;
+          const keep = mode === 'alpha' ? d[i + 3] > 0 : Math.abs(d[i] - bg[0]) > 8 || Math.abs(d[i + 1] - bg[1]) > 8 || Math.abs(d[i + 2] - bg[2]) > 8;
+          if (!keep) continue;
+          if (x < x0) x0 = x; if (x > x1) x1 = x;
+          if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+      }
+    }
+    if (x1 < 0) return toast('The picture is empty — nothing to keep.', { type: 'warn' });
+    if (x0 === 0 && y0 === 0 && x1 === W - 1 && y1 === H - 1) return toast('No empty edges to trim.', { timeout: 1600 });
+    this.cropRect({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 });
+    toast(`Trimmed to ${x1 - x0 + 1} × ${y1 - y0 + 1}`, { timeout: 1600 });
+  }
+
+  cropRect(s) {
     this.checkpoint('all');
-    for (const L of this.layers) { const c = mkCanvas(s.w, s.h); c.getContext('2d').drawImage(L.canvas, -s.x, -s.y); L.canvas = c; }
+    for (const L of this.allLayers()) { const c = mkCanvas(s.w, s.h); c.getContext('2d').drawImage(L.canvas, -s.x, -s.y); L.canvas = c; }
     this.W = s.w; this.H = s.h;
     this.sel = null;
     this.fitStage();
@@ -730,7 +908,7 @@ export class PaintEditor extends BaseEditor {
     if (res !== 'ok') return;
     const W = clamp(Math.round(Number(w.value)), 1, 10000), H = clamp(Math.round(Number(hh.value)), 1, 10000);
     this.checkpoint('all');
-    for (const L of this.layers) {
+    for (const L of this.allLayers()) {
       const c = mkCanvas(W, H);
       const x = c.getContext('2d');
       x.imageSmoothingQuality = 'high';
@@ -746,14 +924,14 @@ export class PaintEditor extends BaseEditor {
 
   transformAll(fn) {
     this.checkpoint('all');
-    for (const L of this.layers) { const c = mkCanvas(this.W, this.H); const x = c.getContext('2d'); fn(x, this.W, this.H); x.drawImage(L.canvas, 0, 0); L.canvas = c; }
+    for (const L of this.allLayers()) { const c = mkCanvas(this.W, this.H); const x = c.getContext('2d'); fn(x, this.W, this.H); x.drawImage(L.canvas, 0, 0); L.canvas = c; }
     this.after();
   }
 
   rotate(dir) {
     this.checkpoint('all');
     const W = this.H, H = this.W;
-    for (const L of this.layers) {
+    for (const L of this.allLayers()) {
       const c = mkCanvas(W, H);
       const x = c.getContext('2d');
       x.translate(W / 2, H / 2); x.rotate((dir * Math.PI) / 2); x.drawImage(L.canvas, -this.W / 2, -this.H / 2);
@@ -805,7 +983,12 @@ export class PaintEditor extends BaseEditor {
     this.refreshStatus();
   }
 
-  zoom(delta) {
+  get handlesWheelZoom() { return true; }
+
+  /** at: a pointer event — the image spot under it stays under it. */
+  zoom(delta, at = null) {
+    const before = at && this.overlay.getBoundingClientRect();
+    const fx = before ? (at.clientX - before.left) / before.width : 0, fy = before ? (at.clientY - before.top) / before.height : 0;
     if (delta === 'fit') {
       const r = this.scroller.getBoundingClientRect();
       this.zoomLevel = clamp(Math.min((r.width - 48) / this.W, (r.height - 48) / this.H), 0.05, 1);
@@ -815,6 +998,11 @@ export class PaintEditor extends BaseEditor {
       this.zoomLevel = delta > 0 ? ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS[i] > this.zoomLevel + 0.001 ? i : i + 1)] : ZOOMS[Math.max(0, (i < 0 ? ZOOMS.length : i) - 1)];
     }
     this.applyZoom();
+    if (before) {
+      const r = this.overlay.getBoundingClientRect();
+      this.scroller.scrollLeft += r.left + fx * r.width - at.clientX;
+      this.scroller.scrollTop += r.top + fy * r.height - at.clientY;
+    }
   }
 
   // ================================================================ keys
@@ -837,6 +1025,7 @@ export class PaintEditor extends BaseEditor {
     if (e.key === 'Escape') { this.sel = null; this.drawOverlay(); this.syncProps(); return; }
     if (e.key === '[') { this.size = Math.max(1, this.size - (this.size > 20 ? 5 : 1)); this.sizeIn.value = String(this.size); return this.syncProps(); }
     if (e.key === ']') { this.size = Math.min(120, this.size + (this.size >= 20 ? 5 : 1)); this.sizeIn.value = String(this.size); return this.syncProps(); }
+    if ((e.key === ',' || e.key === '.') && this.frames.length > 1) { e.preventDefault(); return this.selectFrame((this.fi + (e.key === '.' ? 1 : this.frames.length - 1)) % this.frames.length); }
     if (k === 'x') return this.swapColors();
     if (k === 'd') { this.primary = '#000000'; this.secondary = '#ffffff'; return this.syncProps(); }
     const tool = TOOLS.find((x) => x[3].toLowerCase() === k);
@@ -845,20 +1034,215 @@ export class PaintEditor extends BaseEditor {
 
   // ================================================================ save / export
 
-  saveFormats() { return [{ ext: 'png', name: 'PNG image' }, { ext: 'jpg', name: 'JPEG image' }, { ext: 'webp', name: 'WebP image' }]; }
-  lossyFormat(ext) { return this.layers.length > 1; } // layers are flattened when saving
+  saveFormats() {
+    const fm = OUT_FORMATS.map((f) => ({ ext: f.ext, name: f.name }));
+    if (['jpeg', 'jfif'].includes(this.tab.ext)) fm.unshift({ ext: this.tab.ext, name: 'JPEG image' });
+    return fm;
+  }
+  // layers are flattened when saving; frames need a GIF
+  lossyFormat(ext) { return this.frames.some((f) => f.layers.length > 1) || (outKind(ext) !== 'gif' && this.frames.length > 1); }
+  lossyNote(ext) {
+    const n = this.frames.length;
+    if (outKind(ext) !== 'gif' && n > 1) return `.${ext} can’t hold an animation, so only frame ${this.fi + 1} of ${n} is saved. Save as GIF to keep every frame. (The tab keeps them all until you close it.)`;
+    return 'Layers are merged into one picture in the saved file. The tab keeps them separate until you close it.';
+  }
 
   async serialize(ext) {
-    const jpg = ext === 'jpg' || ext === 'jpeg';
-    const c = this.flatten(jpg ? '#ffffff' : null);
-    const blob = await new Promise((r) => c.toBlob(r, jpg ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png', 0.92));
-    return new Uint8Array(await blob.arrayBuffer());
+    const k = outKind(ext) || 'png';
+    if (k === 'gif') {
+      const frames = this.frames.map((f) => ({ data: this.flatten(null, f).getContext('2d').getImageData(0, 0, this.W, this.H).data, delay: f.delay }));
+      return encodeGif(frames, { width: this.W, height: this.H, loop: this.out.loop, colors: this.out.colors, dither: this.out.dither });
+    }
+    return encodeCanvas(this.flatten(), k, this.out);
+  }
+
+  afterSave(path, ext) {
+    if (!outKind(ext)) return;
+    this.out.ext = ext;
+    if (this.fmtSel) this.fmtSel.value = outKind(ext);
+    this.renderStrip();
+  }
+
+  /** The type it'll be saved as. Changing it from the file's own type makes the next Save ask where (a new name). */
+  setOutExt(ext, { quiet = false, init = false } = {}) {
+    if (outKind(this.out.ext) === ext) ext = this.out.ext; // .jpeg stays .jpeg
+    this.out.ext = ext;
+    if (this.fmtSel) this.fmtSel.value = outKind(ext) || 'png';
+    if (!quiet) warnFormat(ext, this.flatten(), this.frames.length);
+    if (this.tab.ext !== ext) { this.app.setTabMeta(this.tab, { ext }); if (!init) this.markDirty(); }
+    this.renderStrip();
+  }
+
+  openSettings() {
+    return imageSettings({
+      app: this.app, tab: this.tab, out: this.out, meta: this.meta, fresh: true,
+      setOutExt: (e, o) => this.setOutExt(e, o),
+      outCanvas: () => this.flatten(),
+      frameCount: () => this.frames.length,
+      size: () => ({ W: this.W, H: this.H }),
+      resize: () => this.resizeImage(true), canvasSize: () => this.resizeImage(false), trim: () => this.trimEdges(),
+      toDump: () => this.exportToDump(), copyImage: () => copyCanvas(this.flatten()),
+      serialize: (e) => this.serialize(e), markDirty: () => this.markDirty(),
+    });
+  }
+
+  // ================================================================ frames (animated GIF)
+
+  renderStrip() {
+    if (!this.strip || !this.frames) return;
+    const show = outKind(this.out?.ext) === 'gif' || this.frames.length > 1 || !!this.stripOpen;
+    this.strip.hidden = !show;
+    if (!show) return;
+    clear(this.strip);
+    const seg = (id, label, tip) => h('button', { class: this.frameMode === id ? 'on' : '', 'data-tip': tip, onclick: () => { this.frameMode = id; this.renderStrip(); } }, label);
+    const total = this.frames.reduce((n, f) => n + (f.delay || 0), 0);
+    const ctrl = h('div', { class: 'paint-strip-ctrl' },
+      h('div', { class: 'paint-seg' },
+        seg('each', 'Edit each', 'Drawing changes the frame you’re on'),
+        seg('add', 'Add frames', 'Every change goes on a new frame (a copy of this one) — stop-motion style')),
+      h('button', { class: `icon-btn ${this.playing ? 'on' : ''}`, 'data-tip': this.playing ? 'Stop' : 'Play the animation', onclick: () => this.togglePlay() }, icon(this.playing ? 'pause-bars' : 'play', 'sm')),
+      h('button', { class: `icon-btn ${this.onion ? 'on' : ''}`, 'data-tip': 'Onion skin: show the frame before, faintly', onclick: () => { this.onion = !this.onion; this.app.saveSettings({ paintOnion: this.onion }); this._onionKey = null; this.renderStrip(); this.composite(); } }, icon('eye', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'New blank frame', onclick: () => this.newFrame(false) }, icon('plus', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Duplicate this frame', onclick: () => this.newFrame(true) }, icon('copy', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Delete this frame', onclick: () => this.deleteFrame(this.fi) }, icon('trash', 'sm')),
+      h('span', { class: 'mono faint paint-strip-info' }, `${this.fi + 1}/${this.frames.length} · ${(total / 1000).toFixed(2)}s`));
+    const list = h('div', { class: 'paint-frames' });
+    const th = 54, tw = clamp(Math.round((th * this.W) / this.H), 24, 140);
+    this.frames.forEach((f, i) => {
+      const c = mkCanvas(tw, th);
+      c.className = 'checker';
+      c.getContext('2d').drawImage(this.flatten(null, f), 0, 0, tw, th);
+      const el = h('div', { class: `paint-frame ${i === this.fi ? 'on' : ''}`, draggable: 'true', title: 'Click: go to it · Double-click: how long it shows · Right-click: more · Drag: reorder · , and . step' },
+        c, h('div', { class: 'paint-frame-lbl mono' }, `${i + 1} · ${f.delay}ms`));
+      el.addEventListener('click', () => this.selectFrame(i));
+      el.addEventListener('dblclick', () => this.askDelay([i]));
+      el.addEventListener('contextmenu', (e) => contextMenu(e, this.frameMenu(i)));
+      el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/x-bds-frame', String(i)); e.dataTransfer.effectAllowed = 'move'; el.classList.add('dragging'); });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+      el.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/x-bds-frame')) { e.preventDefault(); el.classList.add('drop'); } });
+      el.addEventListener('dragleave', () => el.classList.remove('drop'));
+      el.addEventListener('drop', (e) => { const from = e.dataTransfer.getData('text/x-bds-frame'); el.classList.remove('drop'); if (from !== '') { e.preventDefault(); e.stopPropagation(); this.moveFrame(Number(from), i); } });
+      list.append(el);
+    });
+    this.strip.append(ctrl, list);
+    requestAnimationFrame(() => list.querySelector('.paint-frame.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+  }
+
+  /** Just the frame you're on: its thumbnail follows your drawing. */
+  refreshThumb() {
+    if (!this.strip || this.strip.hidden) return;
+    const c = this.strip.querySelectorAll('.paint-frame canvas')[this.fi];
+    if (!c) return;
+    const x = c.getContext('2d');
+    x.clearRect(0, 0, c.width, c.height);
+    x.drawImage(this.flatten(), 0, 0, c.width, c.height);
+  }
+
+  frameMenu(i) {
+    const n = this.frames.length;
+    return [
+      { label: 'Duplicate', icon: 'copy', action: () => { this.selectFrame(i); this.newFrame(true); } },
+      { label: 'New blank frame after', icon: 'plus', action: () => { this.selectFrame(i); this.newFrame(false); } },
+      { label: `How long it shows… (${this.frames[i].delay}ms)`, icon: 'clock', action: () => this.askDelay([i]) },
+      { label: 'Same time for every frame…', action: () => this.askDelay(this.frames.map((_, k) => k)) },
+      { sep: true },
+      { label: 'Move left', icon: 'arrow-left', disabled: i === 0, action: () => this.moveFrame(i, i - 1) },
+      { label: 'Move right', icon: 'arrow-right', disabled: i === n - 1, action: () => this.moveFrame(i, i + 1) },
+      { label: 'Reverse the order', icon: 'swap', disabled: n < 2, action: () => { this.checkpoint('all'); this.frames.reverse(); this.fi = n - 1 - this.fi; this.renderStrip(); this.after(); } },
+      { sep: true },
+      { label: 'Delete frame', icon: 'trash', disabled: n < 2, action: () => this.deleteFrame(i) },
+    ];
+  }
+
+  selectFrame(i) {
+    if (!this.frames[i]) return;
+    this.fi = i;
+    this._onionKey = null;
+    this.composite();
+    this.renderLayers();
+    this.drawOverlay();
+    this.renderStrip();
+    this.refreshStatus();
+  }
+
+  /** A new frame right after this one (a copy, or blank with the same layers) — and you're on it. */
+  spawnFrame(copy) {
+    const src = this.frame;
+    const layers = src.layers.map((L) => {
+      const n = this.makeLayer(L.name);
+      n.visible = L.visible; n.opacity = L.opacity;
+      if (copy) n.canvas.getContext('2d').drawImage(L.canvas, 0, 0);
+      return n;
+    });
+    this.frames.splice(this.fi + 1, 0, { id: uid('F'), layers, active: src.active, delay: src.delay });
+    this.fi += 1;
+    this._onionKey = null;
+    this.renderStrip();
+  }
+
+  newFrame(copy) {
+    this.checkpoint('all');
+    this.spawnFrame(copy);
+    this.after();
+  }
+
+  deleteFrame(i) {
+    if (this.frames.length <= 1) return toast('An image needs at least one frame.', { type: 'warn' });
+    this.checkpoint('all');
+    this.frames.splice(i, 1);
+    this.fi = clamp(i <= this.fi ? this.fi - 1 : this.fi, 0, this.frames.length - 1);
+    this.renderStrip();
+    this.after();
+  }
+
+  moveFrame(from, to) {
+    if (from === to || !this.frames[from] || !this.frames[to]) return;
+    this.checkpoint('all');
+    const [f] = this.frames.splice(from, 1);
+    this.frames.splice(to, 0, f);
+    this.fi = to;
+    this.renderStrip();
+    this.after();
+  }
+
+  async askDelay(list) {
+    const cur = this.frames[list[0]]?.delay ?? 100;
+    const v = await promptDialog(list.length > 1 ? 'Time for every frame' : `Frame ${list[0] + 1}`, 'How long it shows, in milliseconds (1000 = 1 second)', String(cur), { type: 'number' });
+    if (v == null || v === '') return;
+    const ms = clamp(Math.round((Number(v) || 100) / 10) * 10, 10, 60000); // GIFs count in hundredths of a second
+    this.checkpoint('all');
+    for (const k of list) this.frames[k].delay = ms;
+    this.renderStrip();
+    this.refreshStatus();
+  }
+
+  togglePlay() {
+    if (this.playing) {
+      clearTimeout(this.playTimer);
+      this.playing = false;
+      this.selectFrame(clamp(this.playFrom ?? this.fi, 0, this.frames.length - 1));
+      return;
+    }
+    if (this.frames.length < 2) return toast('Add a second frame to play it.', { timeout: 1600 });
+    this.playing = true;
+    this.playFrom = this.fi;
+    this.renderStrip();
+    const thumbs = () => this.strip.querySelectorAll('.paint-frame');
+    const step = () => {
+      if (!this.playing) return;
+      this.fi = (this.fi + 1) % this.frames.length;
+      this.composite();
+      thumbs().forEach((el, k) => el.classList.toggle('on', k === this.fi));
+      this.playTimer = setTimeout(step, Math.max(20, this.frame.delay));
+    };
+    this.playTimer = setTimeout(step, Math.max(20, this.frame.delay));
   }
 
   async exportToDump() {
     try {
-      const bytes = await this.serialize('png');
-      const name = `${stripExt(this.tab.title) || 'image'}.png`;
+      const ext = outKind(this.out.ext) || 'png';
+      const bytes = await this.serialize(ext);
+      const name = `${stripExt(this.tab.title) || 'image'}.${ext}`;
       const r = await api.dumpAdd(name, bytes, 'image');
       toast(`Saved ${r.name} to the media dump`, { type: 'ok' });
     } catch (e) { errorToast(e, 'Export failed'); }
@@ -874,6 +1258,7 @@ export class PaintEditor extends BaseEditor {
         { label: 'Erase selection', shortcut: 'Del', action: () => this.clearSelection() },
       ],
       tools: [
+        { label: 'Image settings…', icon: 'settings', action: () => this.openSettings() },
         { label: 'Export to the media dump', icon: 'image-down', action: () => this.exportToDump() },
         { label: 'Read text in this image (BoxScribe)', icon: 'scan-text', action: async () => { const { scribeBytes } = await import('./scribe.js'); scribeBytes(this.app, `${stripExt(this.tab.title)}.png`, await this.serialize('png')); } },
       ],
@@ -882,11 +1267,12 @@ export class PaintEditor extends BaseEditor {
 
   status() {
     return {
-      left: [{ text: `${this.W} × ${this.H}`, icon: 'image' }, { text: `${this.layers.length} layer${this.layers.length === 1 ? '' : 's'}` }, ...(this.sel ? [{ text: `selection ${this.sel.w}×${this.sel.h}` }] : []), ...(this.cursor ? [{ text: `${Math.floor(this.cursor.x)}, ${Math.floor(this.cursor.y)}` }] : [])],
+      left: [{ text: `${this.W} × ${this.H}`, icon: 'image' }, { text: `${this.layers.length} layer${this.layers.length === 1 ? '' : 's'}` },
+        ...(this.frames?.length > 1 ? [{ text: `frame ${this.fi + 1}/${this.frames.length}` }] : []), { text: `.${this.out?.ext || 'png'}` }, ...(this.sel ? [{ text: `selection ${this.sel.w}×${this.sel.h}` }] : []), ...(this.cursor ? [{ text: `${Math.floor(this.cursor.x)}, ${Math.floor(this.cursor.y)}` }] : [])],
       right: [{ text: Math.round(this.zoomLevel * 100) + '%' }],
     };
   }
 
   onShow() { requestAnimationFrame(() => this.applyZoom()); }
-  destroy() { document.removeEventListener('paste', this.pasteHandler); document.removeEventListener('keydown', this.keyHandler); this.dumps?.destroy(); }
+  destroy() { clearTimeout(this.playTimer); this.playing = false; document.removeEventListener('paste', this.pasteHandler); document.removeEventListener('keydown', this.keyHandler); this.dumps?.destroy(); }
 }

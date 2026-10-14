@@ -64,6 +64,7 @@ export function detectMode(name, bytes) {
   if (ext === 'eml') return { mode: 'mail' };
   if (DOC_EXT.includes(ext)) return { mode: 'doc' };
   if (SHEET_EXT.includes(ext)) return { mode: 'sheet' };
+  if (ext === 'gif') return { mode: 'paint' }; // GIFs open with their frames, ready to edit
   if (IMAGE_EXT.includes(ext)) return { mode: 'image' };
   if (VIDEO_EXT.includes(ext) || ext === 'ogg') return { mode: 'video' };
   if (base in SPECIAL_NAMES && SPECIAL_NAMES[base]) return { mode: 'code', lang: SPECIAL_NAMES[base] };
@@ -95,12 +96,12 @@ export function extForLang(lang) {
 
 export const MODE_ICON = {
   doc: 'file-doc', pdf: 'file-pdf', text: 'file-text', code: 'file-code', sheet: 'sheet', image: 'image', hex: 'binary',
-  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot', secure: 'lock', tomcat: 'f14', browser: 'globe', swap: 'swap',
+  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot', secure: 'lock', tomcat: 'f14', browser: 'globe', swap: 'swap', music: 'music',
 };
 
 export const MODE_LABEL = { cut: 'Video editor', secure: 'Secure notes', tomcat: 'F-14F Super Tomcat', browser: 'Browser',
   doc: 'Document', pdf: 'PDF', text: 'Text', code: 'Code', sheet: 'Sheet', image: 'Image', hex: 'Binary',
-  video: 'Video', form: 'Form', klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', paint: 'BoxPaint', diff: 'BoxDiff', swap: 'BoxSwap',
+  video: 'Video', form: 'Form', klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', music: 'Music', scribe: 'BoxScribe', paint: 'BoxPaint', diff: 'BoxDiff', swap: 'BoxSwap',
 };
 
 export function iconForName(name, isDir) {

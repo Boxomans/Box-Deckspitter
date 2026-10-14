@@ -3,7 +3,7 @@
 import { h, clear, basename, dirname, joinPath, extOf, debounce, formatBytes } from './dom.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
-import { contextMenu, promptDialog, confirmDialog, toast, errorToast, hoverKeys, rubberSelect } from './ui.js';
+import { contextMenu, promptDialog, confirmDialog, toast, errorToast, hoverKeys, rubberSelect, modal } from './ui.js';
 import { iconForName, MODE_ICON } from './filetypes.js';
 
 const GIT_CLASS = { M: 'mod', ' M': 'mod', MM: 'mod', AM: 'add', A: 'add', '??': 'new', D: 'del', R: 'mod', U: 'conflict', UU: 'conflict' };
@@ -58,6 +58,7 @@ export class Spaces {
     if (!this.root) return this.renderEmpty(host);
     const name = basename(this.root);
     const head = h('div', { class: 'panel-head' }, h('span', { class: 'spaces-name', title: this.root }, this.app.toolName('BoxSpaces') + ' · ' + name), h('div', { class: 'grow' }),
+      h('button', { class: 'icon-btn', 'data-tip': 'New BoxSpace — make a new folder and open it', onclick: () => this.createSpace() }, icon('plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'New file', onclick: () => this.newFile(this.root) }, icon('file-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'New folder', onclick: () => this.newFolder(this.root) }, icon('folder-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => this.refresh() }, icon('refresh', 'sm')),
@@ -85,11 +86,14 @@ export class Spaces {
   renderEmpty(host) {
     const recent = (this.app.settings.spaces || []);
     host.append(
-      h('div', { class: 'panel-head' }, this.app.toolName('BoxSpaces'), h('div', { class: 'grow' })),
+      h('div', { class: 'panel-head' }, this.app.toolName('BoxSpaces'), h('div', { class: 'grow' }),
+        h('button', { class: 'icon-btn', 'data-tip': 'New BoxSpace — make a new folder and open it', onclick: () => this.createSpace() }, icon('plus', 'sm'))),
       h('div', { class: 'panel-body' }, h('div', { class: 'spaces-empty' },
         icon('spaces', 'xl'),
         h('div', {}, 'Open a folder to work on it like a project — file tree, git status, search across files, quick open with Ctrl+E.'),
-        h('button', { class: 'btn primary', onclick: () => this.app.openSpace() }, icon('folder-open', 'sm'), 'Open folder…'),
+        h('div', { class: 'spaces-empty-btns' },
+          h('button', { class: 'btn primary', onclick: () => this.app.openSpace() }, icon('folder-open', 'sm'), 'Open folder…'),
+          h('button', { class: 'btn', onclick: () => this.createSpace() }, icon('folder-plus', 'sm'), 'New folder…')),
         recent.length ? h('div', { class: 'menu-heading' }, 'recent spaces') : null,
         ...recent.map((r) => {
           const row = h('button', { class: 'file-row', title: r, onclick: async () => { await this.open(r); this.render(host); } }, h('span', { class: 'fr-icon' }, icon('folder', 'sm')), h('span', { class: 'fr-name' }, basename(r)), h('span', { class: 'fr-meta' }, dirname(r).slice(-24)));
@@ -199,6 +203,52 @@ export class Spaces {
       this.expanded.add(dir);
       await this.refresh();
       this.app.openPath(p);
+    } catch (e) { errorToast(e); }
+  }
+
+  /** A new, empty folder opened as a BoxSpace. It goes in data/BoxSpaces unless another place is picked. */
+  async createSpace() {
+    const sep = this.app.info?.sep || '\\';
+    const home = this.app.info?.data ? joinPath(this.app.info.data, 'BoxSpaces') : (this.app.info?.documents || '');
+    let where = home;
+    const name = h('input', { type: 'text', placeholder: 'My project', style: 'width:100%' });
+    const whereEl = h('div', { class: 'mono spaces-where', title: where });
+    const full = h('div', { class: 'faint spaces-where-full' });
+    const show = () => {
+      whereEl.textContent = where; whereEl.title = where;
+      const n = name.value.trim();
+      full.textContent = n ? `Makes ${where.replace(/[\\/]+$/, '')}${sep}${n}` : '';
+    };
+    name.addEventListener('input', show);
+    const change = h('button', { class: 'btn', onclick: async () => {
+      const { pickFolder } = await import('./files.js');
+      const p = await pickFolder({ title: 'Where should the new BoxSpace go?', initialDir: where });
+      if (p) { where = p; show(); }
+    } }, icon('folder-open', 'sm'), 'Change…');
+    const reset = h('button', { class: 'btn ghost', 'data-tip': 'Back to the usual place (BoxSpaces in the app’s data folder)', onclick: () => { where = home; show(); } }, 'Default');
+    show();
+    const body = h('div', {},
+      h('label', { class: 'field' }, h('span', {}, 'Folder name'), name),
+      h('div', { class: 'field' }, h('span', {}, 'Where it goes'), h('div', { class: 'spaces-where-row' }, whereEl, change, reset)),
+      full);
+    const bad = /[<>:"/\\|?*\x00-\x1f]/;
+    const res = await modal({
+      title: 'New BoxSpace', body,
+      onOpen: () => name.focus(),
+      buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Create', primary: true, onClick: () => {
+        const n = name.value.trim().replace(/[. ]+$/, '');
+        if (!n) { name.focus(); return false; }
+        if (bad.test(n)) { toast('A folder name can’t have < > : " / \\ | ? *', { type: 'warn' }); return false; }
+        return n;
+      } }],
+    });
+    if (!res) return;
+    const path = joinPath(where, res);
+    try {
+      const st = await api.stat(path);
+      if (st.exists && !(await confirmDialog('Folder already there', `${path} already exists. Open it as a BoxSpace?`, { okLabel: 'Open it' }))) return;
+      if (!st.exists) await api.mkdir(path);
+      await this.app.openSpace(path);
     } catch (e) { errorToast(e); }
   }
 

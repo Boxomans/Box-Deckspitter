@@ -993,7 +993,10 @@ function retagMp3(file, { title, artist }) {
   });
 }
 
-async function grabAudio(job, items, parallel = 3) {
+async function grabAudio(job, items, parallel = 3, folder = '') {
+  // folder: a playlist (a folder in the audio dump) to save into; '' = the top of the audio dump
+  const destDir = folder ? dumpAbs('audio', folder) : AUDIO_DUMP;
+  await fsp.mkdir(destDir, { recursive: true });
   const children = new Set();
   let cancelled = false;
   job.cancel = () => { cancelled = true; for (const c of children) { try { c.kill(); } catch { /* gone */ } } };
@@ -1032,7 +1035,7 @@ async function grabAudio(job, items, parallel = 3) {
           try {
             const made = await ytdlpToMp3(tr, it.url, tmp, onProgress, onChild, it.outName);
             if (it.tags) await retagMp3(made, it.tags).catch(() => {}); // Spotify's title/artist, not the YouTube upload's
-            const dest = await uniquePath(AUDIO_DUMP, path.basename(made));
+            const dest = await uniquePath(destDir, path.basename(made));
             await fsp.rename(made, dest);
             tr.file = dest;
           } finally {
@@ -1041,11 +1044,11 @@ async function grabAudio(job, items, parallel = 3) {
         } else {
           let base = it.name || it.title || 'audio';
           try { if (!it.name && !it.title) base = decodeURIComponent(path.basename(new URL(it.url).pathname)); } catch { /* ignore */ }
-          const dest = await uniquePath(AUDIO_DUMP, safeFileName(base.replace(/\.[a-z0-9]{2,5}$/i, ''), 'audio') + '.mp3');
+          const dest = await uniquePath(destDir, safeFileName(base.replace(/\.[a-z0-9]{2,5}$/i, ''), 'audio') + '.mp3');
           tr.file = await ffmpegToMp3(it.url, dest, it.referer, onProgress, onChild);
         }
         tr.status = 'done';
-        tr.name = path.basename(tr.file);
+        tr.name = dumpRelOf('audio', tr.file) || path.basename(tr.file); // with its playlist in front, as the player names it
         job.done++;
       } catch (e) {
         if (cancelled) { tr.status = 'cancelled'; } else { tr.status = 'failed'; tr.error = e.message; job.failed++; }
@@ -1705,6 +1708,7 @@ const routes = {
     drives: listDrives(), pdfExport: !!BROWSER || SHELL_MODE, nativeDialogs: IS_WIN, appMode: APP_MODE || SHELL_MODE, shell: SHELL_MODE,
     user: os.userInfo().username,
     root: ROOT, // the folder this copy runs from (shown in the status bar)
+    data: DATA, // where new BoxSpaces go by default (data/BoxSpaces)
   }),
 
   'GET /api/list': async (req, q) => {
@@ -1973,12 +1977,15 @@ const routes = {
 
   // Links → MP3s in the audio dump (one at a time; failures are skipped and reported per track).
   'POST /api/audio/grab': async (req) => {
-    const { items, parallel } = await readJSONBody(req);
+    const { items, parallel, folder } = await readJSONBody(req);
     const list = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.url === 'string').slice(0, 500);
     const lanes = Math.max(1, Math.min(6, Number(parallel) || 3));
     if (!list.length) throw Object.assign(new Error('Nothing to download'), { status: 400 });
+    // a playlist is one folder at the top of the audio dump
+    const sub = folder ? dumpRel(folder, 'audio', { folder: true }) : '';
+    if (sub.includes('/')) throw Object.assign(new Error('A playlist is a single folder name'), { status: 400 });
     const job = newJob(list.length === 1 ? (list[0].title || list[0].url) : `${list.length} tracks`);
-    return startJob(job, () => grabAudio(job, list, lanes));
+    return startJob(job, () => grabAudio(job, list, lanes, sub));
   },
 
   'POST /api/klep/download': async (req) => {

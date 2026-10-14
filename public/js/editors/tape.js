@@ -5,7 +5,7 @@
 import { BaseEditor } from './base.js';
 import { h, clear, stripExt } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { toast, errorToast, modal } from '../core/ui.js';
+import { toast, errorToast, modal, promptDialog } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { fmtTime } from './video.js';
 
@@ -88,7 +88,7 @@ export class TapeEditor extends BaseEditor {
   /** A list of songs ("Artist - Title" or just a title, one per entry) → each is matched on YouTube while downloading. */
   async fromList(entries) {
     let have = new Set();
-    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.name)))); } catch { /* ignore */ }
+    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
     const items = entries.slice(0, 300).map((line) => {
       const m = /^(.+?)\s+[-–—]\s+(.+)$/.exec(line);
       const artist = m ? m[1].trim() : '';
@@ -104,7 +104,7 @@ export class TapeEditor extends BaseEditor {
     const res = await post('/api/spotify/tracks', { url });
     // songs already in the audio dump start unticked
     let have = new Set();
-    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.name)))); } catch { /* ignore */ }
+    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
     const items = res.items.map((t) => {
       const artist = String(t.artist || '').split(',')[0].trim();
       return {
@@ -181,8 +181,42 @@ export class TapeEditor extends BaseEditor {
       } }, icon('check', 'sm'), 'Only new songs')
       : null;
     R.append(h('div', { class: 'klep-results-head' }, h('label', { class: 'check' }, all, count), newOnly,
-      this.title ? h('span', { class: 'faint klep-pagetitle' }, '· ' + this.title) : null, h('div', { class: 'grow' }), this.lanes, goBtn), list);
+      this.title ? h('span', { class: 'faint klep-pagetitle' }, '· ' + this.title) : null, h('div', { class: 'grow' }), this.destPicker(), this.lanes, goBtn), list);
     update();
+  }
+
+  /**
+   * Where the songs go: the audio dump itself, or one of its playlists (folders), or a new playlist —
+   * named after the playlist being downloaded, or one you name.
+   */
+  destPicker() {
+    const sel = h('select', { class: 'tape-dest', title: 'Which playlist in the music player these songs go into' });
+    const clean = (n) => String(n || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/^[. ]+|[. ]+$/g, '').replace(/\s+/g, ' ').slice(0, 80);
+    const fill = (playlists, pick) => {
+      const fromTitle = clean(this.title);
+      clear(sel).append(
+        h('option', { value: '' }, 'Music dump (no playlist)'),
+        playlists.length ? h('optgroup', { label: 'Playlists' }, playlists.map((p) => h('option', { value: p }, p))) : null,
+        fromTitle && !playlists.includes(fromTitle) ? h('option', { value: fromTitle }, `New playlist “${fromTitle}”`) : null,
+        h('option', { value: '\u0000new' }, 'New playlist…'));
+      sel.value = [...sel.options].some((o) => o.value === pick) ? pick : '';
+    };
+    let playlists = this.app.music?.playlists || [];
+    fill(playlists, this.app.settings.tapePlaylist || '');
+    api.dump('audio', '').then((r) => { playlists = (r.folders || []).map((f) => f.base); fill(playlists, sel.value || this.app.settings.tapePlaylist || ''); }).catch(() => {});
+    let last = sel.value;
+    sel.addEventListener('change', async () => {
+      if (sel.value === '\u0000new') {
+        const n = clean(await promptDialog('New playlist', 'BoxTape saves these songs into it', '', { placeholder: 'e.g. Road trip' }));
+        if (!n) { sel.value = last; return; }
+        if (!playlists.includes(n)) playlists = [...playlists, n].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        fill(playlists, n);
+      }
+      last = sel.value;
+      this.app.saveSettings({ tapePlaylist: sel.value });
+    });
+    this.dest = sel;
+    return sel;
   }
 
   /** Queue the ticked tracks as one batch. Batches run one after another; each keeps its own progress card. */
@@ -190,7 +224,8 @@ export class TapeEditor extends BaseEditor {
     const picked = this.boxes.filter((b) => b.checked).map((b) => b._item);
     if (!picked.length) return;
     const name = this.title ? `“${this.title}”` : `${picked.length} track${picked.length > 1 ? 's' : ''}`;
-    const batch = { picked, name, state: 'queued', jobId: null };
+    const folder = this.dest && this.dest.value !== '\u0000new' ? this.dest.value : '';
+    const batch = { picked, name, folder, state: 'queued', jobId: null };
     batch.titleEl = h('b', {});
     batch.counter = h('span', { class: 'mono faint', style: { fontSize: '11px' } });
     batch.actions = h('span', { class: 'row', style: { gap: '6px' } });
@@ -210,7 +245,7 @@ export class TapeEditor extends BaseEditor {
 
   paintQueued(batch) {
     const ahead = this.queue.filter((x) => x.state === 'queued').indexOf(batch);
-    batch.titleEl.textContent = `Queued: ${batch.name} · ${batch.picked.length} track${batch.picked.length > 1 ? 's' : ''}`;
+    batch.titleEl.textContent = `Queued: ${batch.name} · ${batch.picked.length} track${batch.picked.length > 1 ? 's' : ''}${batch.folder ? ` → “${batch.folder}”` : ''}`;
     batch.counter.textContent = this.running ? (ahead > 0 ? `${ahead} ahead of it` : 'next up') : '';
     clear(batch.actions).append(h('button', { class: 'btn sm ghost', onclick: () => {
       batch.state = 'removed';
@@ -239,7 +274,7 @@ export class TapeEditor extends BaseEditor {
     const { picked, bar, rows, counter } = batch;
     batch.state = 'running';
     batch.card.classList.remove('queued');
-    batch.titleEl.textContent = `Saving ${batch.name} to the audio dump`;
+    batch.titleEl.textContent = `Saving ${batch.name} to ${batch.folder ? `the playlist “${batch.folder}”` : 'the audio dump'}`;
     const cancel = h('button', { class: 'btn sm ghost' }, 'Cancel');
     clear(batch.actions).append(cancel);
     try {
@@ -249,6 +284,7 @@ export class TapeEditor extends BaseEditor {
           ? { url: it.url, type: 'spotify', title: it.title, artist: it.artist, duration: it.duration, label: it.label }
           : { url: it.url, type: 'ytdlp', title: it.title })),
         parallel,
+        folder: batch.folder || '',
       });
       batch.jobId = id;
       cancel.onclick = () => post('/api/job/cancel', { id });
@@ -274,7 +310,7 @@ export class TapeEditor extends BaseEditor {
             first ? h('button', { class: 'btn sm', onclick: () => this.app.music?.open() }, icon('music', 'sm'), 'Open player') : null,
             h('button', { class: 'icon-btn', 'data-tip': 'Clear this from the list', onclick: () => batch.card.remove() }, icon('x', 'sm')));
           batch.card.classList.add('finished');
-          if (j.status === 'done') toast(`BoxTape: ${j.done} song${j.done === 1 ? '' : 's'} from ${batch.name} in the audio dump`, { type: j.failed ? 'warn' : 'ok' });
+          if (j.status === 'done') toast(`BoxTape: ${j.done} song${j.done === 1 ? '' : 's'} from ${batch.name} in ${batch.folder ? `the playlist “${batch.folder}”` : 'the audio dump'}`, { type: j.failed ? 'warn' : 'ok' });
           break;
         }
       }

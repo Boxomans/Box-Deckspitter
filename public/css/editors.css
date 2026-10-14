@@ -225,6 +225,7 @@ body.focus-mode #titlebar, body.focus-mode #tabbar, body.focus-mode #statusbar, 
 .pdf-annots { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 .pdf-anno { position: absolute; transform-origin: center center; }
 .pdf-page.tool-select .pdf-anno { pointer-events: auto; cursor: move; }
+.pdf-page.tool-select.over-image, .pdf-page.tool-select.over-image .textLayer :is(span, br) { cursor: move; }
 .pdf-anno.selected { outline: 1px dashed #7a4fd6; outline-offset: 1px; }
 .pdf-anno.editing { cursor: text; outline: 1.5px solid #7a4fd6; }
 .pdf-text { white-space: pre; line-height: 1.2; outline: none; min-width: 4px; box-sizing: border-box; }
@@ -942,3 +943,42 @@ textarea.sn-input { resize: none; min-height: 140px; height: 100%; line-height: 
 .bs-empty { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 18px; border: 1px dashed var(--line); border-radius: 11px; color: var(--text-2); font-size: 12.5px; }
 .bs-empty p { margin: 0; line-height: 1.5; }
 .bs-plan ul { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+
+/* ---- image file type & settings ---- */
+.tb-select.img-format { width: 66px; }
+.imgset { display: flex; flex-direction: column; gap: 14px; }
+.imgset-sec { display: flex; flex-direction: column; gap: 8px; }
+.imgset-sec .menu-heading { display: flex; align-items: center; gap: 8px; padding: 0; }
+.imgset-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; }
+.imgset-row > span:first-child { color: var(--text-2); font-size: 12px; }
+.imgset-row input[type=range] { flex: 1; }
+.imgset-grp { display: flex; flex-direction: column; gap: 8px; }
+.imgset-note { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; line-height: 1.45; color: var(--text-2); padding: 8px 10px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--line); }
+.imgset-note.warn { color: #f0c27a; border-color: rgba(240, 194, 122, 0.45); background: rgba(240, 194, 122, 0.08); }
+.imgset-note svg { flex: none; margin-top: 1px; }
+.imgset-small { font-size: 12px; }
+.imgset-meta { display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--bg-1); }
+.imgset-metarow { display: grid; grid-template-columns: 150px 1fr; gap: 10px; font-size: 12px; padding: 2px 0; }
+.imgset-metarow > span:first-child { color: var(--text-2); }
+.imgset-metarow > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imgset-metarow.sens > span:first-child::after { content: ' •'; color: #f0a07a; }
+.imgset-gps { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #f0a07a; text-transform: none; letter-spacing: 0; }
+.imgset-kinds { font-size: 11px; text-transform: none; letter-spacing: 0; margin-left: auto; }
+
+/* ---- paint: frame strip ---- */
+.paint-strip { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px 8px; border-top: 1px solid var(--line); background: var(--bg-1); flex: none; }
+.paint-strip[hidden] { display: none; }
+.paint-strip-ctrl { display: flex; align-items: center; gap: 4px; }
+.paint-strip-ctrl .icon-btn.on { color: var(--accent); background: var(--accent-line); }
+.paint-strip-info { margin-left: auto; font-size: 11px; }
+.paint-seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; margin-right: 6px; }
+.paint-seg button { background: none; border: 0; color: var(--text-2); font-size: 12px; padding: 4px 10px; cursor: pointer; }
+.paint-seg button + button { border-left: 1px solid var(--line-2); }
+.paint-seg button.on { background: var(--accent-line); color: var(--text); }
+.paint-frames { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.paint-frame { flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; background: var(--bg-2); }
+.paint-frame canvas { display: block; border-radius: 3px; }
+.paint-frame.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.paint-frame.dragging { opacity: 0.4; }
+.paint-frame.drop { border-color: var(--accent); border-style: dashed; }
+.paint-frame-lbl { font-size: 10px; color: var(--text-3); }

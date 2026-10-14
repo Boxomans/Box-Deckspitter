@@ -52,6 +52,8 @@ const AGILITY = { 'J-11': 1, 'J-36': 0.8, 'PL-15': 0.5, 'PL-21': 0.4 };
 const overshootChance = (agility, turnDps) => clamp(0.25 * agility * (20 / turnDps) ** 2, 0.02, 0.6);
 const dudChance = (fuseLevel) => Math.max(0.02, 0.15 - 0.025 * fuseLevel);
 export const SPEEDS = [1, 2, 3];
+/** The speeds on offer: 4× and 5× come with the Time compression perk (level 1 and 2). */
+export const speedsFor = (perks) => [...SPEEDS, ...[4, 5].slice(0, clamp(perks?.warp || 0, 0, 2))];
 const MAGAZINE_STEP = { 'FOX-1': 1, 'FOX-2': 2, 'FOX-3': 1 };
 /**
  * Hangar upgrades: each level costs base·growth^level (growth 1.6 unless given). max Infinity: no cap.
@@ -81,6 +83,7 @@ export const rebirthTokens = (rebirths = 0) => 2 ** rebirths;
 /** Rebirth-shop perks, bought with tokens: level n costs cost(n) tokens. */
 export const PERKS = [
   { id: 'favor', name: 'Admiral’s favor', what: '+10% $ from every kill per level, on top of Defense contracts. Kept through rebirths. No limit.', max: Infinity, cost: (level) => level + 1 },
+  { id: 'warp', name: 'Time compression', what: 'Level 1 adds 4× speed, level 2 adds 5× (T or the speed button). Kept through rebirths.', max: 2, cost: (level) => [4, 8][level] },
 ];
 export const unlockedUpgrades = (rebirths = 0) => UPGRADES.filter((u) => (u.rebirth || 0) <= rebirths);
 export const nextUnlock = (rebirths = 0) => UPGRADES.filter((u) => (u.rebirth || 0) > rebirths).sort((a, b) => a.rebirth - b.rebirth)[0] || null;
@@ -113,7 +116,7 @@ class TomcatGame {
     this.onFire = onFire;
     this.onVolume = onVolume;
     this.auto = auto;
-    this.speed = SPEEDS.includes(speed) ? speed : 1;
+    this.speed = speedsFor((best || (() => ({})))().perks).includes(speed) ? speed : 1;
     this.onSpeed = onSpeed;
     this.onStart = onStart;
     this.hangarOpen = false; // set by the tab while the hangar is up: holds an automatic restart
@@ -372,9 +375,10 @@ class TomcatGame {
     this.onAuto?.(this.auto);
   }
 
-  /** 1x -> 2x -> 3x -> 1x: the whole sim runs faster (Flight.tick takes more steps). */
+  /** 1x -> 2x -> 3x (-> 4x -> 5x with the perk) -> 1x: the whole sim runs faster (Flight.tick takes more steps). */
   cycleSpeed() {
-    this.speed = SPEEDS[(SPEEDS.indexOf(this.speed) + 1) % SPEEDS.length];
+    const list = speedsFor(this.best().perks);
+    this.speed = list[(list.indexOf(this.speed) + 1) % list.length];
     this.toast(this.speed > 1 ? `FAST FORWARD ${this.speed}×` : 'NORMAL SPEED', 1.4, '#9ecf9f');
     this.onSpeed?.(this.speed);
   }

@@ -13,6 +13,8 @@ import { createPresence } from './core/presence.js';
 import { createSounds } from './core/sounds.js';
 import { createClips } from './core/clips.js';
 import { createMusic } from './core/music.js';
+import { createClock } from './core/clock.js';
+import { createCalendar } from './core/calendar.js';
 
 const EDITORS = {
   doc: () => import('./editors/doc.js').then((m) => m.DocEditor),
@@ -34,6 +36,7 @@ const EDITORS = {
   secure: () => import('./editors/secure.js').then((m) => m.SecureNotesEditor),
   tomcat: () => import('./editors/tomcat.js').then((m) => m.TomcatEditor),
   browser: () => import('./editors/browser.js').then((m) => m.BrowserEditor),
+  music: () => import('./editors/music.js').then((m) => m.MusicEditor),
   swap: () => import('./editors/swap.js').then((m) => m.SwapEditor),
   paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
@@ -173,14 +176,14 @@ const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clip
 // tabs that are a tool (opened with newDocument(mode)), and the new-document kind for an untitled tab of each mode
 const TOOL_KINDS = new Set(['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'browser']);
 const NEW_KIND = { doc: 'doc', text: 'text', code: 'code', sheet: 'sheet', pdf: 'pdf', cut: 'cut', paint: 'paint' };
-const TOP_TOOLS = ['btn-music', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-shortcuts'];
+const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
 // tool modes and the home-card name they're renamed by
 // files the video editor can use
 const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
 const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', swap: 'BoxSwap', cut: 'Video editor', secure: 'Secure notes' };
 // tabs that are tools rather than files
-const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'tomcat', 'browser'];
-const TOOL_LABEL = { 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-shortcuts': 'keys' };
+const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'tomcat', 'browser', 'music'];
+const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
 
@@ -225,6 +228,8 @@ class App {
     this.sounds = createSounds(this);
     this.clips = createClips(this);
     this.music = createMusic(this);
+    this.clock = createClock(this);
+    this.calendar = createCalendar(this);
 
     this.decorateChrome();
     this.renderMenubar();
@@ -244,6 +249,7 @@ class App {
     this.afterStartup();
 
     const params = new URLSearchParams(location.search);
+    if (this.mainWindow && !params.get('adopt')) await this.restorePinned();
     if (params.get('adopt')) { history.replaceState(null, '', '/'); await this.adoptTabs(params.get('adopt')); }
     const opens = params.getAll('open');
     if (opens.length) {
@@ -513,9 +519,14 @@ class App {
     $('#btn-tomcat').append(icon('f14'));
     $('#btn-tomcat').addEventListener('click', () => this.newDocument('tomcat'));
     this.syncTomcat();
+    $('#btn-fullscreen').addEventListener('click', () => this.toggleFullScreen());
+    // leaving full screen some other way (the window manager, focus mode) keeps the button right
+    addEventListener('resize', () => this.syncFullScreen());
+    document.addEventListener('fullscreenchange', () => this.syncFullScreen());
+    this.syncFullScreen();
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
-    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'clock', mediadump: 'image', docdump: 'file-pdf', settings: 'settings' };
+    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'history', calendar: 'calendar', mediadump: 'image', docdump: 'file-pdf', settings: 'settings' };
     for (const b of $$('.rail-btn[data-panel]')) {
       b.append(icon(railIcons[b.dataset.panel], 'lg'));
       b.addEventListener('click', () => this.togglePanel(b.dataset.panel));
@@ -525,6 +536,7 @@ class App {
     web.append(icon('globe', 'lg'));
     web.hidden = !window.bdsShell?.browser;
     web.addEventListener('click', () => this.newDocument('browser'));
+    this.wireLeftRailOrder();
     for (const b of $$('.rrail-tab')) b.addEventListener('click', () => this.toggleRightPanel(b.dataset.rpanel));
     // remember the last place the user was typing, so side panels can insert there
     document.addEventListener('focusin', (e) => {
@@ -578,9 +590,10 @@ class App {
   wireMusicDock() {
     const topZone = () => $('.titlebar-actions');
     const sideZone = () => $('#rightrail');
-    const marker = (ev, el) => this.railMarker(ev, el);
+    const marker = (ev, el) => { this.railMarker(ev, el); this.topMarker(ev, el); };
     const inRail = (el) => ({ home: sideZone, onHome: (ev) => this.railMove(el, ev.clientY), marker });
-    flingable($('#btn-music'), sideZone, (drop) => this.setMusicDock(true, { drop }), { marker });
+    const onTop = (el) => ({ home: topZone, onHome: (ev) => this.topMove(el, ev.clientX), marker });
+    flingable($('#btn-music'), sideZone, (drop) => this.setMusicDock(true, { drop }), onTop($('#btn-music')));
     flingable(this.musicRailTab(), topZone, () => this.setMusicDock(false), inRail(this.musicRailTab()));
     // chars, claude and clip can move to the top bar too (and back): there they open as a drop-down
     for (const tab of $$('.rrail-tab[data-rpanel]')) {
@@ -591,12 +604,13 @@ class App {
       btn.addEventListener('click', () => this.toggleTopPanel(name));
       $('#btn-music').before(btn);
       flingable(tab, topZone, () => this.setPanelDock(name, 'top'), inRail(tab));
-      flingable(btn, sideZone, (drop) => this.setPanelDock(name, 'side', { drop }), { marker });
+      flingable(btn, sideZone, (drop) => this.setPanelDock(name, 'side', { drop }), onTop(btn));
 
       tab.title = `${tab.title} · drag or flick it to the top bar to move it there`;
     }
     for (const [name, where] of Object.entries(this.settings.panelDock || {})) if (where === 'top' && SIDE_PANELS[name]) this.setPanelDock(name, 'top', { save: false });
     this.wireToolDock();
+    this.applyBarOrder($('.titlebar-actions'), 'top');
     this.syncRail();
   }
 
@@ -708,6 +722,8 @@ class App {
       const bar = $('.titlebar-actions');
       const after = TOP_TOOLS.slice(TOP_TOOLS.indexOf(id) + 1).map((x) => $(`#${x}`)).find((x) => x && x.parentElement === bar);
       if (after) bar.insertBefore(el, after); else bar.append(el);
+      if (drop && save) this.topMove(el, drop.clientX); // let go somewhere on the bar: it goes there
+      else this.applyBarOrder(bar, 'top');
     }
     this.syncRail();
     if (save) this.saveSettings({ toolDock: { ...(this.settings.toolDock || {}), [id]: side ? 'side' : 'top' } });
@@ -717,12 +733,141 @@ class App {
     for (const id of TOP_TOOLS.slice(1)) {
       const el = $(`#${id}`);
       if (!el) continue;
-      el.dataset.rlabel = TOOL_LABEL[id];
+      el.dataset.rlabel ||= TOOL_LABEL[id]; // the clock keeps its own (the time)
       // drag or flick it to the other place
       flingable(el, () => (el.closest('#rightrail') ? $('.titlebar-actions') : $('#rightrail')), (drop) => this.setToolDock(id, !el.closest('#rightrail'), { drop }),
-        { home: () => $('#rightrail'), onHome: (ev) => this.railMove(el, ev.clientY), marker: (ev, x) => this.railMarker(ev, x) });
+        {
+          home: () => (el.closest('#rightrail') ? $('#rightrail') : $('.titlebar-actions')),
+          onHome: (ev) => (el.closest('#rightrail') ? this.railMove(el, ev.clientY) : this.topMove(el, ev.clientX)),
+          marker: (ev, x) => { this.railMarker(ev, x); this.topMarker(ev, x); },
+        });
       if ((this.settings.toolDock || {})[id] === 'side') this.setToolDock(id, true, { save: false });
     }
+  }
+
+  // ---- the order of things in the top bar and the left sidebar: drag to rearrange, kept in settings.barOrder
+
+  /** An item's name in settings.barOrder. */
+  barKey(el) {
+    if (el.nodeType !== 1) return null;
+    if (el.id) return el.id;
+    if (el.dataset.tpanel) return `tpanel:${el.dataset.tpanel}`;
+    if (el.dataset.panel) return `panel:${el.dataset.panel}`;
+    if (el.classList.contains('rail-spacer')) return 'spacer';
+    return null;
+  }
+  /** Put a bar's items back in their saved order. Items it doesn't know (new ones) keep their places. */
+  applyBarOrder(bar, name) {
+    const saved = (this.settings.barOrder || {})[name];
+    if (!bar || !saved?.length) return;
+    const rank = new Map(saved.map((k, i) => [k, i]));
+    const kids = [...bar.children].filter((c) => rank.has(this.barKey(c)));
+    const slots = kids.map((c) => { const m = document.createComment(''); c.before(m); return m; });
+    const sorted = [...kids].sort((a, b) => rank.get(this.barKey(a)) - rank.get(this.barKey(b)));
+    slots.forEach((m, i) => m.replaceWith(sorted[i]));
+  }
+  /** Save a bar's order. Items that are away (moved to the other bar) keep their old place in the list. */
+  saveBarOrder(bar, name) {
+    const now = [...bar.children].map((c) => this.barKey(c)).filter(Boolean);
+    const old = (this.settings.barOrder || {})[name] || [];
+    for (let i = 0; i < old.length; i++) {
+      if (now.includes(old[i])) continue;
+      const before = old.slice(0, i).reverse().find((k) => now.includes(k));
+      now.splice(before ? now.indexOf(before) + 1 : 0, 0, old[i]);
+    }
+    this.saveSettings({ barOrder: { ...(this.settings.barOrder || {}), [name]: now } });
+  }
+  /** Where along the bar something let go at x lands: before the first item whose middle is past x. */
+  topSpot(el, x) {
+    const bar = $('.titlebar-actions');
+    return [...bar.children].find((c) => c !== el && !c.hidden && this.barKey(c) && (() => { const r = c.getBoundingClientRect(); return r.width && r.left + r.width / 2 > x; })()) || null;
+  }
+  topMove(el, x) {
+    const bar = $('.titlebar-actions');
+    const at = this.topSpot(el, x);
+    if (at) bar.insertBefore(el, at); else bar.append(el);
+    this.saveBarOrder(bar, 'top');
+  }
+  /** While dragging a top-bar button along the top bar: a line where it would go. */
+  topMarker(ev, el) {
+    const bar = $('.titlebar-actions');
+    let m = this._topMarker;
+    if (!m) { m = this._topMarker = h('div', { class: 'top-marker' }); document.body.append(m); }
+    const r = bar.getBoundingClientRect();
+    if (!ev || !bar.contains(el) || ev.clientX < r.left - 20 || ev.clientX > r.right + 20 || ev.clientY < r.top - 20 || ev.clientY > r.bottom + 20) { m.hidden = true; return; }
+    const at = this.topSpot(el, ev.clientX);
+    const vis = [...bar.children].filter((c) => c !== el && !c.hidden && c.getBoundingClientRect().width);
+    const x = at ? at.getBoundingClientRect().left - 2 : (vis.length ? vis[vis.length - 1].getBoundingClientRect().right + 2 : r.left);
+    m.hidden = false;
+    m.style.left = `${Math.round(x - 1)}px`;
+    m.style.top = `${Math.round(r.top + 4)}px`;
+    m.style.height = `${Math.max(16, Math.round(r.height - 8))}px`;
+  }
+
+  /** Left sidebar: drag a button up or down to move it (across the gap too, to sit at the bottom with Settings). */
+  wireLeftRailOrder() {
+    const rail = $('#rail');
+    if (!rail) return;
+    const usual = [...rail.children].map((c) => this.barKey(c)).filter(Boolean);
+    this.applyBarOrder(rail, 'rail');
+    // the button follows the pointer; the others make room as it passes their middles
+    const startDrag = (b, e) => {
+      const sy = e.clientY;
+      const grab = sy - b.getBoundingClientRect().top;
+      let moving = false;
+      const move = (ev) => {
+        if (!moving) {
+          if (Math.abs(ev.clientY - sy) < 5) return;
+          moving = true;
+          b.classList.add('rail-dragging');
+          rail.classList.add('rail-sorting');
+          document.body.classList.add('rail-grabbing');
+        }
+        ev.preventDefault();
+        const y = Math.max(rail.getBoundingClientRect().top, Math.min(rail.getBoundingClientRect().bottom, ev.clientY));
+        const at = [...rail.children].find((c) => c !== b && !c.hidden && this.barKey(c) && (() => { const r = c.getBoundingClientRect(); return r.top + r.height / 2 > y; })());
+        if (at) { if (b.nextElementSibling !== at) rail.insertBefore(b, at); } else if (rail.lastElementChild !== b) rail.append(b);
+        b.style.transform = '';
+        const natural = b.getBoundingClientRect().top;
+        b.style.transform = `translateY(${Math.round(y - grab - natural)}px)`;
+      };
+      const up = () => {
+        removeEventListener('pointermove', move, true);
+        removeEventListener('pointerup', up, true);
+        removeEventListener('pointercancel', up, true);
+        if (!moving) return;
+        b.classList.remove('rail-dragging');
+        rail.classList.remove('rail-sorting');
+        document.body.classList.remove('rail-grabbing');
+        b.style.transition = 'transform 0.15s';
+        b.style.transform = '';
+        setTimeout(() => { b.style.transition = ''; }, 160);
+        // the click that ends a drag doesn't open the panel
+        const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); };
+        b.addEventListener('click', swallow, { capture: true, once: true });
+        setTimeout(() => b.removeEventListener('click', swallow, { capture: true }), 60);
+        this.saveBarOrder(rail, 'rail');
+      };
+      // on the window, not the button: moving the button in the page would cut it off from the pointer
+      addEventListener('pointermove', move, true);
+      addEventListener('pointerup', up, true);
+      addEventListener('pointercancel', up, true);
+    };
+    for (const b of rail.querySelectorAll('.rail-btn')) {
+      b.addEventListener('pointerdown', (e) => { if (e.button === 0) startDrag(b, e); });
+      b.addEventListener('dragstart', (e) => e.preventDefault());
+      if (!/drag/.test(b.title)) b.title += ' · drag to move it';
+    }
+    rail.addEventListener('contextmenu', (e) => {
+      if (!e.target.closest('.rail-btn') && e.target !== rail && !e.target.classList.contains('rail-spacer')) return;
+      contextMenu(e, [{ label: 'Reset the sidebar’s order', icon: 'refresh', disabled: !(this.settings.barOrder || {}).rail, action: () => {
+        const { rail: _, ...rest } = this.settings.barOrder || {};
+        this.saveSettings({ barOrder: rest });
+        this.settings.barOrder = { ...rest, rail: usual };
+        this.applyBarOrder(rail, 'rail');
+        this.settings.barOrder = rest;
+      } }]);
+    });
   }
 
   /** Move chars / claude / clip between the right sidebar ('side') and the top bar ('top'). */
@@ -945,6 +1090,7 @@ class App {
       { label: 'HTML page', icon: 'globe', action: () => this.newDocument('html') },
       { label: 'Markdown note', icon: 'markdown', action: () => this.newDocument('md') },
       { label: 'Spreadsheet', icon: 'sheet', action: () => this.newDocument('sheet') },
+      { label: 'Image (paint)', icon: 'brush', action: () => this.newDocument('paint') },
       { sep: true },
       { label: 'Blank PDF', icon: 'file-pdf', action: () => this.newDocument('pdf') },
       { label: 'PDF from images…', icon: 'image-plus', action: () => this.newDocument('pdf-images') },
@@ -962,6 +1108,7 @@ class App {
       { label: `${this.toolName('BoxSpaces')} — open folder…`, icon: 'folder-open', action: () => this.openSpace() },
       { label: this.toolName('StoragePeek'), icon: 'layers', action: () => this.newDocument('storage') },
       { label: this.toolName('BoxMail'), icon: 'mail', action: () => this.newDocument('mail') },
+      { label: 'Music player (as a tab)', icon: 'music', action: () => this.newDocument('music') },
       { label: `${this.toolName('BoxTape')} — playlist to MP3s`, icon: 'music', action: () => this.newDocument('tape') },
       { label: `${this.toolName('BoxScribe')} — image to text (OCR)`, icon: 'scan-text', action: () => this.newDocument('scribe') },
       { label: `${this.toolName('BoxDiff')} — compare two files`, icon: 'diff', action: () => this.newDocument('diff') },
@@ -1056,7 +1203,8 @@ class App {
       { label: 'Special characters', icon: 'omega', checked: this.rightPanel === 'chars' || this.topPanel === 'chars', action: () => this.toggleRightPanel('chars') },
       { label: 'Clipboard & snippets', icon: 'copy', checked: this.rightPanel === 'clip' || this.topPanel === 'clip', action: () => this.toggleRightPanel('clip') },
       { label: 'Music player in the sidebar', icon: 'music', checked: this.settings.musicDock === 'side', action: () => this.setMusicDock(this.settings.musicDock !== 'side') },
-      { label: 'Focus mode', icon: 'focus', shortcut: 'F11', checked: document.body.classList.contains('focus-mode'), action: () => this.toggleFocus() },
+      { label: 'Full screen', icon: 'maximize', shortcut: 'F11', checked: this.isFullScreen(), action: () => this.toggleFullScreen() },
+      { label: 'Focus mode', icon: 'focus', shortcut: 'Shift+F11', checked: document.body.classList.contains('focus-mode'), action: () => this.toggleFocus() },
       { sep: true },
       { label: 'Dark theme', icon: 'moon', checked: this.settings.theme === 'dark', action: () => this.applyTheme('dark') },
       { label: 'Light theme', icon: 'sun', checked: this.settings.theme === 'light', action: () => this.applyTheme('light') },
@@ -1094,7 +1242,7 @@ class App {
   }
 
   reopenAsItems(t) {
-    const modes = [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['video', 'Video trimmer'], ['hex', 'Binary (hex) viewer']];
+    const modes = [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['paint', 'Paint (layers, GIF frames)'], ['video', 'Video trimmer'], ['hex', 'Binary (hex) viewer']];
     return modes.map(([m, label]) => ({ label, icon: MODE_ICON[m], checked: t.mode === m, action: () => this.reopenAs(t, m) }));
   }
 
@@ -1113,8 +1261,8 @@ class App {
     const host = clear($('#tabs'));
     for (const t of this.tabs) {
       const el = h('div', {
-        class: `tab ${t === this.active ? 'active' : ''} ${t.dirty ? 'dirty' : ''}`,
-        role: 'tab', title: t.path || t.title,
+        class: `tab ${t === this.active ? 'active' : ''} ${t.dirty ? 'dirty' : ''} ${t.pinned ? 'pinned' : ''}`,
+        role: 'tab', title: `${t.pinned ? '📌 ' : ''}${t.path || t.title}`,
       },
       h('span', { class: 'tab-icon' }, icon(t.mode ? (t.mode === 'code' ? iconForName(t.title) : MODE_ICON[t.mode]) : 'file', 'sm')),
       h('span', { class: 'tab-title' }, t.title),
@@ -1126,9 +1274,11 @@ class App {
         this.dragTab(e, t, el);
       });
       el.addEventListener('contextmenu', (e) => contextMenu(e, [
+        { label: t.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => this.pinTab(t, !t.pinned) },
+        { sep: true },
         { label: 'Close', action: () => this.closeTab(t) },
-        { label: 'Close others', action: () => this.closeAll(t) },
-        { label: 'Close all', action: () => this.closeAll() },
+        { label: 'Close others', action: () => this.closeAll(t, { keepPinned: true }) },
+        { label: 'Close all', action: () => this.closeAll(null, { keepPinned: true }) },
         { sep: true },
         { label: 'Copy path', disabled: !t.path, action: () => navigator.clipboard.writeText(t.path) },
         { label: 'Show in folder', disabled: !t.path, action: () => api.reveal(t.path) },
@@ -1141,14 +1291,12 @@ class App {
   }
 
   // ---- dragging a tab: along the bar to reorder; up, down or out of the window to give it a window of its own
-  //      (shell.js opens it under the pointer); with only one tab, the drag moves the whole window instead.
+  //      (shell.js opens it under the pointer). That works for the last tab too: this window is left on its home page.
 
   dragTab(e, t, el) {
     const shellWin = !!window.bdsShell?.tearOff;
-    const single = this.tabs.length === 1 && shellWin;
     const sx = e.screenX, sy = e.screenY;
-    let mode = null, winPos = null, target = null, ghost = null, out = false, lastX = e.clientX, lastY = e.clientY;
-    if (single) window.bdsShell.winInfo().then((w) => { winPos = w?.pos || null; }).catch(() => {});
+    let mode = null, target = null, ghost = null, out = false, lastX = e.clientX, lastY = e.clientY;
     // renderTabs (activate) rebuilt the bar: follow the pointer on the tab's new element
     el = [...$$('#tabs .tab')].find((x) => x._tab === t) || el;
     try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
@@ -1158,11 +1306,10 @@ class App {
       const dx = ev.screenX - sx, dy = ev.screenY - sy;
       if (!mode) {
         if (Math.hypot(dx, dy) < 6) return;
-        mode = single ? 'window' : 'tab';
+        mode = 'tab';
         el.classList.add('tab-dragging');
         document.body.classList.add('tab-drag');
       }
-      if (mode === 'window') { if (winPos) window.bdsShell.moveWindow(winPos[0], winPos[1], dx, dy); return; }
       const b = $('#tabbar').getBoundingClientRect();
       out = shellWin && (ev.clientY < b.top - 28 || ev.clientY > b.bottom + 44 || ev.clientX < 0 || ev.clientX > innerWidth);
       clearMarks();
@@ -1198,9 +1345,13 @@ class App {
       const from = this.tabs.indexOf(t);
       if (from < 0) return;
       this.tabs.splice(from, 1);
-      const to = target ? this.tabs.indexOf(target) : this.tabs.length;
-      this.tabs.splice(to < 0 ? from : to, 0, t);
+      let to = target ? this.tabs.indexOf(target) : this.tabs.length;
+      if (to < 0) to = from;
+      const pins = this.tabs.filter((x) => x.pinned).length;
+      to = t.pinned ? Math.min(to, pins) : Math.max(to, pins);
+      this.tabs.splice(to, 0, t);
       this.renderTabs();
+      if (t.pinned) this.savePinned();
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -1210,6 +1361,7 @@ class App {
   /** What a tab needs to open again in another window, or why it can't (said to the user). */
   tabHandoff(t) {
     if (t.mode === 'tomcat') return { why: 'That one stays in the main window.' };
+    if (t.mode === 'music') return { why: 'The music player stays in its window.' };
     const item = { title: t.title, path: t.path || null, ext: t.ext, mode: t.mode, lang: t.lang, untitled: !!t.untitled, dirty: !!t.dirty };
     if (TOOL_KINDS.has(t.mode)) return { item };
     if (t.dirty || (t.untitled && !NEW_KIND[t.mode])) {
@@ -1291,6 +1443,7 @@ class App {
       if (choice === 'save' && !(await this.save(tab))) return false;
     }
     const idx = this.tabs.indexOf(tab);
+    if (tab.pinned && !this.quitting) { tab.pinned = false; this.savePinned(); }
     try { tab.editor?.destroy?.(); } catch (e) { console.warn(e); }
     tab.pane.remove();
     this.tabs.splice(idx, 1);
@@ -1303,12 +1456,45 @@ class App {
     return true;
   }
 
-  async closeAll(except) {
+  async closeAll(except, { keepPinned = false } = {}) {
     for (const t of [...this.tabs]) {
-      if (t === except) continue;
+      if (t === except || (keepPinned && t.pinned)) continue;
       if (!(await this.closeTab(t))) return false;
     }
     return true;
+  }
+
+  // ---- pinned tabs: small (icon only), always at the front, and opened again when the app starts
+
+  pinTab(t, on) {
+    if (!t || !!t.pinned === on) return;
+    t.pinned = on;
+    const i = this.tabs.indexOf(t);
+    this.tabs.splice(i, 1);
+    const pins = this.tabs.filter((x) => x.pinned).length;
+    this.tabs.splice(pins, 0, t); // pinning: last of the pinned · unpinning: first after them
+    this.renderTabs();
+    this.savePinned();
+    if (on && !t.path && !TOOL_KINDS.has(t.mode) && !['tomcat', 'music'].includes(t.mode)) toast('Pinned for now — save it to a file and it comes back when the app starts.', { timeout: 3200 });
+  }
+
+  savePinned() {
+    if (!this.mainWindow) return;
+    const list = this.tabs.filter((t) => t.pinned).map((t) => (t.path ? { path: t.path, mode: t.mode } : TOOL_KINDS.has(t.mode) || ['tomcat', 'music'].includes(t.mode) ? { tool: t.mode } : null)).filter(Boolean);
+    this.saveSettings({ pinnedTabs: list });
+  }
+
+  async restorePinned() {
+    const list = Array.isArray(this.settings.pinnedTabs) ? this.settings.pinnedTabs : [];
+    for (const p of list) {
+      try {
+        let t = null;
+        if (p.tool) t = await this.newDocument(p.tool);
+        else if (p.path && (await api.stat(p.path)).exists) t = await this.openPath(p.path, { mode: p.mode });
+        if (t && this.tabs.includes(t)) { t.pinned = true; const i = this.tabs.indexOf(t); this.tabs.splice(i, 1); this.tabs.splice(this.tabs.filter((x) => x.pinned).length, 0, t); }
+      } catch (e) { console.warn('pinned tab', p, e); }
+    }
+    if (list.length) { this.renderTabs(); this.activate(null); }
   }
 
   setDirty(tab, dirty) {
@@ -1484,6 +1670,7 @@ class App {
       secure: { mode: 'secure', ext: '', base: this.toolName('Secure notes') },
       tomcat: { mode: 'tomcat', ext: '', base: 'F-14F Super Tomcat' },
       browser: { mode: 'browser', ext: '', base: 'Browser' },
+      music: { mode: 'music', ext: '', base: 'Music' },
       cut: { mode: 'cut', ext: 'boxcut', base: `Untitled ${this.toolName('Video editor').toLowerCase()}` },
       paint: { mode: 'paint', ext: 'png', base: 'Untitled image' },
     }[kind];
@@ -1493,7 +1680,7 @@ class App {
       images = await pickOpen({ multi: true, title: 'Choose images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
       if (!images) return;
     }
-    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'swap' || kind === 'secure' || kind === 'tomcat' || kind === 'browser') && !opts.another) {
+    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'swap' || kind === 'secure' || kind === 'tomcat' || kind === 'browser' || kind === 'music') && !opts.another) {
       const existing = this.tabs.find((t) => t.mode === spec.mode);
       if (existing) { this.activate(existing); return existing; }
     }
@@ -1579,7 +1766,8 @@ class App {
     if (!tab?.editor) return false;
     const formats = tab.editor.saveFormats();
     if (!formats.length) { toast('This view is read-only.', { type: 'warn' }); return false; }
-    if (!tab.path || !formats.some((f) => f.ext === tab.ext)) return this.saveAs(tab);
+    // an image whose file type was changed goes to a new name rather than writing GIF bytes into a .png
+    if (!tab.path || !formats.some((f) => f.ext === tab.ext) || (tab.editor.out && extOf(tab.path) !== tab.ext)) return this.saveAs(tab);
     return this.writeTab(tab, tab.path, tab.ext);
   }
 
@@ -1605,7 +1793,8 @@ class App {
       if (tab.mode === 'text' || tab.mode === 'code') { /* any extension is fine for plain text */ }
       else { path = `${path}.${chosen.ext}`; ext = chosen.ext; }
     }
-    if (tab.editor.lossyFormat(ext) && !(await confirmDialog('Some formatting may be lost', `Saving as .${ext} keeps the text but drops formatting this format can't store. Continue?`, { okLabel: 'Save anyway' }))) return false;
+    const lossy = tab.editor.lossyFormat(ext) && (tab.editor.lossyNote?.(ext) || null);
+    if (tab.editor.lossyFormat(ext) && !(await confirmDialog(lossy ? 'Not everything fits in this file' : 'Some formatting may be lost', lossy || `Saving as .${ext} keeps the text but drops formatting this format can't store. Continue?`, { okLabel: 'Save anyway' }))) return false;
     const ok = await this.writeTab(tab, path, ext, { fresh: true });
     if (ok) {
       this.setTabMeta(tab, { path, title: basename(path), ext });
@@ -1916,6 +2105,7 @@ class App {
       ['layers', 'StoragePeek', 'what’s eating your drives', () => this.newDocument('storage')],
       ['mail', 'BoxMail', 'gmail + the dumps + claude', () => this.newDocument('mail')],
       ['music', 'BoxTape', 'youtube playlist → mp3s', () => this.newDocument('tape')],
+      ['play', 'Music', 'the audio dump · playlists · big player', () => this.newDocument('music')],
       ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
       ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
       ['swap', 'BoxSwap', 'profiles of files · hot-swap a folder', () => this.newDocument('swap')],
@@ -2034,6 +2224,7 @@ class App {
     else if (name === 'mediadump') this.renderDumpPanel('media');
     else if (name === 'docdump') this.renderDumpPanel('doc');
     else if (name === 'settings') this.renderSettings();
+    else if (name === 'calendar') this.calendar.render(this.sidepanel);
     else if (name === 'spaces') this.ensureSpaces().then((s) => s.render(this.sidepanel));
     this.active?.editor?.onShow?.();
   }
@@ -2117,7 +2308,7 @@ class App {
     }
     return [
       { label: 'Open', icon: 'file', action: () => this.openPath(e.path) },
-      { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['video', 'Video trimmer'], ['hex', 'Hex viewer']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.openPath(e.path, { mode: m }) })) },
+      { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['paint', 'Paint (layers, GIF frames)'], ['video', 'Video trimmer'], ['hex', 'Hex viewer']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.openPath(e.path, { mode: m }) })) },
       ...this.videoEditorMenu([e.path]),
       { sep: true },
       { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
@@ -2968,6 +3159,9 @@ class App {
     const timeCb = h('input', { type: 'checkbox' });
     timeCb.checked = s.discordShowTime !== false;
     timeCb.addEventListener('change', () => set({ discordShowTime: timeCb.checked }));
+    const songCb = h('input', { type: 'checkbox' });
+    songCb.checked = !!s.discordSong;
+    songCb.addEventListener('change', () => set({ discordSong: songCb.checked }));
 
     // preview card styled after Discord's profile activity
     const pvDetails = h('div', { class: 'dp-line strong' });
@@ -3024,8 +3218,9 @@ class App {
         exportLogo),
       h('span', { class: 'dim' }, 'Mode'), modeSeg, autoBox, customBox,
       h('label', { class: 'check' }, timeCb, 'Show elapsed time'),
+      h('label', { class: 'check', title: 'While the music player is playing, the second line shows the song’s name' }, songCb, 'Show the song I’m listening to'),
       preview, statusEl,
-      h('span', { class: 'faint', style: { fontSize: '11px' } }, 'File names and folders are never sent — only what you type here or the kind of file.'));
+      h('span', { class: 'faint', style: { fontSize: '11px' } }, 'File names and folders are never sent — only what you type here, the kind of file, and (if you turn it on) the song’s name.'));
     body.hidden = !enabled.checked;
 
     if (s.discordEnabled) api.presenceStatus().then((r) => renderStatus(r.status)).catch(() => {});
@@ -3081,6 +3276,14 @@ class App {
       if (ed?.handlesKey?.(e)) return;
       const stop = () => { e.preventDefault(); e.stopPropagation(); };
       if (ctrl && e.altKey && k === 'l') { stop(); this.lockApp('manual'); return; }
+      // Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) in every editor: a text box being typed in keeps its own undo;
+      // otherwise (a canvas, a toolbar button, the page) it's the editor's undo / redo
+      if (ctrl && !e.altKey && (k === 'z' || k === 'y') && ed && !e.defaultPrevented) {
+        const t = e.target;
+        const typing = t?.isContentEditable || t?.tagName === 'TEXTAREA' || t?.tagName === 'SELECT'
+          || (t?.tagName === 'INPUT' && !/^(checkbox|radio|range|color|button|submit|reset|file|image)$/.test(t.type));
+        if (!typing) { stop(); if (k === 'y' || e.shiftKey) ed.redo?.(); else ed.undo?.(); return; }
+      }
       if (ctrl && e.shiftKey && k === 'p') { stop(); this.commandPalette('commands'); return; }
       if (ctrl && !e.shiftKey && !e.altKey && k === 'e') { stop(); this.commandPalette('files'); return; }
       if (ctrl && !e.shiftKey && k === 's') { stop(); this.save(); }
@@ -3095,7 +3298,8 @@ class App {
       else if (ctrl && k === '-' && ed) { stop(); ed.zoom(-1); }
       else if (ctrl && k === '0' && ed) { stop(); ed.zoom(0); }
       else if (e.key === 'F1') { stop(); this.showShortcuts(); }
-      else if (e.key === 'F11') { stop(); this.toggleFocus(); }
+      else if (e.key === 'F11' && e.shiftKey) { stop(); this.toggleFocus(); }
+      else if (e.key === 'F11') { stop(); this.toggleFullScreen(); }
       else if (ctrl && e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
         stop();
         if (!this.tabs.length) return;
@@ -3155,12 +3359,40 @@ class App {
 
   toggleFocus() {
     const on = document.body.classList.toggle('focus-mode');
-    window.bdsShell?.setFullScreen(on).catch(() => {});
+    this.setFullScreen(on);
     this.active?.editor?.onShow?.();
   }
 
+  /** The whole app window full screen (bars and all). */
+  isFullScreen() {
+    if (document.fullscreenElement) return true;
+    return !!window.bdsShell && Math.abs(innerWidth - screen.width) < 2 && Math.abs(innerHeight - screen.height) < 2;
+  }
+  setFullScreen(on) {
+    if (window.bdsShell) window.bdsShell.setFullScreen(on).catch(() => {});
+    else if (on) document.documentElement.requestFullscreen?.().catch(() => {});
+    else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    this._fullWant = on;
+    setTimeout(() => this.syncFullScreen(), 400);
+  }
+  toggleFullScreen() {
+    if (document.body.classList.contains('focus-mode')) { this.toggleFocus(); return; } // F11 leaves focus mode too
+    this.setFullScreen(!this.isFullScreen());
+  }
+  syncFullScreen() {
+    const b = $('#btn-fullscreen');
+    if (!b) return;
+    const on = this.isFullScreen();
+    b.classList.toggle('on', on);
+    document.documentElement.classList.toggle('app-full', on); // no window buttons to leave room for
+    b.title = `${on ? 'Leave full screen' : 'Full screen'} (F11) · drag or flick it to the right sidebar`;
+    const want = on ? 'fit-page' : 'maximize';
+    if (b.dataset.ic !== want) { b.dataset.ic = want; const old = b.querySelector('svg'); const ni = icon(want); if (old) old.replaceWith(ni); else b.prepend(ni); }
+  }
+
   async quit() {
-    if (!(await this.closeAll())) return;
+    this.quitting = true; // pinned tabs stay pinned for next time
+    if (!(await this.closeAll())) { this.quitting = false; return; }
     await api.quit().catch(() => {});
     document.body.innerHTML = '<div class="loading-pane">Box-DocSpitter has stopped. You can close this window.</div>';
     setTimeout(() => window.close(), 300);
@@ -3170,7 +3402,7 @@ class App {
     const rows = [
       ['New document', 'Alt+N'], ['Open file', 'Ctrl+O'], ['Save', 'Ctrl+S'], ['Save as', 'Ctrl+Shift+S'], ['Close tab', 'Alt+W'],
       ['Next / previous tab', 'Ctrl+Alt+→ / ←'], ['Jump to tab 1–9', 'Alt+1…9'], ['Print', 'Ctrl+P'], ['Find', 'Ctrl+F'], ['Find & replace', 'Ctrl+H'],
-      ['Zoom in / out / reset', 'Ctrl+= / - / 0'], ['Focus mode', 'F11'], ['Shortcuts', 'F1'], ['Lock the app (with a PIN set)', 'Ctrl+Alt+L'],
+      ['Zoom in / out / reset', 'Ctrl+= / - / 0'], ['Full screen', 'F11'], ['Focus mode (full screen, no bars)', 'Shift+F11'], ['Shortcuts', 'F1'], ['Lock the app (with a PIN set)', 'Ctrl+Alt+L'],
     ];
     const hoverRows = [
       ['Rename what’s under the mouse', 'F2'], ['Put the original name back', 'Ctrl+F2'], ['Remove what’s under the mouse', 'Del'],

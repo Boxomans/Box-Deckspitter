@@ -5,6 +5,7 @@ import { h, clear, clamp, vendor, stripExt, extOf, blobToDataURL } from '../core
 import { icon } from '../core/icons.js';
 import { tbButton, tbSep, tbSelect, showMenu, modal, toast, errorToast } from '../core/ui.js';
 import { api } from '../core/api.js';
+import { OUT_FORMATS, outKind, defaultOut, formatSelect, warnFormat, imageSettings, encodeCanvas, copyCanvas, readMeta, stripMeta } from './image-out.js';
 
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', svg: 'image/svg+xml', apng: 'image/png' };
 
@@ -15,6 +16,9 @@ export class ImageEditor extends BaseEditor {
     const ext = this.tab.ext || 'png';
     this.mime = MIME[ext] || 'image/png';
     this.origBytes = bytes;
+    this.out = defaultOut(this.app, outKind(ext) ? ext : 'png');
+    this.meta = bytes?.length ? readMeta(bytes) : null;
+    this.fresh = false;
     this.canvas = h('canvas', { class: 'img-canvas' });
     this.stage = h('div', { class: 'img-stage' }, this.canvas);
     this.cropBox = h('div', { class: 'img-crop', hidden: true }, ...['nw', 'ne', 'sw', 'se'].map((k) => h('div', { class: 'img-crop-h ' + k, dataset: { h: k } })));
@@ -56,7 +60,7 @@ export class ImageEditor extends BaseEditor {
     }
     this.canvas.style.width = W * this.scale + 'px';
     this.canvas.style.height = H * this.scale + 'px';
-    this.info.textContent = `${W} × ${H}px  ·  ${Math.round(this.scale * 100)}%${this.animated ? '  ·  animated GIF: edits keep the first frame' : ''}`;
+    this.info.textContent = `${W} × ${H}px  ·  ${Math.round(this.scale * 100)}%${this.animated ? '  ·  animated GIF: edits keep the first frame (Frames opens it in Paint)' : ''}`;
     if (!this.cropBox.hidden) this.drawCrop();
     this.refreshStatus();
   }
@@ -241,6 +245,10 @@ export class ImageEditor extends BaseEditor {
       tbButton('fit-page', 'Fit', () => { this.view = 'fit'; this.layout(); }),
       tbButton('zoom-in', 'Zoom in', () => this.zoom(1)),
       tbSep(),
+      (this.fmtSel = formatSelect(this)),
+      tbButton('settings', 'Image settings — file type, quality, hidden info', () => this.openSettings()),
+      this.animated && this.tab.path ? tbButton('pages', 'Edit every frame in Paint', () => this.app.reopenAs(this.tab, 'paint'), { text: 'Frames' }) : null,
+      tbSep(),
       tbButton('image', 'Send to media dump', () => this.toDump(), { text: 'To dump' }),
       this.tab.ext === 'svg' && this.tab.path ? tbButton('code', 'Edit SVG source', () => this.app.reopenAs(this.tab, 'code'), { text: 'Source' }) : null,
     );
@@ -279,12 +287,13 @@ export class ImageEditor extends BaseEditor {
       tools: [
         { label: 'Copy image to clipboard', icon: 'copy', action: async () => { const b = await new Promise((r) => this.canvas.toBlob(r, 'image/png')); await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Copied', { type: 'ok' }); } },
         { label: 'Send to media dump', icon: 'image', action: () => this.toDump() },
+        { label: 'Image settings…', icon: 'settings', action: () => this.openSettings() },
       ],
     };
   }
 
   saveFormats() {
-    const fm = [{ ext: 'png', name: 'PNG image' }, { ext: 'jpg', name: 'JPEG image' }, { ext: 'webp', name: 'WebP image' }];
+    const fm = OUT_FORMATS.map((f) => ({ ext: f.ext, name: f.name }));
     if (['jpeg', 'jfif'].includes(this.tab.ext)) fm.unshift({ ext: this.tab.ext, name: 'JPEG image' });
     return fm;
   }
@@ -305,22 +314,44 @@ export class ImageEditor extends BaseEditor {
   }
 
   async serialize(ext) {
-    // untouched files are written back byte-for-byte
-    if (!this.history.length && this.origBytes && ext === this.tab.ext) return this.origBytes;
-    const type = { jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg', webp: 'image/webp' }[ext] || 'image/png';
-    let canvas = this.canvas;
-    if (type === 'image/jpeg') {
-      canvas = h('canvas', { width: this.canvas.width, height: this.canvas.height });
-      const c = canvas.getContext('2d');
-      c.fillStyle = '#fff';
-      c.fillRect(0, 0, canvas.width, canvas.height);
-      c.drawImage(this.canvas, 0, 0);
+    // untouched files are written back byte-for-byte (minus the hidden info, when that's asked for: no quality lost)
+    if (!this.history.length && this.origBytes && ext === this.tab.ext) {
+      if (!this.out.strip) return this.origBytes;
+      const clean = stripMeta(this.origBytes);
+      if (clean) return clean;
     }
-    const blob = await new Promise((r) => canvas.toBlob(r, type, 0.92));
-    return new Uint8Array(await blob.arrayBuffer());
+    return encodeCanvas(this.canvas, outKind(ext) || 'png', this.out);
   }
 
-  afterSave(path, ext) { this.history = []; this.origBytes = null; void ext; }
+  lossyFormat(ext) { return !!this.animated && (this.history.length > 0 || ext !== this.tab.ext); }
+  lossyNote() { return 'Only the first frame of the animation is saved. To keep every frame, open it with Frames (Paint) and save as GIF.'; }
+
+  afterSave(path, ext) {
+    this.history = []; this.origBytes = null;
+    if (outKind(ext)) { this.out.ext = ext; if (this.fmtSel) this.fmtSel.value = outKind(ext); }
+  }
+
+  /** The type it'll be saved as. Changing it from the file's own type makes the next Save ask where (a new name). */
+  setOutExt(ext, { quiet = false } = {}) {
+    if (outKind(this.out.ext) === ext) ext = this.out.ext;
+    this.out.ext = ext;
+    if (this.fmtSel) this.fmtSel.value = outKind(ext) || 'png';
+    if (!quiet) warnFormat(ext, this.canvas);
+    if (this.tab.ext !== ext) { this.app.setTabMeta(this.tab, { ext }); this.markDirty(); }
+  }
+
+  openSettings() {
+    return imageSettings({
+      app: this.app, tab: this.tab, out: this.out, meta: this.meta, fresh: false,
+      setOutExt: (e, o) => this.setOutExt(e, o),
+      outCanvas: () => this.canvas,
+      frameCount: () => 1,
+      size: () => ({ W: this.canvas.width, H: this.canvas.height }),
+      resize: () => this.resizeDialog(),
+      toDump: () => this.toDump(), copyImage: () => copyCanvas(this.canvas),
+      serialize: (e) => this.serialize(e), markDirty: () => this.markDirty(),
+    });
+  }
   print() {
     const w = window.open('', '_blank');
     if (!w) return;

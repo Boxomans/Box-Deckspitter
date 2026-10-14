@@ -27,6 +27,7 @@ const LINES = {
   tape: { plain: ['Making a mixtape'], silly: ['making a mixtape', 'turning a playlist into mp3s', 'curating the audio dump'] },
   storage: { plain: ['Checking disk space'], silly: ['finding out where the space went', 'staring at a treemap', 'judging their downloads folder'] },
   swap: { plain: ['Swapping files'], silly: ['shuffling file profiles', 'hot-swapping a folder', 'swapping loadouts'] },
+  music: { plain: ['Listening to music'], silly: ['vibing', 'DJing for an audience of one', 'shuffling the audio dump', 'skipping to the good part'] },
   browser: { plain: ['Browsing the web'], silly: ['surfing the information superhighway', 'reading the whole internet', 'opening one more tab'] },
   tomcat: { plain: ['Flying an F-14'], silly: ['flying a Tomcat at FL300', 'calling FOX-3', 'splashing bandits', 'dodging a PL-15', 'going Mach 1 between documents'] },
   // never anything about what's in them
@@ -64,9 +65,10 @@ function fill(text, tab, cat, tabCount) {
 }
 
 /**
- * settings: { discordMode: 'auto' | 'custom', discordStyle: 'silly' | 'plain', discordDetails, discordState, discordShowTime }
+ * settings: { discordMode: 'auto' | 'custom', discordStyle: 'silly' | 'plain', discordDetails, discordState, discordShowTime, discordSong }
+ * song: the music player's current song (only used when discordSong is on), shown as the second line.
  */
-export function presenceActivity(tab, tabCount, s, since) {
+export function presenceActivity(tab, tabCount, s, since, song = null) {
   const cat = category(tab);
   const showTime = s.discordShowTime !== false;
   let details;
@@ -79,6 +81,7 @@ export function presenceActivity(tab, tabCount, s, since) {
     details = fill(set[hash((tab?.id || 'home') + cat) % set.length], tab, cat, tabCount);
     state = tabCount ? `${tabCount} tab${tabCount === 1 ? '' : 's'} open` : 'no tabs open';
   }
+  if (s.discordSong && song) state = `♪ ${song}`;
   return {
     details: details.slice(0, 120) || undefined,
     state: state.slice(0, 120) || undefined,
@@ -100,7 +103,7 @@ export function createPresence(app) {
       const r = await api.presence({
         enabled: !!s.discordEnabled,
         clientId: s.discordClientId || '',
-        activity: s.discordEnabled ? presenceActivity(tab, app.tabs.length, s, since) : null,
+        activity: s.discordEnabled ? presenceActivity(tab, app.tabs.length, s, since, app.music?.nowPlaying) : null,
       });
       app.presenceStatus = r.status;
       app.onPresenceStatus?.(r.status);
@@ -109,6 +112,6 @@ export function createPresence(app) {
   return {
     update: push,
     /** What would be shown right now (for the live preview in settings). */
-    preview: () => presenceActivity(app.active, app.tabs.length, app.settings, since),
+    preview: () => presenceActivity(app.active, app.tabs.length, app.settings, since, app.music?.nowPlaying || (app.settings.discordSong ? 'Song name' : null)),
   };
 }

@@ -87,6 +87,19 @@ export class KlepEditor extends BaseEditor {
 
   // =================================================================== scanning
 
+  /** From the browser's right-click menu: one video (auto: yt-dlp for video sites) or every video the page links/embeds. */
+  grab(url, { all = false } = {}) {
+    this.input.value = url;
+    this.input.dispatchEvent(new Event('input'));
+    const pl = /[?&]list=/.test(url);
+    this.modeSel.value = all && !pl ? 'page' : 'auto'; // a playlist goes through yt-dlp as a whole
+    if (pl) {
+      this.playlistMode = all ? 'on' : 'off';
+      for (const b of this.playlistSeg.children) b.classList.toggle('on', b.dataset.v === this.playlistMode);
+    }
+    return this.scan();
+  }
+
   async scan() {
     const url = this.input.value.trim();
     if (!url) { this.input.focus(); return; }
