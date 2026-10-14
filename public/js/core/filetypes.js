@@ -96,12 +96,12 @@ export function extForLang(lang) {
 
 export const MODE_ICON = {
   doc: 'file-doc', pdf: 'file-pdf', text: 'file-text', code: 'file-code', sheet: 'sheet', image: 'image', hex: 'binary',
-  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot', secure: 'lock', tomcat: 'f14', browser: 'globe', swap: 'swap', music: 'music',
+  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot', secure: 'lock', tomcat: 'f14', browser: 'globe', swap: 'swap', music: 'music', tunnel: 'tunnel',
 };
 
 export const MODE_LABEL = { cut: 'Video editor', secure: 'Secure notes', tomcat: 'F-14F Super Tomcat', browser: 'Browser',
   doc: 'Document', pdf: 'PDF', text: 'Text', code: 'Code', sheet: 'Sheet', image: 'Image', hex: 'Binary',
-  video: 'Video', form: 'Form', klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', music: 'Music', scribe: 'BoxScribe', paint: 'BoxPaint', diff: 'BoxDiff', swap: 'BoxSwap',
+  video: 'Video', form: 'Form', klep: 'BoxKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', music: 'Music', scribe: 'BoxScribe', paint: 'BoxPaint', diff: 'BoxDiff', swap: 'BoxSwap', tunnel: 'BoxTunnel',
 };
 
 export function iconForName(name, isDir) {

@@ -235,6 +235,13 @@ function hashPath(p) {
   return crypto.createHash('sha1').update(p.toLowerCase()).digest('hex').slice(0, 16);
 }
 
+/** BoxKlep's default download folder (the old Downloads\BoxVidKlep, when there is one, so downloads stay together). */
+function klepFolder() {
+  const base = knownFolder('downloads') || os.homedir();
+  const old = path.join(base, 'BoxVidKlep');
+  return fs.existsSync(old) ? old : path.join(base, 'BoxKlep');
+}
+
 function knownFolder(name) {
   const home = os.homedir();
   const candidates = {
@@ -660,7 +667,7 @@ function sanitizeActivity(a) {
 const presence = new DiscordPresence();
 
 // ---------------------------------------------------------------------------
-// Media: streaming, external tools (yt-dlp / ffmpeg), BoxVidKlep scanning & download jobs
+// Media: streaming, external tools (yt-dlp / ffmpeg), BoxKlep scanning & download jobs
 // ---------------------------------------------------------------------------
 
 const { Readable } = require('stream');
@@ -919,7 +926,7 @@ function downloadYtdlp(job, url, dir, selector) {
   });
 }
 
-// ---- audio grabbing: links → MP3s in the audio dump (BoxVidKlep's "MP3 → audio dump" and BoxTape)
+// ---- audio grabbing: links → MP3s in the audio dump (BoxKlep's "MP3 → audio dump" and BoxTape)
 
 /** One link (YouTube, SoundCloud, any yt-dlp site) → MP3 with title/artist/cover art. Resolves to the file path. */
 function ytdlpToMp3(track, url, dir, onProgress, onChild, outName = null) {
@@ -1916,7 +1923,7 @@ const routes = {
 
   'GET /api/tools': async () => {
     const t = tools();
-    return { ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: path.join(knownFolder('downloads') || os.homedir(), 'BoxVidKlep') };
+    return { ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: klepFolder() };
   },
 
   'POST /api/klep/scan': async (req) => {
@@ -1991,7 +1998,7 @@ const routes = {
   'POST /api/klep/download': async (req) => {
     const { url, type, selector, dir, name, referer } = await readJSONBody(req);
     checkUrl(url);
-    const target = requirePath(dir || path.join(knownFolder('downloads') || os.homedir(), 'BoxVidKlep'));
+    const target = requirePath(dir || klepFolder());
     await fsp.mkdir(target, { recursive: true });
     const job = newJob(name || url);
     if (type === 'ytdlp') return startJob(job, () => downloadYtdlp(job, url, target, selector));

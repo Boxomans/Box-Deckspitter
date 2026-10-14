@@ -71,7 +71,7 @@ The repo holds only the source (about 2 MB). The libraries and the Electron runt
 2. Double-click `Box-DocSpitter.exe`. On first run it does `npm install` (a few hundred MB), then opens the
    app. If Node.js 18+ isn't installed, it asks first and installs it with `winget install OpenJS.NodeJS.LTS`
    (or points you to nodejs.org if winget isn't there). Or install Node.js and run `npm install` yourself.
-3. Optional: `winget install yt-dlp` and `winget install Gyan.FFmpeg` for BoxVidKlep, BoxTape and faster video
+3. Optional: `winget install yt-dlp` and `winget install Gyan.FFmpeg` for BoxKlep, BoxTape and faster video
    exports.
 
 Your personal data (`data/`) and the dumps are never part of the repo. They're listed in `.gitignore`.
@@ -148,9 +148,9 @@ next to the media list: drag between the dump, the media list and the timeline, 
 keep its file, and export straight into it. Exports MP4 through the PC's ffmpeg; formats the browser can't
 play get an editing copy automatically.
 
-**BoxVidKlep** Paste a web page or video link and it finds the videos on that page. You pick which
+**BoxKlep** Paste a web page or video link and it finds the videos on that page. You pick which
 ones to download, rename them, or send them straight to the trimmer. Direct video files work out of
-the box. YouTube and most social sites need **yt-dlp** (`winget install yt-dlp`), which BoxVidKlep uses
+the box. YouTube and most social sites need **yt-dlp** (`winget install yt-dlp`), which BoxKlep uses
 automatically once it's installed. DRM-protected streams are skipped. Only download what you have the
 right to keep.
 
@@ -179,7 +179,7 @@ Emails display with no scripts and remote images (tracking pixels) blocked until
 
 **BoxTape** Paste a YouTube playlist (or an album, or a single video) and pick the tracks. They're saved as
 MP3s, with title, artist and cover art, into `audio-dump/` for the ♪ player, 1–6 at a time with per-track
-progress. A track that fails is skipped and listed. BoxVidKlep also has an **MP3** button on every video,
+progress. A track that fails is skipped and listed. BoxKlep also has an **MP3** button on every video,
 and a bulk **→ MP3** button, for the same thing. Needs yt-dlp and ffmpeg. Only download music you have the
 right to keep.
 - **Spotify links** (playlist, album or song) work too. Spotify's audio is copy-protected, so BoxTape reads

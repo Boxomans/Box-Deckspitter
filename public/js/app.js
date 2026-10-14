@@ -38,6 +38,7 @@ const EDITORS = {
   browser: () => import('./editors/browser.js').then((m) => m.BrowserEditor),
   music: () => import('./editors/music.js').then((m) => m.MusicEditor),
   swap: () => import('./editors/swap.js').then((m) => m.SwapEditor),
+  tunnel: () => import('./editors/tunnel.js').then((m) => m.TunnelEditor),
   paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
 
@@ -167,6 +168,7 @@ function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
   });
 }
 
+const DISCORD_INVITE = 'https://discord.gg/3qxNWFErAV';
 const THEME_NEXT = { dark: 'light', light: 'pbj', pbj: 'dark' };
 const THEME_NAME = { dark: 'Dark', light: 'Light', pbj: 'PB&J' };
 const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) => [b, a]));
@@ -174,15 +176,15 @@ const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) =>
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
 // tabs that are a tool (opened with newDocument(mode)), and the new-document kind for an untitled tab of each mode
-const TOOL_KINDS = new Set(['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'browser']);
+const TOOL_KINDS = new Set(['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'browser', 'tunnel']);
 const NEW_KIND = { doc: 'doc', text: 'text', code: 'code', sheet: 'sheet', pdf: 'pdf', cut: 'cut', paint: 'paint' };
 const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
 // tool modes and the home-card name they're renamed by
 // files the video editor can use
 const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
-const TOOL_OF_MODE = { klep: 'BoxVidKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', swap: 'BoxSwap', cut: 'Video editor', secure: 'Secure notes' };
+const TOOL_OF_MODE = { klep: 'BoxKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', swap: 'BoxSwap', tunnel: 'BoxTunnel', cut: 'Video editor', secure: 'Secure notes' };
 // tabs that are tools rather than files
-const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'tomcat', 'browser', 'music'];
+const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'tomcat', 'browser', 'music', 'tunnel'];
 const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
@@ -213,6 +215,7 @@ class App {
       const [info, settings] = await Promise.all([api.info(), api.settings()]);
       this.info = info;
       this.settings = { ...DEFAULT_SETTINGS, ...settings };
+      this.renameToolKey('BoxVidKlep', 'BoxKlep');
     } catch (e) {
       document.body.append(h('div', { class: 'loading-pane' }, 'Could not reach the local server. Restart Box-DocSpitter.'));
       throw e;
@@ -250,6 +253,8 @@ class App {
 
     const params = new URLSearchParams(location.search);
     if (this.mainWindow && !params.get('adopt')) await this.restorePinned();
+    // BoxTunnel's lines can start with the app (main window only, so torn-off windows don't double them)
+    if (this.mainWindow && this.settings.tunnel?.autostart) import('./core/tunnel.js').then((m) => m.tunnel(this).start()).catch((e) => console.warn('tunnel', e));
     if (params.get('adopt')) { history.replaceState(null, '', '/'); await this.adoptTabs(params.get('adopt')); }
     const opens = params.getAll('open');
     if (opens.length) {
@@ -1104,7 +1109,7 @@ class App {
       { label: `${this.toolName('Fill a form')}…`, icon: 'form-fill', action: () => this.fillForm() },
       { label: this.toolName('Video editor'), icon: 'video', action: () => this.newDocument('cut') },
       { label: 'Quick trim a video…', icon: 'scissors', action: () => this.openVideoTrimmer() },
-      { label: this.toolName('BoxVidKlep'), icon: 'magnet', action: () => this.newDocument('klep') },
+      { label: this.toolName('BoxKlep'), icon: 'magnet', action: () => this.newDocument('klep') },
       { label: `${this.toolName('BoxSpaces')} — open folder…`, icon: 'folder-open', action: () => this.openSpace() },
       { label: this.toolName('StoragePeek'), icon: 'layers', action: () => this.newDocument('storage') },
       { label: this.toolName('BoxMail'), icon: 'mail', action: () => this.newDocument('mail') },
@@ -1113,6 +1118,7 @@ class App {
       { label: `${this.toolName('BoxScribe')} — image to text (OCR)`, icon: 'scan-text', action: () => this.newDocument('scribe') },
       { label: `${this.toolName('BoxDiff')} — compare two files`, icon: 'diff', action: () => this.newDocument('diff') },
       { label: `${this.toolName('BoxSwap')} — swap sets of files in a folder`, icon: 'swap', action: () => this.newDocument('swap') },
+      { label: `${this.toolName('BoxTunnel')} — audio lines: any input to any output`, icon: 'tunnel', action: () => this.newDocument('tunnel') },
       { label: `${this.toolName('Secure notes')} — passwords & private notes`, icon: 'lock', action: () => this.newDocument('secure') },
       { label: 'Music player', icon: 'music', action: () => this.music.open() },
       // web pages need the desktop app's <webview>s
@@ -1230,6 +1236,8 @@ class App {
       { label: 'Keyboard shortcuts', icon: 'keyboard', shortcut: 'F1', action: () => this.showShortcuts() },
       { label: 'README', icon: 'markdown', action: () => this.showReadme() },
       { label: 'About Box-DocSpitter', icon: 'info', action: () => this.showAbout() },
+      { sep: true },
+      { label: 'Join the Discord', icon: 'external', action: () => window.open(DISCORD_INVITE, '_blank', 'noopener') },
     ];
   }
 
@@ -1660,13 +1668,14 @@ class App {
       pdf: { mode: 'pdf', ext: 'pdf', base: 'Untitled' },
       'pdf-images': { mode: 'pdf', ext: 'pdf', base: 'Images' },
       'form-images': { mode: 'form', ext: 'pdf', base: 'Form' },
-      klep: { mode: 'klep', ext: '', base: this.toolName('BoxVidKlep') },
+      klep: { mode: 'klep', ext: '', base: this.toolName('BoxKlep') },
       storage: { mode: 'storage', ext: '', base: this.toolName('StoragePeek') },
       mail: { mode: 'mail', ext: '', base: this.toolName('BoxMail') },
       tape: { mode: 'tape', ext: '', base: this.toolName('BoxTape') },
       scribe: { mode: 'scribe', ext: '', base: this.toolName('BoxScribe') },
       diff: { mode: 'diff', ext: '', base: this.toolName('BoxDiff') },
       swap: { mode: 'swap', ext: '', base: this.toolName('BoxSwap') },
+      tunnel: { mode: 'tunnel', ext: '', base: this.toolName('BoxTunnel') },
       secure: { mode: 'secure', ext: '', base: this.toolName('Secure notes') },
       tomcat: { mode: 'tomcat', ext: '', base: 'F-14F Super Tomcat' },
       browser: { mode: 'browser', ext: '', base: 'Browser' },
@@ -1680,7 +1689,7 @@ class App {
       images = await pickOpen({ multi: true, title: 'Choose images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
       if (!images) return;
     }
-    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'swap' || kind === 'secure' || kind === 'tomcat' || kind === 'browser' || kind === 'music') && !opts.another) {
+    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'swap' || kind === 'secure' || kind === 'tomcat' || kind === 'browser' || kind === 'music' || kind === 'tunnel') && !opts.another) {
       const existing = this.tabs.find((t) => t.mode === spec.mode);
       if (existing) { this.activate(existing); return existing; }
     }
@@ -1989,6 +1998,16 @@ class App {
   }
 
   /** A tool's name as you've named it (F2 on its home card), e.g. toolName('BoxTape'). */
+  /** A tool's own name changed: carry over what was saved under the old one (a custom name, the card order). */
+  renameToolKey(from, to) {
+    const s = this.settings, patch = {};
+    if (s.cardNames && from in s.cardNames) { const n = { ...s.cardNames }; if (!(to in n)) n[to] = n[from]; delete n[from]; patch.cardNames = n; }
+    if (s.cardOrder && Object.values(s.cardOrder).some((l) => Array.isArray(l) && l.includes(from))) {
+      patch.cardOrder = Object.fromEntries(Object.entries(s.cardOrder).map(([g, l]) => [g, Array.isArray(l) ? l.map((k) => (k === from ? to : k)) : l]));
+    }
+    if (Object.keys(patch).length) this.saveSettings(patch);
+  }
+
   toolName(key) { return (this.settings.cardNames || {})[key] || key; }
 
   /** A span showing a tool's name that follows renames while it's on screen (tool headings). */
@@ -2100,7 +2119,7 @@ class App {
     for (const [ic, title, sub, fn] of this.ordered('tools', [
       ['form-fill', 'Fill a form', 'gov pdfs · autofill · sign', () => this.fillForm()],
       ['video', 'Video editor', 'tracks · keyframes · chroma key', () => this.newDocument('cut')],
-      ['magnet', 'BoxVidKlep', 'grab videos from a link', () => this.newDocument('klep')],
+      ['magnet', 'BoxKlep', 'grab videos from a link', () => this.newDocument('klep')],
       ['spaces', 'BoxSpaces', 'open a folder, IDE-style', () => this.openSpace()],
       ['layers', 'StoragePeek', 'what’s eating your drives', () => this.newDocument('storage')],
       ['mail', 'BoxMail', 'gmail + the dumps + claude', () => this.newDocument('mail')],
@@ -2109,6 +2128,7 @@ class App {
       ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
       ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
       ['swap', 'BoxSwap', 'profiles of files · hot-swap a folder', () => this.newDocument('swap')],
+      ['tunnel', 'BoxTunnel', 'audio lines · any input to any output', () => this.newDocument('tunnel')],
       ['lock', 'Secure notes', 'passwords & private notes · encrypted', () => this.newDocument('secure')],
       ...(window.bdsShell?.browser ? [['globe', 'Browser', 'the web · send pages & media to the dumps', () => this.newDocument('browser')]] : []),
     ], (c) => c[1])) {
@@ -2710,7 +2730,10 @@ class App {
           h('span', { class: 'dim mono', style: { fontSize: '11px' } }, `v${window.BDS?.version} · data folder: Box-DocSpitter\\data`)),
         h('div', { class: 'settings-group danger-zone' }, h('h4', {}, 'Reset'),
           h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Erase everything Box-DocSpitter has stored and start fresh, like a new copy.'),
-          h('button', { class: 'btn sm danger', onclick: () => this.factoryReset() }, icon('trash', 'sm'), 'Reset to clean state…')))));
+          h('button', { class: 'btn sm danger', onclick: () => this.factoryReset() }, icon('trash', 'sm'), 'Reset to clean state…')),
+        h('div', { class: 'settings-group' }, h('h4', {}, 'Community'),
+          h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Questions, ideas or bugs? Come say hi.'),
+          h('button', { class: 'btn sm', onclick: () => window.open(DISCORD_INVITE, '_blank', 'noopener') }, icon('external', 'sm'), 'Join the Discord')))));
   }
 
   async factoryReset() {
@@ -3392,6 +3415,7 @@ class App {
 
   async quit() {
     this.quitting = true; // pinned tabs stay pinned for next time
+    await this.saveGames().catch(() => {});
     if (!(await this.closeAll())) { this.quitting = false; return; }
     await api.quit().catch(() => {});
     document.body.innerHTML = '<div class="loading-pane">Box-DocSpitter has stopped. You can close this window.</div>';

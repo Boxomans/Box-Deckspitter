@@ -1,4 +1,4 @@
-// BoxVidKlep — paste a page or video link, grep the videos out of it, pick what to download.
+// BoxKlep — paste a page or video link, grep the videos out of it, pick what to download.
 
 import { BaseEditor } from './base.js';
 import { h, clear, formatBytes, basename, extOf } from '../core/dom.js';
@@ -45,7 +45,7 @@ export class KlepEditor extends BaseEditor {
     this.results = h('div', { class: 'klep-results' });
     this.downloads = h('div', { class: 'klep-downloads' });
     const hero = h('div', { class: 'klep-hero' },
-      h('div', { class: 'klep-title' }, h('span', { class: 'g' }, this.app.toolLabel('BoxVidKlep')), h('span', { class: 'klep-cursor' })),
+      h('div', { class: 'klep-title' }, h('span', { class: 'g' }, this.app.toolLabel('BoxKlep')), h('span', { class: 'klep-cursor' })),
       h('div', { class: 'klep-sub mono' }, '> paste a link · it greps the videos out · you pick what to keep'),
       h('div', { class: 'klep-bar' }, this.input, this.playlistSeg, this.modeSel, this.goBtn),
       h('div', { class: 'klep-meta' }, h('span', { class: 'faint mono' }, 'save to'), this.dirChip,
@@ -145,7 +145,7 @@ export class KlepEditor extends BaseEditor {
     const cmd = 'winget install yt-dlp';
     return h('div', { class: 'klep-help' },
       h('div', { class: 'klep-help-title' }, icon('info', 'sm'), 'This site needs yt-dlp'),
-      h('div', {}, 'YouTube and most social sites don’t expose a plain video file. yt-dlp is the free, open-source tool that reads them — BoxVidKlep uses it automatically once it’s installed.'),
+      h('div', {}, 'YouTube and most social sites don’t expose a plain video file. yt-dlp is the free, open-source tool that reads them — BoxKlep uses it automatically once it’s installed.'),
       h('div', { class: 'row' }, h('code', { class: 'klep-cmd' }, cmd),
         h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(cmd); toast('Copied — paste it into a terminal', { type: 'ok' }); } }, icon('copy', 'sm'), 'Copy')),
       h('div', { class: 'faint' }, 'Optional, for best quality (merging HD video + audio): ', h('code', {}, 'winget install Gyan.FFmpeg'), '. Then restart Box-DocSpitter.'));
@@ -326,7 +326,7 @@ export class KlepEditor extends BaseEditor {
     return row;
   }
 
-  status() { return { left: [{ text: this.app.toolName('BoxVidKlep'), icon: 'magnet' }, { text: this.dir || '' }], right: [{ text: this.tools?.ytdlp ? 'yt-dlp ready' : 'direct links only' }] }; }
+  status() { return { left: [{ text: this.app.toolName('BoxKlep'), icon: 'magnet' }, { text: this.dir || '' }], right: [{ text: this.tools?.ytdlp ? 'yt-dlp ready' : 'direct links only' }] }; }
   saveFormats() { return []; }
   focus() { this.input?.focus(); }
   insertText(t) { this.input.focus(); document.execCommand('insertText', false, t); return true; }

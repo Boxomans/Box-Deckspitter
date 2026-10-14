@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.0.32",
+    "date": "2026-10-14",
+    "notes": [
+      "BoxTunnel: audio lines (BoxAudioLine1, 2, …). Each line mixes any number of inputs (mics or line-in, everything the system is playing, other lines), each with its own volume, mute, level meter and noise gate, through an optional compressor, and plays the mix to any output. Listen lets you hear what's going through a line. Send a line to a virtual audio cable and other apps can use it as a microphone.",
+      "BoxVidKlep is now called BoxKlep. A custom name or card position you gave it carries over, and an existing Downloads\\BoxVidKlep folder keeps being used.",
+      "Setup export no longer carries this PC's pinned tabs, pinned browser tabs or BoxTunnel lines, so importing on another PC doesn't pin the wrong things or point at missing devices.",
+      "There's a Box-DocSpitter Discord now: Help → Join the Discord, or the button at the bottom of Settings.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.31",
     "date": "2026-10-14",
     "notes": [

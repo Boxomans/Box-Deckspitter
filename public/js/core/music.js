@@ -1016,7 +1016,7 @@ export function createMusic(app) {
   }
 
   refresh();
-  /** Play a file from the audio dump by name (used by BoxVidKlep / BoxTape after a download). */
+  /** Play a file from the audio dump by name (used by BoxKlep / BoxTape after a download). */
   async function playByName(name) {
     await refresh();
     const i = state.tracks.findIndex((t) => t.name === name);

@@ -27,6 +27,7 @@ const LINES = {
   tape: { plain: ['Making a mixtape'], silly: ['making a mixtape', 'turning a playlist into mp3s', 'curating the audio dump'] },
   storage: { plain: ['Checking disk space'], silly: ['finding out where the space went', 'staring at a treemap', 'judging their downloads folder'] },
   swap: { plain: ['Swapping files'], silly: ['shuffling file profiles', 'hot-swapping a folder', 'swapping loadouts'] },
+  tunnel: { plain: ['Routing audio'], silly: ['plumbing some audio', 'running sound through a tunnel', 'patching cables'] },
   music: { plain: ['Listening to music'], silly: ['vibing', 'DJing for an audience of one', 'shuffling the audio dump', 'skipping to the good part'] },
   browser: { plain: ['Browsing the web'], silly: ['surfing the information superhighway', 'reading the whole internet', 'opening one more tab'] },
   tomcat: { plain: ['Flying an F-14'], silly: ['flying a Tomcat at FL300', 'calling FOX-3', 'splashing bandits', 'dodging a PL-15', 'going Mach 1 between documents'] },

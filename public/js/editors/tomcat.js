@@ -3,6 +3,7 @@
 // pause, a missile-launch warning, contacts marked when they're in range, waves that get harder the longer
 // you last, and stats (best time, splashes) kept in settings for the badges to come.
 
+import { toast } from '../core/ui.js';
 import { BaseEditor } from './base.js';
 import { h } from '../core/dom.js';
 
@@ -1300,6 +1301,20 @@ class TomcatGame {
 // While the easter egg is on, one sortie keeps flying for as long as the app runs: full size in its tab, as a tiny
 // radar you can drag anywhere, or folded into the right sidebar. It only stops for the hangar or for P.
 
+// Badges: lifetime totals (manual and automatic sorties together). Score counts when a sortie ends, plus the one in
+// the air; time is real time spent flying (not sped-up sim time), paused and carrier time not included.
+const BADGES = [
+  { id: 'score-25k', kind: 'score', goal: 25000, name: 'Nugget', what: '25,000 points in total' },
+  { id: 'score-250k', kind: 'score', goal: 250000, name: 'Ace', what: '250,000 points in total' },
+  { id: 'score-2500k', kind: 'score', goal: 2500000, name: 'Legend', what: '2,500,000 points in total' },
+  { id: 'time-1h', kind: 'time', goal: 3600, name: 'Hour builder', what: '1 hour in the air' },
+  { id: 'time-10h', kind: 'time', goal: 36000, name: 'Long haul', what: '10 hours in the air' },
+  { id: 'time-24h', kind: 'time', goal: 86400, name: 'Round the clock', what: '24 hours in the air' },
+  { id: 'time-100h', kind: 'time', goal: 360000, name: 'Centurion', what: '100 hours in the air' },
+];
+const hours = (s) => (s >= 36000 ? `${Math.floor(s / 3600)} h` : s >= 3600 ? `${(s / 3600).toFixed(1)} h` : `${Math.floor(s / 60)} min`);
+const short = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K` : String(Math.floor(n)));
+
 const SOUND_FILE = { flare: '/assets/sounds/cm.mp3', missile: '/assets/sounds/missile.mp3', rwr: '/assets/sounds/rwr.mp3' };
 const SIM_STEP = 0.05; // s per update (the old frame loop capped steps at 0.06)
 const MINI_W = 120, MINI_H = 84;
@@ -1310,6 +1325,17 @@ export class Flight {
     // fuses used to come with seekers: pilots who bought seekers keep those levels as fuses too
     const t = app.settings.tomcat;
     if (t?.upgrades?.seeker && t.upgrades.fuse == null) app.saveSettings({ tomcat: { ...t, upgrades: { ...t.upgrades, fuse: t.upgrades.seeker } } });
+    // badge totals started after the stats did: the best score stands in for the old total (a floor, never more),
+    // and the recorded flight time for the time flown
+    const st = app.settings.tomcat;
+    if (st && (st.totalScore == null || st.playTime == null)) {
+      const next = { ...st };
+      if (next.totalScore == null) next.totalScore = next.bestScore || 0;
+      if (next.auto && next.auto.totalScore == null) next.auto = { ...next.auto, totalScore: next.auto.bestScore || 0 };
+      if (next.playTime == null) next.playTime = (next.flightTime || 0) + (next.auto?.flightTime || 0);
+      app.saveSettings({ tomcat: next });
+    }
+    this.lastBadgeCheck = 0;
     this.view = null; // the TomcatEditor drawing it full size, while that tab is the one on screen
     this.game = new TomcatGame(null, {
       best: () => app.settings.tomcat || {},
@@ -1350,8 +1376,10 @@ export class Flight {
 
   tick() {
     const now = performance.now();
-    let left = Math.min(600, (now - this.last) / 1000) * this.game.speed; // asleep longer than 10 min: that time is lost
+    const real = Math.min(600, (now - this.last) / 1000);
+    let left = real * this.game.speed; // asleep longer than 10 min: that time is lost
     this.last = now;
+    this.logTime(real, now);
     while (left > 1e-6) { const d = Math.min(SIM_STEP, left); this.game.update(d); left -= d; }
     // merged while you're somewhere else (another tab, another window): the RWR goes off, app wide, every few seconds
     // until you come back to it
@@ -1390,11 +1418,50 @@ export class Flight {
     this.togglePause();
   }
 
-  /** Lifetime stats, kept for the badges to come. Sorties flown in automatic mode count separately (s.auto). */
+  // ---- badges
+
+  /** Real time in the air (a sortie flying, not paused, not over), saved every 30 s and with the $. */
+  logTime(real, now) {
+    const g = this.game;
+    if (!g.started || g.paused || g.gameOver || g.hangarOpen || real <= 0) return;
+    const t = (this.app.settings.tomcat ||= {});
+    t.playTime = (t.playTime || 0) + real;
+    if (!this.saveCash && now - (this.lastTimeSave || 0) > 30000) { this.lastTimeSave = now; this.saveCash = setTimeout(() => this.flushCash(), 3000); }
+    if (now - this.lastBadgeCheck > 2000) { this.lastBadgeCheck = now; this.checkBadges(); }
+  }
+
+  /** Totals for the badges: both kinds of sortie, and the one in the air right now. */
+  totals() {
+    const t = this.app.settings.tomcat || {};
+    const g = this.game;
+    const live = g.started && !g.gameOver ? Math.floor(g.score) : 0;
+    return { score: (t.totalScore || 0) + (t.auto?.totalScore || 0) + live, time: t.playTime || 0 };
+  }
+
+  badgeList() {
+    const tot = this.totals();
+    const got = this.app.settings.tomcat?.badges || {};
+    return BADGES.map((b) => ({ ...b, have: Math.min(tot[b.kind], b.goal), earned: got[b.id] || null }));
+  }
+
+  checkBadges() {
+    const fresh = this.badgeList().filter((b) => !b.earned && b.have >= b.goal);
+    if (!fresh.length) return;
+    const t = (this.app.settings.tomcat ||= {});
+    t.badges = { ...(t.badges || {}) };
+    for (const b of fresh) t.badges[b.id] = Date.now();
+    this.flushCash();
+    for (const b of fresh) toast(`★ Badge: ${b.name} — ${b.what}`, { type: 'ok', timeout: 6000 });
+    this.app.sounds?.play?.('click');
+    if (this.view?.hangar) this.view.renderHangar();
+  }
+
+  /** Lifetime stats (the badges count from these). Sorties flown in automatic mode count separately (s.auto). */
   record(g) {
     const all = { ...(this.app.settings.tomcat || {}) };
     const s = g.auto ? { ...(all.auto || {}) } : all;
     s.games = (s.games || 0) + 1;
+    s.totalScore = (s.totalScore || 0) + g.score;
     s.splashes = (s.splashes || 0) + g.splashes;
     s.intercepts = (s.intercepts || 0) + g.intercepts;
     s.flightTime = (s.flightTime || 0) + g.time;
@@ -1404,6 +1471,7 @@ export class Flight {
     if (g.auto) all.auto = s;
     this.app.saveSettings({ tomcat: all });
     this.view?.refreshStatus();
+    this.checkBadges();
   }
 
   /** The game's own volumes (SETTINGS in the game), each on top of the app's sound volume. */
@@ -1751,7 +1819,8 @@ export class TomcatEditor extends BaseEditor {
     const reborn = t.rebirths || 0;
     const tokens = t.tokens || 0;
     const shop = this.carrierTab === 'shop';
-    const rows = shop ? this.shopRows(t) : unlockedUpgrades(reborn).map((u) => {
+    const badges = this.carrierTab === 'badges';
+    const rows = badges ? this.badgeRows() : shop ? this.shopRows(t) : unlockedUpgrades(reborn).map((u) => {
       const level = lv[u.id] || 0;
       const cost = upgradeCost(u, level);
       const maxed = level >= u.max;
@@ -1775,12 +1844,29 @@ export class TomcatEditor extends BaseEditor {
     this.hangar.replaceChildren(h('div', { class: 'th-card' },
       h('div', { class: 'th-head' }, h('span', {}, 'BACK ON THE CARRIER'), reborn ? h('span', { class: 'th-stars', title: `Reborn ${reborn}×` }, `★${reborn}`) : null,
         h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`), tokens || reborn ? h('span', { class: 'th-tokens', title: 'Rebirth tokens' }, `◆${tokens}`) : null, close),
-      h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP')),
-      h('div', { class: 'th-sub' }, shop
+      h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP'), tab('badges', 'BADGES')),
+      h('div', { class: 'th-sub' }, badges
+        ? 'For your totals: every sortie’s score, manual and automatic, and the time you spend in the air. Kept forever.'
+        : shop
         ? 'Rebirth for tokens, and spend them on perks. Perks stay through every rebirth.'
         : 'Splash bandits and missiles for $. Upgrades stay between sorties (until you rebirth).'),
       ...rows));
     if (focused) this.hangar.focus();
+  }
+
+  /** Badges: earned ones with their date, the rest with how far along they are. */
+  badgeRows() {
+    const list = this.flight.badgeList();
+    const got = list.filter((b) => b.earned).length;
+    return [h('div', { class: 'th-badge-sum' }, `${got} of ${list.length} earned`), ...list.map((b) => {
+      const pct = Math.floor((b.have / b.goal) * 100);
+      const fmt = b.kind === 'time' ? hours : short;
+      return h('div', { class: `th-row th-badge${b.earned ? ' on' : ''}` },
+        h('div', { class: 'th-medal' }, b.earned ? '★' : '☆'),
+        h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, b.name), h('div', { class: 'th-what' }, b.what),
+          b.earned ? null : h('div', { class: 'th-bar' }, h('span', { style: `width:${pct}%` }))),
+        h('div', { class: 'th-badge-val' }, b.earned ? new Date(b.earned).toLocaleDateString() : `${fmt(b.have)} / ${fmt(b.goal)}`));
+    })];
   }
 
   /** The rebirth shop: the rebirth itself, then the token perks. */

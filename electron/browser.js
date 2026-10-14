@@ -325,12 +325,12 @@ ${again}`;
     sep();
     items.push({ label: 'Save page to doc dump (PDF)', click: () => report(wc, 'doc', toDocDump(wc)) });
     sep();
-    // BoxVidKlep: the video you right-clicked (when it has a real address), else the page's video; or every video on the page
+    // BoxKlep: the video you right-clicked (when it has a real address), else the page's video; or every video on the page
     const page = wc.getURL();
     const direct = p.mediaType === 'video' && /^https?:/i.test(p.srcURL || '') ? p.srcURL : null;
     if (/^https?:/i.test(page)) {
-      items.push({ label: direct ? 'Get this video with BoxVidKlep' : 'Get the video with BoxVidKlep', click: () => send(wc, { type: 'klep', url: direct || page, all: false }) });
-      items.push({ label: 'Get all videos on this page with BoxVidKlep', click: () => send(wc, { type: 'klep', url: page, all: true }) });
+      items.push({ label: direct ? 'Get this video with BoxKlep' : 'Get the video with BoxKlep', click: () => send(wc, { type: 'klep', url: direct || page, all: false }) });
+      items.push({ label: 'Get all videos on this page with BoxKlep', click: () => send(wc, { type: 'klep', url: page, all: true }) });
       sep();
     }
     items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) });
