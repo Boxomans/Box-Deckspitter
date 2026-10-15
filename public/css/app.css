@@ -1870,6 +1870,15 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 .tomcat-hangar .th-badge:not(.on) .th-name { color: #9a9; }
 .tomcat-hangar .th-bar { height: 4px; margin-top: 6px; background: #1e2a1e; border: 1px solid #243424; }
 .tomcat-hangar .th-bar span { display: block; height: 100%; background: #54ff6b; }
+.tomcat-hangar .th-stat-head { display: flex; justify-content: space-between; gap: 12px; color: #8afc96; font-size: 13px; letter-spacing: 1px; padding: 10px 0 6px; border-top: 1px solid #243424; }
+.tomcat-hangar .th-stat-head span { color: #9a9; font-size: 11px; letter-spacing: 0; }
+.tomcat-hangar .th-msl { display: grid; grid-template-columns: auto repeat(5, 1fr); gap: 3px 12px; font-size: 12px; margin-bottom: 8px; }
+.tomcat-hangar .th-msl > span:not(.th-k) { color: #e6f0e6; text-align: right; }
+.tomcat-hangar .th-msl > .th-k:nth-child(-n+6):not(:first-child) { text-align: right; }
+.tomcat-hangar .th-kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 12px; margin-bottom: 8px; }
+.tomcat-hangar .th-k { color: #9a9; }
+.tomcat-hangar .th-v { color: #e6f0e6; }
+.tomcat-hangar .th-v[title]:not([title='']) { cursor: help; text-decoration: underline dotted #4a5a4a; }
 .tomcat-hangar .th-badge-val { min-width: 110px; text-align: right; font-size: 12px; color: #ffd36b; }
 .tomcat-hangar .th-badge:not(.on) .th-badge-val { color: #8bd88b; }
 

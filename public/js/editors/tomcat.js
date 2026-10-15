@@ -69,9 +69,10 @@ export const UPGRADES = [
   { id: 'reach', name: 'Longer burn', what: 'Missiles reach 10% further per level', base: 100, max: 5 },
   { id: 'flares', name: 'Bigger dispenser', what: '+2 chaff/flares and 15% faster reload per level', base: 90, max: 3 },
   { id: 'notch', name: 'Beam training', what: 'Notch is ready 10% sooner per level', base: 110, max: 5 },
-  { id: 'ecm', name: 'ECM pod', what: '6% chance per level to spoof each inbound missile', base: 150, max: 5 },
+  { id: 'ecm', name: 'ECM pod', what: '+6% enemy missile duds per level, on top of their own dud rate', base: 150, max: 5 },
   { id: 'contracts', name: 'Defense contracts', what: '+10% $ from every kill per level. No limit.', base: 200, max: Infinity, growth: 1.35 },
   { id: 'armor', name: 'Armor plating', what: 'Shrug off one missile hit per sortie per level', base: 2500, max: 3, rebirth: 1 },
+  { id: 'heater', name: 'Heater bay', what: 'Doubles your total AIM-9X count (Extra rails included)', base: 5000, max: 1, rebirth: 1 },
 ];
 export const upgradeCost = (u, level) => Math.round(u.base * (u.growth || 1.6) ** level);
 /**
@@ -93,8 +94,8 @@ const BANDIT_TYPES = [
   { name: 'J-36', mach: 3.0, spawnMin: 180, spawnMax: 185 },
   { name: 'J-11', mach: 2.0, spawnMin: 118, spawnMax: 122 },
 ];
-// the H-20: a stealth bomber, always at 5:00 and 15:00 on the sortie clock, then a small chance every minute after 15:00
-const H20 = { name: 'H-20', mach: 0.85, spawnMin: 150, spawnMax: 155, sureAt: [300, 900], randomFrom: 900, perMinute: 0.08, launchKm: 140, salvos: 2, gap: 18 };
+// the H-20: a stealth bomber, for sure every 5 minutes on the sortie clock, plus a small chance every minute after 15:00
+const H20 = { name: 'H-20', mach: 0.85, spawnMin: 150, spawnMax: 155, every: 300, randomFrom: 900, perMinute: 0.08, launchKm: 140, salvos: 2, gap: 18 };
 const H20_FAINT_KM = 60; // stealthy: a faint, flickering return until it's this close
 const H20_COLOR = '#c99bff';
 
@@ -141,7 +142,7 @@ class TomcatGame {
     this.notchBtn = { w: 92, h: 36 };
     this.flareRect = {};
     // the top row, left to right at full width (layout() squeezes it to fit a narrow window)
-    this.restartBtn = { w: 120, h: 40, size: 18 };
+    this.restartBtn = { w: 120, h: 40, size: 15 };
     this.pauseBtn = { w: 96, h: 40, size: 16 };
     this.autoBtn = { w: 96, h: 40, size: 15 };
     this.hangarBtn = { w: 106, h: 40, size: 15 };
@@ -168,7 +169,7 @@ class TomcatGame {
     this.selectedId = null; this.selectedKind = 'bandit';
     this.nextId = 1; this.nextMissileId = 1; this.nextHostileId = 1;
     this.spawnT = 0; this.nextSpawn = rand(3, 7);
-    this.h20Sure = [...H20.sureAt]; this.h20At = this.h20Sure[0];
+    this.h20Sure = H20.every; this.h20At = this.h20Sure;
     this.simTime = 0; this.gameOver = null; this.dogfight = null;
     this.splashes = 0; this.intercepts = 0; this.shots = 0; this.score = 0; this.earned = 0;
     this.usedAuto = this.auto; this.autoCd = 0; this.restartIn = 0;
@@ -212,10 +213,13 @@ class TomcatGame {
     const k = t <= 330 ? 1 - t / 600 : 0.45 * 0.85 ** ((t - 330) / 90);
     return [3 * k, 7 * k];
   }
-  /** Bandits fly 5% faster per wave. Their missiles are 4% faster and turn 5% harder per wave. */
+  /** Bandits fly 5% faster per wave, their missiles 4% faster. */
   banditPace() { return 1 + 0.05 * this.heat(); }
   missilePace() { return 1 + 0.04 * this.heat(); }
-  missileTurn() { return 1 + 0.05 * this.heat(); }
+  /** Enemy missiles dud 12% of the time on wave 1, 1% less each wave (none from wave 13). ECM adds 6% a level on top. */
+  enemyDudBase() { return Math.max(0, 0.12 - 0.01 * this.heat()); }
+  enemyDudEcm() { return 0.06 * (this.upgrades().ecm || 0); }
+  enemyDud() { return Math.min(0.9, this.enemyDudBase() + this.enemyDudEcm()); }
   /** Targets break harder each wave (more overshoots), so seekers stay worth upgrading. */
   agility() { return 1 + 0.04 * this.heat(); }
   /** Launch range grows 3% a wave (never past where they show up). */
@@ -237,14 +241,14 @@ class TomcatGame {
     if (!this.selectedId) { this.selectedId = b.id; this.selectedKind = 'bandit'; }
   }
 
-  /** The H-20 shows up at 5:00 and 15:00 for sure, then rolls a small chance every minute (one in the air at a time;
-   *  a sure one that finds one still flying comes a minute later). */
+  /** The H-20 shows up for sure every 5 minutes (5:00, 10:00, 15:00…), and after 15:00 also rolls a small chance every
+   *  minute. One in the air at a time: a sure one waits for the last to go. */
   maybeH20() {
     if (this.simTime < this.h20At) return;
-    const sure = this.h20Sure.length && this.simTime >= this.h20Sure[0];
+    const sure = this.simTime >= this.h20Sure;
     if (this.bandits.some((b) => b.type === H20.name)) { this.h20At = this.simTime + (sure ? 1 : 60); return; }
-    if (sure) this.h20Sure.shift();
-    this.h20At = Math.min(this.simTime + 60, this.h20Sure[0] ?? Infinity);
+    if (sure) this.h20Sure += H20.every;
+    this.h20At = Math.min(this.simTime + 60, this.h20Sure);
     if (!sure && (this.simTime < H20.randomFrom || Math.random() >= H20.perMinute)) return;
     const distance = rand(H20.spawnMin, H20.spawnMax);
     const b = {
@@ -341,7 +345,7 @@ class TomcatGame {
     const u = this.upgrades();
     return {
       ...base,
-      max: base.max + (u.magazine || 0) * MAGAZINE_STEP[code],
+      max: (base.max + (u.magazine || 0) * MAGAZINE_STEP[code]) * (code === 'FOX-2' && u.heater ? 2 : 1), // Heater bay: twice the AIM-9Xs
       regen: base.regen * (1 - 0.1 * (u.reload || 0)),
       speedMach: base.speedMach * (1 + 0.08 * (u.motor || 0)),
       turnRateDps: base.turnRateDps * (1 + 0.1 * (u.seeker || 0)),
@@ -540,7 +544,7 @@ class TomcatGame {
     const x = Math.sin(b.angle) * b.distance, y = b.distance;
     const heading = Math.atan2(-x, -y) + spread; // a fan leaves off-line and curves in
     this.hostiles.push({
-      id: 'H' + this.nextHostileId++, wpn, speed: spec.speedMach * MACH1_KMPS * this.missilePace(), turnRate: rad(spec.turnRateDps * this.missileTurn()), heading,
+      id: 'H' + this.nextHostileId++, wpn, speed: spec.speedMach * MACH1_KMPS * this.missilePace(), turnRate: rad(spec.turnRateDps), heading,
       x, y, px: x, py: y, bearing: heading, rangeKm: y, altitude: b.altitude, distance: Math.hypot(x, y),
     });
     if (!quiet) this.toast(`${b.id} FOX (${wpn})`, 1.8, '#ff8080');
@@ -558,9 +562,10 @@ class TomcatGame {
       m.rangeKm = m.y;
       m.bearing = Math.atan2(m.x, m.y);
       m.distance = Math.hypot(m.x, m.y);
-      if (!m.ecmRolled && m.distance <= 15) {
-        m.ecmRolled = true;
-        if (Math.random() < 0.06 * (this.upgrades().ecm || 0)) { this.hostiles.splice(i, 1); this.toast(`${m.id} SPOOFED (ECM)`, 2, '#c9a8ff'); continue; }
+      if (!m.dudRolled && m.distance <= 15) {
+        // one roll per missile: their own dud rate (falls with the waves) plus your ECM
+        m.dudRolled = true;
+        if (Math.random() < this.enemyDud()) { this.hostiles.splice(i, 1); this.toast(`${m.id} DUD${this.upgrades().ecm ? ' (ECM)' : ''}`, 2, '#c9a8ff'); continue; }
       }
       if (m.distance <= 1.0) {
         this.hostiles.splice(i, 1);
@@ -760,7 +765,7 @@ class TomcatGame {
     this.drawPanel();
     this.drawHud();
     const ts = (b) => Math.max(9, b.size * this.topScale);
-    this.button(this.restartBtn, 'END SORTIE', false, ts(this.restartBtn), !this.started || !!this.gameOver);
+    this.button(this.restartBtn, 'END SORTIE', false, ts(this.restartBtn), !this.started || !!this.gameOver, true);
     this.button(this.pauseBtn, !this.started || this.gameOver ? 'START' : this.paused ? 'RESUME' : 'PAUSE', this.paused, ts(this.pauseBtn));
     this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, ts(this.autoBtn));
     this.button(this.hangarBtn, 'CARRIER', !!this.hangarOpen, ts(this.hangarBtn), !this.canHangar());
@@ -778,16 +783,18 @@ class TomcatGame {
     else if (this.paused) this.drawPaused();
   }
 
-  button(r, label, active, size = 13, dim = false) {
+  /** A top-bar button. warn: the red-edged look for END SORTIE (it ends the run). */
+  button(r, label, active, size = 13, dim = false, warn = false) {
     const { ctx } = this;
     ctx.save();
     if (dim) ctx.globalAlpha = 0.35;
-    ctx.fillStyle = active ? '#2e5a2e' : '#1e1e1e';
-    ctx.strokeStyle = active ? '#9f9' : '#777';
+    ctx.fillStyle = active ? '#2e5a2e' : warn ? '#261818' : '#1e1e1e';
+    ctx.strokeStyle = active ? '#9f9' : warn ? '#d9634f' : '#777';
     ctx.lineWidth = 2;
     ctx.fillRect(r.x, r.y, r.w, r.h);
     ctx.strokeRect(r.x, r.y, r.w, r.h);
-    ctx.fillStyle = '#fff';
+    if (warn) { ctx.strokeStyle = 'rgba(217,99,79,.35)'; ctx.lineWidth = 1; ctx.strokeRect(r.x + 4, r.y + 4, r.w - 8, r.h - 8); } // a second, inner edge
+    ctx.fillStyle = warn ? '#ffc9bd' : '#fff';
     ctx.font = `${size}px ${MONO}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1902,7 +1909,9 @@ export class TomcatEditor extends BaseEditor {
     const tokens = t.tokens || 0;
     const shop = this.carrierTab === 'shop';
     const badges = this.carrierTab === 'badges';
-    const rows = badges ? this.badgeRows() : shop ? this.shopRows(t) : unlockedUpgrades(reborn).map((u) => {
+    const stats = this.carrierTab === 'stats';
+    clearTimeout(this.statsTimer);
+    const rows = stats ? this.statsRows() : badges ? this.badgeRows() : shop ? this.shopRows(t) : unlockedUpgrades(reborn).map((u) => {
       const level = lv[u.id] || 0;
       const cost = upgradeCost(u, level);
       const maxed = level >= u.max;
@@ -1923,17 +1932,23 @@ export class TomcatEditor extends BaseEditor {
       return b;
     };
     const focused = this.hangar.contains(document.activeElement);
+    const scroll = [this.hangar.scrollTop, this.hangar.querySelector('.th-card')?.scrollTop || 0]; // the live STATS redraw keeps your place
     this.hangar.replaceChildren(h('div', { class: 'th-card' },
       h('div', { class: 'th-head' }, h('span', {}, 'BACK ON THE CARRIER'), reborn ? h('span', { class: 'th-stars', title: `Reborn ${reborn}×` }, `★${reborn}`) : null,
         h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`),
         t.pending ? h('span', { class: 'th-pending', title: 'What this sortie has earned so far: paid when it ends' }, `+$${Math.round(t.pending).toLocaleString()}`) : null, tokens || reborn ? h('span', { class: 'th-tokens', title: 'Rebirth tokens' }, `◆${tokens}`) : null, close),
-      h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP'), tab('badges', 'BADGES')),
-      h('div', { class: 'th-sub' }, badges
+      h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP'), tab('badges', 'BADGES'), tab('stats', 'STATS')),
+      h('div', { class: 'th-sub' }, stats
+        ? 'Your jet with every upgrade and perk applied, and what this wave throws at you.'
+        : badges
         ? 'For your totals: every sortie’s score, manual and automatic, and the time you spend in the air. Kept forever.'
         : shop
         ? 'Rebirth for tokens, and spend them on perks. Perks stay through every rebirth.'
         : 'Splash bandits and missiles for $. Upgrades stay between sorties (until you rebirth).'),
       ...rows));
+    this.hangar.scrollTop = scroll[0];
+    const card = this.hangar.querySelector('.th-card');
+    if (card) card.scrollTop = scroll[1];
     if (focused) this.hangar.focus();
   }
 
@@ -1960,6 +1975,59 @@ export class TomcatEditor extends BaseEditor {
           }, h('span', { class: done.length ? 'on' : '' }, `LV ${done.length}`), ` / ${tiers.length}`)),
         h('div', { class: 'th-badge-val' }, next ? `${fmt(next.have)} / ${fmt(next.goal)}` : `${done.length} / ${tiers.length}`));
     })];
+  }
+
+  /** STATS: the jet's numbers with every upgrade and perk applied, and the threat this wave. Live while automatic flies. */
+  statsRows() {
+    const g = this.game;
+    const u = g.upgrades();
+    const perks = g.best().perks || {};
+    const flying = g.started && !g.gameOver;
+    const pct = (k) => `${k >= 1 ? '+' : '−'}${Math.round(Math.abs(k - 1) * 100)}%`;
+    const kv = (rows) => h('div', { class: 'th-kv' }, ...rows.filter(Boolean).flatMap(([k, v, why]) => [
+      h('span', { class: 'th-k' }, k), h('span', { class: 'th-v', title: why || '' }, v)]));
+    const head = (text, note) => h('div', { class: 'th-stat-head' }, text, note ? h('span', {}, note) : null);
+
+    const msl = h('div', { class: 'th-msl' },
+      ...['', 'Rails', 'Reload', 'Speed', 'Turn', 'Range'].map((c) => h('span', { class: 'th-k' }, c)),
+      ...Object.keys(MISSILES).flatMap((code) => {
+        const c = g.spec(code);
+        return [h('span', { class: 'th-k' }, c.short), h('span', {}, String(c.max)), h('span', {}, `${c.regen.toFixed(1)} s`),
+          h('span', {}, `M${c.speedMach.toFixed(1)}`), h('span', {}, `${Math.round(c.turnRateDps)}°/s`), h('span', {}, `${c.rMaxKm} km`)];
+      }));
+    const fuse = g.spec('FOX-1');
+    const contracts = 1 + 0.1 * (u.contracts || 0), favor = 1 + 0.1 * (perks.favor || 0), wavePay = 1 + 0.15 * g.heat();
+    const jet = kv([
+      ['Fuse', `${Math.round(fuse.killRadiusKm * 1000)} m · ${Math.round(fuse.dud * 100)}% duds`],
+      ['Chaff/flares', `${g.flareMax()} · one every ${g.flareReload().toFixed(1)} s`],
+      ['Notch', `ready every ${Math.round(g.notchCooldown())} s`],
+      (u.armor || (this.app.settings.tomcat?.rebirths || 0)) ? ['Armor', `${u.armor || 0} hit${u.armor === 1 ? '' : 's'} a sortie${flying ? ` (${g.armor} left)` : ''}`] : null,
+      ['$ per kill', `×${(contracts * favor * wavePay).toFixed(2)}`, `Defense contracts ${pct(contracts)} · Admiral’s favor ${pct(favor)} · wave ${pct(wavePay)}`],
+      ['Speeds', speedsFor(perks).map((n) => `${n}×`).join(' ')],
+    ]);
+
+    const wave = g.wave();
+    const [gapLo, gapHi] = g.spawnGap();
+    const nextWave = 90 - (g.simTime % 90);
+    const salvo = (type) => `${g.salvo(type)} from ${Math.round(g.launchKm(type))} km, every ${g.shotGap(type).toFixed(1)} s`;
+    const h20 = `next for sure at ${clock(g.h20Sure).slice(0, 5)}${g.simTime >= H20.randomFrom ? ` · ${Math.round(H20.perMinute * 100)}% a minute too` : ''}`;
+    const threat = kv([
+      ['Bandits', `up to ${g.maxBandits()} at once · a new one every ${gapLo.toFixed(1)}–${gapHi.toFixed(1)} s`],
+      ['Bandit speed', pct(g.banditPace())],
+      ['Their missile speed', pct(g.missilePace())],
+      ['Their duds', `${Math.round(g.enemyDud() * 100)}% = ${Math.round(g.enemyDudBase() * 100)}% theirs + ${Math.round(g.enemyDudEcm() * 100)}% your ECM${u.ecm ? ` (LV ${u.ecm})` : ''}`,
+        'Rolled once per missile at 15 km. Their own rate starts at 12% and falls 1% a wave; ECM adds 6% a level.'],
+      ['Jinking', `${pct(g.agility())}`, 'Targets break harder: your missiles overshoot more'],
+      ['J-11 salvo', salvo('J-11')],
+      ['J-36 salvo', salvo('J-36')],
+      ['H-20', h20],
+    ]);
+    if (this.hangar && g.hangarOpen && flying && g.auto) this.statsTimer = setTimeout(() => { if (this.carrierTab === 'stats' && g.hangarOpen) this.renderHangar(); }, 1000);
+    return [
+      head('YOUR JET'), msl, jet,
+      head(`THE THREAT · WAVE ${wave}`, flying ? `${clock(g.simTime).slice(0, 5)} · next wave in ${Math.ceil(nextWave)} s` : 'on the ramp'),
+      threat,
+    ];
   }
 
   /** The rebirth shop: the rebirth itself, then the token perks. */
