@@ -235,7 +235,7 @@ export function createMusic(app) {
     if (!ui) return;
     const extra = groups.reduce((n, g) => n + g.length - 1, 0);
     ui.dupeBtn.hidden = !extra;
-    ui.dupeBtn.textContent = `${extra} duplicate${extra === 1 ? '' : 's'}`;
+    ui.dupeBtn.textContent = `${extra} dupe${extra === 1 ? '' : 's'}`;
   }
 
   async function showDuplicates() {
@@ -805,6 +805,7 @@ export function createMusic(app) {
     const fullB = h('button', { class: 'icon-btn music-full-btn', 'data-tip': 'Full screen', onclick: () => setFull(!full) }, icon('maximize', 'sm'));
     const head = h('div', { class: 'music-head' }, h('span', { class: 'music-note' }, '♪'), h('span', { class: 'mono' }, 'audio-dump/'), h('div', { class: 'grow' }),
       h('button', { class: 'icon-btn', 'data-tip': 'Add songs', onclick: () => addFromDisk() }, icon('plus', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': `${app.toolName?.('BoxTape') || 'BoxTape'}: songs from a YouTube or Spotify playlist`, onclick: () => app.newDocument('tape') }, icon('download', 'sm')),
       dupeBtn,
       h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => refresh() }, icon('refresh', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio', state.playlist || undefined) }, icon('external', 'sm')),

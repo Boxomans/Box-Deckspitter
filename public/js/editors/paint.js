@@ -1,5 +1,6 @@
 // BoxPaint — a lightweight Paint.NET-style editor: layers, brush, eraser, line/rectangle/ellipse, fill bucket,
-// text, colour picker, rectangle selection (crop/clear/copy/cut/paste), move layer, zoom, undo/redo.
+// text (typed on the canvas, any font), colour picker, rectangle selection (crop/clear/copy/cut/paste), move /
+// transform (drag, resize, rotate, flip a layer or the selection), zoom, undo/redo.
 // Left mouse button paints with the primary colour, right button with the secondary (like Paint.NET).
 
 import { BaseEditor } from './base.js';
@@ -11,14 +12,19 @@ import { OUT_FORMATS, outKind, defaultOut, formatSelect, formatNote, warnFormat,
 import { api } from '../core/api.js';
 import { pickOpen } from '../core/files.js';
 import { DumpDock, DUMP_MIME } from './doc/image-dump.js';
+import { FONTS } from './doc/styles.js';
 
 const TOOLS = [
   ['brush', 'brush', 'Brush', 'B'], ['eraser', 'eraser', 'Eraser', 'E'], ['line', 'line', 'Line', 'L'],
   ['rect', 'square', 'Rectangle', 'R'], ['ellipse', 'circle', 'Ellipse', 'O'], ['fill', 'bucket', 'Paint bucket', 'F'],
-  ['text', 'type', 'Text', 'T'], ['picker', 'pipette', 'Colour picker', 'K'], ['select', 'select', 'Rectangle select', 'S'], ['move', 'move', 'Move layer', 'M'],
+  ['text', 'type', 'Text', 'T'], ['picker', 'pipette', 'Colour picker', 'K'], ['select', 'select', 'Rectangle select', 'S'], ['move', 'move', 'Move / transform — drag the handles to resize, the dot to rotate', 'M'],
 ];
 const ZOOMS = [0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 const MAX_UNDO = 30;
+const TEXT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48, 56, 64, 72, 96, 120, 144, 192, 256];
+const ROT_GAP = 22; // screen px from the box's top edge to its rotate dot
+const angNorm = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const selBox = (r) => ({ cx: r.x + r.w / 2, cy: r.y + r.h / 2, w: r.w, h: r.h, rot: 0 });
 const UNDO_BYTES = 768 * 1024 * 1024; // frames make snapshots big: older steps are dropped past this
 
 const mkCanvas = (w, h2) => { const c = document.createElement('canvas'); c.width = w; c.height = h2; return c; };
@@ -60,6 +66,9 @@ export class PaintEditor extends BaseEditor {
     this.shapeMode = s.paintShape || 'stroke'; // stroke | fill | both
     this.tolerance = s.paintTolerance ?? 24;
     this.accuracy = s.paintAccuracy ?? 0;
+    this.textOpts = { font: s.paintFont || 'Segoe UI', size: s.paintTextSize || 32, bold: !!s.paintBold, italic: !!s.paintItalic, underline: !!s.paintUnderline, align: s.paintAlign || 'left' };
+    this.xf = null; // a transform in progress (move tool): the pixels being moved and their box
+    this.textEdit = null; // text being typed on the canvas
     this.primary = s.paintPrimary || '#1d1b22';
     this.secondary = s.paintSecondary || '#ffffff';
     this.zoomLevel = 1;
@@ -195,6 +204,26 @@ export class PaintEditor extends BaseEditor {
     this.accLabel = h('span', { class: 'mono paint-size-label' });
     this.accIn.addEventListener('input', () => { this.accuracy = Number(this.accIn.value); this.syncProps(); this.drawOverlay(); });
     this.accIn.addEventListener('change', () => this.app.saveSettings({ paintAccuracy: this.accuracy }));
+    // text: font (yours, then the ones on this PC), a small size list, bold / italic / underline, alignment
+    this.fontSel = h('select', { class: 'tb-select paint-font', 'data-tip': 'Font: yours (Settings → Appearance → Your fonts), then the ones installed on this PC' });
+    this.fontSel.addEventListener('change', () => this.setText({ font: this.fontSel.value }));
+    this.fillFonts();
+    this.tsizeSel = h('select', { class: 'tb-select paint-tsize', 'data-tip': 'Text size (px)' });
+    this.tsizeSel.addEventListener('change', () => this.setText({ size: Number(this.tsizeSel.value) }));
+    this.textBtns = {};
+    const tog = (k, ic, tip) => (this.textBtns[k] = tbButton(ic, tip, () => this.setText({ [k]: !this.textOpts[k] })));
+    this.alignBtn = tbButton('align-left', 'Alignment', () => this.setText({ align: { left: 'center', center: 'right', right: 'left' }[this.textOpts.align] || 'left' }));
+    this.textBar = h('span', { class: 'paint-optbar' }, this.fontSel, this.tsizeSel,
+      tog('bold', 'bold', 'Bold (Ctrl+B)'), tog('italic', 'italic', 'Italic (Ctrl+I)'), tog('underline', 'underline', 'Underline (Ctrl+U)'), this.alignBtn);
+    // move / transform: flips, quarter turns, exact size, done / cancel
+    this.moveBar = h('span', { class: 'paint-optbar' },
+      tbButton('flip-h', 'Flip horizontally', () => this.xfOp((x) => { x.fx *= -1; x.rot = angNorm(-x.rot); })),
+      tbButton('flip-v', 'Flip vertically', () => this.xfOp((x) => { x.fy *= -1; x.rot = angNorm(-x.rot); })),
+      tbButton('rotate-ccw', 'Rotate 90° left', () => this.xfOp((x) => { x.rot = angNorm(x.rot - Math.PI / 2); })),
+      tbButton('rotate-cw', 'Rotate 90° right', () => this.xfOp((x) => { x.rot = angNorm(x.rot + Math.PI / 2); })),
+      tbButton('resize', 'Size and angle…', () => this.xfDialog()),
+      (this.xfDone = tbButton('check', 'Done (Enter)', () => this.endXf())),
+      (this.xfCancel = tbButton('x', 'Cancel (Esc)', () => this.cancelXf())));
     this.propLabel = h('span', { class: 'mono faint paint-proplabel' });
     this.zoomLabel = h('span', { class: 'mono paint-zoomlabel' });
     const tb = h('div', { class: 'toolbar paint-toolbar' },
@@ -210,6 +239,7 @@ export class PaintEditor extends BaseEditor {
       h('span', { class: 'faint paint-lbl' }, 'accuracy'), this.accIn, this.accLabel,
       this.shapeSel,
       h('span', { class: 'faint paint-lbl paint-tolwrap' }, 'tolerance'), this.tolIn,
+      this.textBar, this.moveBar,
       this.propLabel,
       h('div', { class: 'grow' }),
       (this.fmtSel = formatSelect(this)),
@@ -237,7 +267,7 @@ export class PaintEditor extends BaseEditor {
     this.sizeLabel.textContent = `${this.size}px`;
     const t = this.tool;
     const show = (el, on) => { el.style.display = on ? '' : 'none'; };
-    const sized = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'text'].includes(t);
+    const sized = ['brush', 'eraser', 'line', 'rect', 'ellipse'].includes(t);
     show(this.sizeIn, sized); show(this.sizeLabel, sized); show(this.sizeIn.previousSibling, sized);
     const op = ['brush', 'line', 'rect', 'ellipse', 'text'].includes(t);
     show(this.opIn, op); show(this.opIn.previousSibling, op);
@@ -246,11 +276,20 @@ export class PaintEditor extends BaseEditor {
     const acc = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'text'].includes(t);
     show(this.accIn, acc); show(this.accIn.previousSibling, acc); show(this.accLabel, acc);
     this.accLabel.textContent = `${this.accuracy}%`;
-    this.propLabel.textContent = t === 'fill' ? String(this.tolerance) : t === 'select' && this.sel ? `${Math.round(this.sel.w)}×${Math.round(this.sel.h)}` : '';
-    this.overlay.style.cursor = { picker: 'copy', move: 'move', text: 'text', select: 'crosshair', fill: 'cell' }[t] || 'crosshair';
+    show(this.textBar, t === 'text');
+    show(this.moveBar, t === 'move');
+    this.xfDone.disabled = this.xfCancel.disabled = !this.xf;
+    this.syncText();
+    const box = t === 'move' && (this.xf || this.moveBox());
+    this.propLabel.textContent = t === 'fill' ? String(this.tolerance) : t === 'select' && this.sel ? `${Math.round(this.sel.w)}×${Math.round(this.sel.h)}`
+      : box ? `${Math.round(box.w)}×${Math.round(box.h)}${box.rot ? ` · ${Math.round((box.rot * 180) / Math.PI)}°` : ''}` : '';
+    if (!this.drag) this.overlay.style.cursor = { picker: 'copy', move: 'move', text: 'text', select: 'crosshair', fill: 'cell' }[t] || 'crosshair';
+    if (this.textEdit) this.layoutText();
   }
 
   setTool(t) {
+    if (t !== 'text') this.commitText();
+    if (t !== 'move') this.endXf();
     this.tool = t;
     for (const [id, b] of Object.entries(this.toolBtns || {})) b.classList.toggle('active', id === t);
     this.syncProps();
@@ -259,7 +298,7 @@ export class PaintEditor extends BaseEditor {
   }
 
   pickColor(which, anchor) {
-    colorPopover(anchor, { onPick: (c) => { if (!c) return; this[which] = c; this.app.saveSettings({ [which === 'primary' ? 'paintPrimary' : 'paintSecondary']: c }); this.syncProps(); } });
+    colorPopover(anchor, { onPick: (c) => { if (!c) return; this[which] = c; this.app.saveSettings({ [which === 'primary' ? 'paintPrimary' : 'paintSecondary']: c }); this.syncProps(); this.textEdit?.ta.focus(); } });
   }
   swapColors() { [this.primary, this.secondary] = [this.secondary, this.primary]; this.syncProps(); }
 
@@ -361,6 +400,7 @@ export class PaintEditor extends BaseEditor {
     return { kind: 'all', W: this.W, H: this.H, fi: this.fi, frames, bytes: one * this.allLayers().length };
   }
   restore(s) {
+    this.xf = null;
     if (s.kind === 'pixels') {
       this.frames.forEach((f, k) => {
         const L = f.layers.find((x) => x.id === s.id);
@@ -382,6 +422,7 @@ export class PaintEditor extends BaseEditor {
     }
   }
   checkpoint(kind = 'pixels') {
+    this.xf = null; // any other change makes a transform final
     // "Add frames": a change to the picture goes on a new frame, a copy of this one
     const adding = kind === 'pixels' && this.frameMode === 'add';
     this.undoStack.push(this.snapshot(adding ? 'all' : kind));
@@ -392,6 +433,7 @@ export class PaintEditor extends BaseEditor {
     this.markDirty();
   }
   undo() {
+    this.cancelText();
     const s = this.undoStack.pop();
     if (!s) return toast('Nothing to undo', { timeout: 1000 });
     this.redoStack.push(s.kind === 'pixels' ? this.snapshotOf(s.id) : this.snapshot('all'));
@@ -399,6 +441,7 @@ export class PaintEditor extends BaseEditor {
     this.after();
   }
   redo() {
+    this.cancelText();
     const s = this.redoStack.pop();
     if (!s) return;
     this.undoStack.push(s.kind === 'pixels' ? this.snapshotOf(s.id) : this.snapshot('all'));
@@ -406,7 +449,7 @@ export class PaintEditor extends BaseEditor {
     this.after();
   }
   snapshotOf(id) { const L = this.allLayers().find((x) => x.id === id) || this.layer; return { kind: 'pixels', id: L.id, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H), bytes: this.W * this.H * 4 }; }
-  after() { this._onionKey = null; this.composite(); this.renderLayers(); this.drawOverlay(); this.syncProps(); this.refreshThumb(); this.refreshStatus(); }
+  after() { this.rev = (this.rev || 0) + 1; this._onionKey = null; this.composite(); this.renderLayers(); this.drawOverlay(); this.syncProps(); this.refreshThumb(); this.refreshStatus(); }
 
   // ================================================================ pointer
 
@@ -453,13 +496,23 @@ export class PaintEditor extends BaseEditor {
         if (this.stroke.erase) this.previewErase(); else this.composite();
         break;
       }
-      case 'line': case 'rect': case 'ellipse': case 'select':
+      case 'select': {
+        // on the selection: its handles resize it, inside moves it; anywhere else starts a new one
+        const hit = this.sel && this.hitBox(selBox(this.sel), p, false);
+        this.drag = hit ? { start: p, now: p, ...hit, s0: { ...this.sel } } : { start: p, now: p, color, button: e.button };
+        break;
+      }
+      case 'line': case 'rect': case 'ellipse':
         this.drag = { start: p, now: p, color, button: e.button };
         break;
-      case 'move':
-        this.checkpoint();
-        this.drag = { start: p, now: p, orig: this.ctxOf().getImageData(0, 0, this.W, this.H) };
+      case 'move': {
+        // handles resize, the dot rotates, anywhere else moves; the pixels lift off on the first drag
+        const box = this.xf || this.moveBox();
+        if (!box) { toast(this.sel ? 'Nothing selected on this layer.' : 'This layer is empty — nothing to move.', { type: 'warn' }); break; }
+        const hit = this.hitBox(box, p, true);
+        this.drag = { start: p, now: p, mode: hit?.mode === 'scale' || hit?.mode === 'rotate' ? hit.mode : 'move', hx: hit?.hx, hy: hit?.hy, s0: { cx: box.cx, cy: box.cy, w: box.w, h: box.h, rot: box.rot || 0 } };
         break;
+      }
       case 'fill':
         this.checkpoint();
         this.floodFill(Math.floor(p.x), Math.floor(p.y), color);
@@ -472,7 +525,7 @@ export class PaintEditor extends BaseEditor {
         this.syncProps();
         break;
       }
-      case 'text': this.placeText(p, color); break;
+      case 'text': this.openText(p, e.button === 2 ? 'secondary' : 'primary'); break;
       default: break;
     }
   }
@@ -493,15 +546,12 @@ export class PaintEditor extends BaseEditor {
     }
     if (this.drag) {
       this.drag.now = p;
-      if (this.tool === 'move') {
-        const c = this.ctxOf();
-        c.clearRect(0, 0, this.W, this.H);
-        c.putImageData(this.drag.orig, Math.round(p.x - this.drag.start.x), Math.round(p.y - this.drag.start.y));
-        this.composite();
-      }
+      if (this.tool === 'move') return this.dragXf(p, e.shiftKey);
+      if (this.tool === 'select' && this.drag.mode) return this.dragSel(p);
       this.drawOverlay();
       return;
     }
+    if (this.tool === 'move' || this.tool === 'select') this.hoverCursor(p);
     this.drawOverlay();
   }
 
@@ -520,12 +570,15 @@ export class PaintEditor extends BaseEditor {
     this.drag = null;
     const x0 = Math.min(d.start.x, d.now.x), y0 = Math.min(d.start.y, d.now.y), w = Math.abs(d.now.x - d.start.x), hh = Math.abs(d.now.y - d.start.y);
     if (this.tool === 'select') {
-      this.sel = w > 1 && hh > 1 ? { x: Math.round(x0), y: Math.round(y0), w: Math.round(w), h: Math.round(hh) } : null;
+      if (d.mode) this.sel = this.clipRect(this.sel);
+      else if (e.shiftKey && w > 1 && hh > 1) { const k = Math.max(w, hh); this.sel = this.clipRect({ x: Math.round(d.now.x < d.start.x ? d.start.x - k : d.start.x), y: Math.round(d.now.y < d.start.y ? d.start.y - k : d.start.y), w: Math.round(k), h: Math.round(k) }); }
+      else this.sel = w > 1 && hh > 1 ? this.clipRect({ x: Math.round(x0), y: Math.round(y0), w: Math.round(w), h: Math.round(hh) }) : null;
       this.syncProps();
       this.drawOverlay();
+      this.refreshStatus();
       return;
     }
-    if (this.tool === 'move') { this.after(); return; }
+    if (this.tool === 'move') { if (this.xf) this.after(); return; }
     if (w < 1 && hh < 1) { this.drawOverlay(); return; }
     this.checkpoint();
     const c = this.ctxOf();
@@ -596,11 +649,15 @@ export class PaintEditor extends BaseEditor {
     c.clearRect(0, 0, this.W, this.H);
     const px = 1 / this.zoomLevel;
     // shape / selection preview
-    if (this.drag && this.tool !== 'move') {
+    if (this.drag && this.tool !== 'move' && !this.drag.mode) {
       if (this.tool === 'select') this.drawSelRect(c, this.drag.start, this.drag.now, px);
       else this.drawShape(c, this.drag.start, this.drag.now, this.drag.button === 2 ? this.secondary : this.primary, this.drag.button === 2 ? this.primary : this.secondary, false);
     }
-    if (this.sel && !(this.drag && this.tool === 'select')) this.drawSelRect(c, { x: this.sel.x, y: this.sel.y }, { x: this.sel.x + this.sel.w, y: this.sel.y + this.sel.h }, px);
+    const drawingSel = this.drag && this.tool === 'select' && !this.drag.mode;
+    if (this.sel && !drawingSel) this.drawSelRect(c, { x: this.sel.x, y: this.sel.y }, { x: this.sel.x + this.sel.w, y: this.sel.y + this.sel.h }, px);
+    if (this.tool === 'select' && this.sel && !drawingSel) this.drawBox(c, selBox(this.sel), px, false);
+    if (this.tool === 'move' && !this.playing) { const b = this.xf || this.moveBox(); if (b) this.drawBox(c, b, px, true); }
+    if (this.textEdit) { c.save(); c.globalAlpha = this.opacity; this.drawText(c, this.textEdit); c.restore(); }
     // brush outline
     if (this.cursor && ['brush', 'eraser'].includes(this.tool)) {
       c.beginPath();
@@ -654,19 +711,410 @@ export class PaintEditor extends BaseEditor {
     c.putImageData(img, 0, 0);
   }
 
-  async placeText(p, color) {
-    const text = await promptDialog('Add text', `Text (${this.size * 2}px, ${this.app.settings.paintFont || 'Segoe UI'}) — change size with the size slider`, '');
-    if (!text) return;
-    this.checkpoint();
-    const c = this.ctxOf();
+  // ================================================================ text
+
+  /** The font list: yours first (Settings → Appearance → Your fonts), then every family installed on this PC. */
+  async fillFonts() {
+    const sel = this.fontSel;
+    const opt = (value, label, css) => h('option', { value, style: `font-family:${css}` }, label);
+    const mine = this.app.uiFontList().filter(([id]) => id.startsWith('u:'));
+    const fill = (installed) => {
+      const cur = this.textOpts.font;
+      clear(sel);
+      if (mine.length) sel.append(h('optgroup', { label: 'Your fonts' }, mine.map(([id, label, css]) => opt(id, label.replace(/ \(yours\)$/, ''), css))));
+      sel.append(h('optgroup', { label: 'Installed' }, installed.map((f) => opt(f, f, `"${f}"`))));
+      if (![...sel.options].some((o) => o.value === cur)) sel.prepend(opt(cur, cur.startsWith('u:') ? 'Removed font' : cur, `"${cur}"`));
+      sel.value = cur;
+    };
+    if (!this.localFonts) fill(FONTS);
+    try {
+      const list = this.localFonts || (await window.queryLocalFonts?.());
+      if (list?.length) fill((this.localFonts = list) && [...new Set(list.map((f) => f.family))].sort((a, b) => a.localeCompare(b)));
+    } catch { // the PC's list needs the window on screen: try again when the list is opened
+      if (!this.fontRetry) { this.fontRetry = true; this.fontSel.addEventListener('pointerdown', () => { if (!this.localFonts) this.fillFonts(); }); }
+    }
+  }
+
+  syncText() {
+    if (!this.textBtns) return;
+    const t = this.textOpts;
+    for (const k of ['bold', 'italic', 'underline']) this.textBtns[k].classList.toggle('active', !!t[k]);
+    this.alignBtn.replaceChildren(icon(`align-${t.align}`));
+    this.alignBtn.dataset.tip = `Alignment: ${t.align}`;
+    if (![...this.tsizeSel.options].some((o) => Number(o.value) === t.size) || this.tsizeSel.options.length !== new Set([...TEXT_SIZES, t.size]).size) {
+      clear(this.tsizeSel).append(...[...new Set([...TEXT_SIZES, t.size])].sort((a, b) => a - b).map((n) => h('option', { value: String(n) }, String(n))));
+    }
+    this.tsizeSel.value = String(t.size);
+    if (this.fontSel.value !== t.font && [...this.fontSel.options].some((o) => o.value === t.font)) this.fontSel.value = t.font;
+  }
+
+  setText(patch) {
+    Object.assign(this.textOpts, patch);
+    const t = this.textOpts;
+    this.app.saveSettings({ paintFont: t.font, paintTextSize: t.size, paintBold: t.bold, paintItalic: t.italic, paintUnderline: t.underline, paintAlign: t.align });
+    this.syncText();
+    this.layoutText();
+    this.textEdit?.ta.focus();
+  }
+
+  /** The canvas font for the text options (scale: the zoom, for the typing box). */
+  textFont(scale = 1) {
+    const t = this.textOpts;
+    const mine = t.font.startsWith('u:') && this.app.uiFontList().find(([id]) => id === t.font);
+    return `${t.italic ? 'italic ' : ''}${t.bold ? 'bold ' : ''}${t.size * scale}px ${mine ? mine[2] : `"${t.font}", sans-serif`}`;
+  }
+
+  /** Where each line goes: x is the left edge, the centre or the right edge, by the alignment. */
+  textLayout(te) {
+    const t = this.textOpts;
+    const lines = te.ta.value.split('\n');
+    const m = (this._measure ||= mkCanvas(1, 1).getContext('2d'));
+    m.font = this.textFont();
+    const widths = lines.map((l) => m.measureText(l).width);
+    const w = Math.max(t.size * 0.5, ...widths), lh = t.size * 1.25;
+    const left = t.align === 'left' ? te.x : t.align === 'center' ? te.x - w / 2 : te.x - w;
+    return { lines, widths, w, lh, left, top: te.y, h: lh * lines.length };
+  }
+
+  drawText(c, te) {
+    const t = this.textOpts, L = this.textLayout(te);
     c.save();
-    c.globalAlpha = this.opacity;
-    c.fillStyle = color;
-    c.font = `${Math.max(8, this.size * 2)}px "${this.app.settings.paintFont || 'Segoe UI'}", sans-serif`;
-    c.textBaseline = 'top';
-    text.split('\n').forEach((line, i) => c.fillText(line, p.x, p.y + i * this.size * 2.4));
+    c.font = this.textFont();
+    c.fillStyle = this[te.which];
+    c.textBaseline = 'middle';
+    c.textAlign = t.align;
+    const ax = t.align === 'left' ? L.left : t.align === 'center' ? L.left + L.w / 2 : L.left + L.w;
+    L.lines.forEach((line, i) => {
+      const y = L.top + L.lh * i + L.lh / 2;
+      c.fillText(line, ax, y);
+      const lw = L.widths[i];
+      if (t.underline && lw) c.fillRect(t.align === 'left' ? ax : t.align === 'center' ? ax - lw / 2 : ax - lw, y + t.size * 0.42, lw, Math.max(1, t.size / 14));
+    });
     c.restore();
+  }
+
+  /** Click with the text tool: a box to type in right on the picture (the text shows as it will look). */
+  openText(p, which) {
+    this.commitText();
+    const ta = h('textarea', { class: 'paint-textedit', spellcheck: 'false', rows: '1' });
+    const grip = h('div', { class: 'paint-textgrip', 'data-tip': 'Drag to move · Ctrl+Enter or click away to finish · Esc to cancel' }, icon('move', 'sm'));
+    const box = h('div', { class: 'paint-textbox' }, grip, ta);
+    this.stage.append(box);
+    const te = (this.textEdit = { x: p.x, y: p.y, which, box, ta });
+    ta.addEventListener('input', () => this.layoutText());
+    ta.addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
+      if (e.key === 'Escape') { e.preventDefault(); this.cancelText(); } else if (e.key === 'Enter' && ctrl) { e.preventDefault(); this.commitText(); } else if (ctrl && ['b', 'i', 'u'].includes(k)) {
+        e.preventDefault();
+        const key = { b: 'bold', i: 'italic', u: 'underline' }[k];
+        this.setText({ [key]: !this.textOpts[key] });
+      }
+    });
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      grip.setPointerCapture(e.pointerId);
+      const sx = e.clientX, sy = e.clientY, ox = te.x, oy = te.y;
+      const mv = (ev) => { te.x = ox + (ev.clientX - sx) / this.zoomLevel; te.y = oy + (ev.clientY - sy) / this.zoomLevel; this.layoutText(); };
+      const up = () => { grip.removeEventListener('pointermove', mv); grip.removeEventListener('pointerup', up); ta.focus(); };
+      grip.addEventListener('pointermove', mv);
+      grip.addEventListener('pointerup', up);
+    });
+    this.layoutText();
+    requestAnimationFrame(() => ta.focus());
+  }
+
+  /** Lines the typing box up with the text (at this zoom) and redraws the preview. */
+  layoutText() {
+    const te = this.textEdit;
+    if (!te) return;
+    const f = this.textFont();
+    if (!document.fonts.check(f) && this._fontTried !== f) { this._fontTried = f; document.fonts.load(f).then(() => this.layoutText(), () => {}); }
+    const z = this.zoomLevel, L = this.textLayout(te), pad = 3;
+    Object.assign(te.box.style, { left: L.left * z - pad + 'px', top: L.top * z + 'px' });
+    Object.assign(te.ta.style, {
+      width: L.w * z + pad * 2 + 'px', height: L.h * z + 'px', padding: `0 ${pad}px`, font: this.textFont(z), lineHeight: L.lh * z + 'px',
+      textAlign: this.textOpts.align, caretColor: this[te.which],
+    });
+    this.drawOverlay();
+  }
+
+  commitText() {
+    const te = this.textEdit;
+    if (!te) return;
+    this.textEdit = null;
+    te.box.remove();
+    if (!te.ta.value.trim()) { this.drawOverlay(); return; }
+    this.checkpoint();
+    const sheet = mkCanvas(this.W, this.H);
+    this.drawText(sheet.getContext('2d'), te);
+    if (this.accuracy > 0) harden(sheet, this.accuracy, null, this[te.which]);
+    const c = this.ctxOf();
+    c.save(); c.globalAlpha = this.opacity; c.drawImage(sheet, 0, 0); c.restore();
     this.after();
+  }
+
+  cancelText() {
+    const te = this.textEdit;
+    if (!te) return;
+    this.textEdit = null;
+    te.box.remove();
+    this.drawOverlay();
+  }
+
+  // ================================================================ move / transform
+
+  /** A rectangle trimmed to the picture (null if nothing's left). */
+  clipRect(r) {
+    if (!r) return null;
+    const x0 = Math.max(0, Math.round(r.x)), y0 = Math.max(0, Math.round(r.y));
+    const x1 = Math.min(this.W, Math.round(r.x + r.w)), y1 = Math.min(this.H, Math.round(r.y + r.h));
+    return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+  }
+
+  /** The smallest rectangle round everything on a layer that isn't see-through. */
+  contentBounds(L = this.layer) {
+    const W = this.W, H = this.H, d = this.ctxOf(L).getImageData(0, 0, W, H).data;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let y = 0; y < H; y++) {
+      const row = y * W * 4;
+      for (let x = 0; x < W; x++) {
+        if (!d[row + x * 4 + 3]) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        y1 = y;
+      }
+    }
+    return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  }
+
+  /** What the move tool would pick up: the selection, or everything on the layer. */
+  moveBox() {
+    const L = this.layer;
+    if (!L) return null;
+    const key = `${L.id}:${this.rev || 0}:${this.sel ? [this.sel.x, this.sel.y, this.sel.w, this.sel.h].join() : ''}`;
+    if (this._mvKey !== key) {
+      this._mvKey = key;
+      const r = this.sel ? this.clipRect(this.sel) : this.contentBounds(L);
+      this._mvBox = r && selBox(r);
+    }
+    return this._mvBox;
+  }
+
+  /** Lifts the pixels: the rest of the layer stays put and the lifted part is redrawn from the original each time,
+   *  so sizing up and down again never blurs it. */
+  startXf() {
+    if (this.xf) return this.xf;
+    const r = this.sel ? this.clipRect(this.sel) : this.contentBounds();
+    if (!r) { toast(this.sel ? 'Nothing selected on this layer.' : 'This layer is empty — nothing to move.', { type: 'warn' }); return null; }
+    const sel0 = this.sel && { ...this.sel };
+    this.checkpoint();
+    const L = this.layer;
+    const src = mkCanvas(r.w, r.h);
+    src.getContext('2d').drawImage(L.canvas, -r.x, -r.y);
+    const base = mkCanvas(this.W, this.H);
+    const b = base.getContext('2d');
+    b.drawImage(L.canvas, 0, 0);
+    b.clearRect(r.x, r.y, r.w, r.h);
+    this.xf = { L, src, base, ...selBox(r), fx: 1, fy: 1, sel0 };
+    return this.xf;
+  }
+
+  renderXf() {
+    const x = this.xf;
+    if (!x) return;
+    const c = this.ctxOf(x.L);
+    c.save();
+    c.clearRect(0, 0, this.W, this.H);
+    c.drawImage(x.base, 0, 0);
+    c.imageSmoothingEnabled = this.accuracy < 100;
+    c.imageSmoothingQuality = 'high';
+    if (!x.rot) { // straight: whole pixels, so a plain move stays sharp
+      const w = Math.max(1, Math.round(x.w)), hh = Math.max(1, Math.round(x.h));
+      c.translate(Math.round(x.cx - x.w / 2) + (x.fx < 0 ? w : 0), Math.round(x.cy - x.h / 2) + (x.fy < 0 ? hh : 0));
+      c.scale(x.fx, x.fy);
+      c.drawImage(x.src, 0, 0, w, hh);
+    } else {
+      c.translate(x.cx, x.cy);
+      c.rotate(x.rot);
+      c.scale(x.fx, x.fy);
+      c.drawImage(x.src, -x.w / 2, -x.h / 2, x.w, x.h);
+    }
+    c.restore();
+    if (x.sel0) this.sel = this.clipRect(this.boxRect(x)); // the selection follows what you moved
+    this.composite();
+    this.drawOverlay();
+    this.syncProps();
+    this.refreshStatus();
+  }
+
+  /** The upright rectangle round a (maybe turned) box. */
+  boxRect(b) {
+    const cos = Math.abs(Math.cos(b.rot || 0)), sin = Math.abs(Math.sin(b.rot || 0));
+    const w = b.w * cos + b.h * sin, hh = b.w * sin + b.h * cos;
+    return { x: b.cx - w / 2, y: b.cy - hh / 2, w, h: hh };
+  }
+
+  /** Done: the transform stays as it is. */
+  endXf() {
+    if (!this.xf) return;
+    this.xf = null;
+    this.drawOverlay();
+    this.syncProps();
+  }
+
+  /** Puts everything back as it was before the transform. */
+  cancelXf() {
+    const x = this.xf;
+    if (!x) return;
+    this.undo();
+    this.redoStack.pop();
+    this.sel = x.sel0 || null;
+    this.drawOverlay();
+    this.syncProps();
+  }
+
+  /** A toolbar / menu change to the layer (or selection): flips, quarter turns, exact size. */
+  xfOp(fn) {
+    if (this.tool !== 'move') this.setTool('move');
+    const x = this.startXf();
+    if (!x) return;
+    fn(x);
+    this.renderXf();
+    this.after();
+  }
+
+  async xfDialog() {
+    if (this.tool !== 'move') this.setTool('move');
+    const b = this.xf || this.moveBox();
+    if (!b) return toast(this.sel ? 'Nothing selected on this layer.' : 'This layer is empty — nothing to size.', { type: 'warn' });
+    const w = h('input', { type: 'number', min: '1', max: '20000', value: String(Math.round(b.w)) });
+    const hh = h('input', { type: 'number', min: '1', max: '20000', value: String(Math.round(b.h)) });
+    const pct = h('input', { type: 'number', min: '1', max: '2000', value: '100' });
+    const ang = h('input', { type: 'number', min: '-360', max: '360', step: '1', value: String(Math.round(((b.rot || 0) * 180) / Math.PI)) });
+    const keep = h('input', { type: 'checkbox', checked: true });
+    const ratio = b.w / b.h;
+    w.addEventListener('input', () => { if (keep.checked) hh.value = String(Math.max(1, Math.round(Number(w.value) / ratio))); pct.value = String(Math.round((Number(w.value) / b.w) * 100)); });
+    hh.addEventListener('input', () => { if (keep.checked) w.value = String(Math.max(1, Math.round(Number(hh.value) * ratio))); });
+    pct.addEventListener('input', () => { const k = Number(pct.value) / 100; w.value = String(Math.max(1, Math.round(b.w * k))); hh.value = String(Math.max(1, Math.round(b.h * k))); });
+    const res = await modal({
+      title: this.sel ? 'Selection size and angle' : 'Layer size and angle',
+      body: h('div', { class: 'form-grid' }, h('label', {}, 'Width'), w, h('label', {}, 'Height'), hh, h('label', {}, 'Scale %'), pct, h('span'), h('label', { class: 'check' }, keep, 'Keep proportions'),
+        h('label', {}, 'Angle (°)'), ang),
+      buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Apply', value: 'ok', primary: true }],
+    });
+    if (res !== 'ok') return;
+    this.xfOp((x) => {
+      x.w = clamp(Math.round(Number(w.value)) || 1, 1, 20000);
+      x.h = clamp(Math.round(Number(hh.value)) || 1, 1, 20000);
+      x.rot = angNorm(((Number(ang.value) || 0) * Math.PI) / 180);
+    });
+  }
+
+  /** Dragging with the move tool: move (Shift: straight), a handle (corners keep proportions, Shift frees them),
+   *  or the dot (Shift: 15° steps). */
+  dragXf(p, shift) {
+    const d = this.drag, s = d.s0;
+    if (!this.xf && (Math.abs(p.x - d.start.x) < 0.5 && Math.abs(p.y - d.start.y) < 0.5)) return;
+    const x = this.startXf();
+    if (!x) { this.drag = null; return; }
+    if (d.mode === 'rotate') {
+      let a = s.rot + Math.atan2(p.y - s.cy, p.x - s.cx) - Math.atan2(d.start.y - s.cy, d.start.x - s.cx);
+      if (shift) a = Math.round(a / (Math.PI / 12)) * (Math.PI / 12);
+      x.rot = angNorm(a);
+    } else if (d.mode === 'scale') {
+      const cos = Math.cos(s.rot), sin = Math.sin(s.rot);
+      const qx = p.x - s.cx, qy = p.y - s.cy;
+      const lx = qx * cos + qy * sin, ly = -qx * sin + qy * cos;
+      const ax = (-d.hx * s.w) / 2, ay = (-d.hy * s.h) / 2; // the opposite side stays put
+      let w = d.hx ? Math.max(1, (lx - ax) * d.hx) : s.w, hh = d.hy ? Math.max(1, (ly - ay) * d.hy) : s.h;
+      if (d.hx && d.hy && !shift) { const k = Math.max(w / s.w, hh / s.h); w = s.w * k; hh = s.h * k; }
+      const ccx = d.hx ? ax + (d.hx * w) / 2 : 0, ccy = d.hy ? ay + (d.hy * hh) / 2 : 0;
+      x.w = w; x.h = hh;
+      x.cx = s.cx + ccx * cos - ccy * sin;
+      x.cy = s.cy + ccx * sin + ccy * cos;
+    } else {
+      let mx = p.x - d.start.x, my = p.y - d.start.y;
+      if (shift) { if (Math.abs(mx) > Math.abs(my)) my = 0; else mx = 0; }
+      x.cx = s.cx + Math.round(mx);
+      x.cy = s.cy + Math.round(my);
+    }
+    this.renderXf();
+  }
+
+  /** Dragging the selection itself: inside moves it, a handle resizes it. */
+  dragSel(p) {
+    const d = this.drag, s = d.s0;
+    const dx = Math.round(p.x - d.start.x), dy = Math.round(p.y - d.start.y);
+    if (d.mode === 'move') this.sel = { ...s, x: s.x + dx, y: s.y + dy };
+    else {
+      let x0 = s.x, y0 = s.y, x1 = s.x + s.w, y1 = s.y + s.h;
+      if (d.hx < 0) x0 += dx;
+      if (d.hx > 0) x1 += dx;
+      if (d.hy < 0) y0 += dy;
+      if (d.hy > 0) y1 += dy;
+      this.sel = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.max(1, Math.abs(x1 - x0)), h: Math.max(1, Math.abs(y1 - y0)) };
+    }
+    this.syncProps();
+    this.drawOverlay();
+  }
+
+  /** The rotate dot: above the box, or just inside it when above would be off the picture. */
+  rotHandle(b) {
+    const cos = Math.cos(b.rot || 0), sin = Math.sin(b.rot || 0), r = ROT_GAP / this.zoomLevel;
+    const at = (ly) => ({ x: b.cx - ly * sin, y: b.cy + ly * cos });
+    const out = at(-b.h / 2 - r);
+    return out.x < 0 || out.y < 0 || out.x > this.W || out.y > this.H ? at(-b.h / 2 + r) : out;
+  }
+
+  /** What's under the pointer on a box: { mode: 'rotate' | 'scale' (hx, hy: -1, 0, 1) | 'move' } or null. */
+  hitBox(b, p, rotate) {
+    const tol = 6 / this.zoomLevel;
+    if (rotate) { const r = this.rotHandle(b); if (Math.hypot(p.x - r.x, p.y - r.y) <= tol * 1.4) return { mode: 'rotate' }; }
+    const cos = Math.cos(b.rot || 0), sin = Math.sin(b.rot || 0);
+    const dx = p.x - b.cx, dy = p.y - b.cy;
+    const lx = dx * cos + dy * sin, ly = -dx * sin + dy * cos;
+    for (const hy of [-1, 0, 1]) for (const hx of [-1, 0, 1]) {
+      if ((hx || hy) && Math.abs(lx - (hx * b.w) / 2) <= tol && Math.abs(ly - (hy * b.h) / 2) <= tol) return { mode: 'scale', hx, hy };
+    }
+    return Math.abs(lx) <= b.w / 2 && Math.abs(ly) <= b.h / 2 ? { mode: 'move' } : null;
+  }
+
+  hoverCursor(p) {
+    const b = this.tool === 'move' ? this.xf || this.moveBox() : this.sel && selBox(this.sel);
+    const hit = b && this.hitBox(b, p, this.tool === 'move');
+    let cur = this.tool === 'move' ? 'move' : 'crosshair';
+    if (hit?.mode === 'rotate') cur = 'grab';
+    else if (hit?.mode === 'scale') cur = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'][(((Math.round((Math.atan2(hit.hy, hit.hx) + (b.rot || 0)) / (Math.PI / 4))) % 4) + 4) % 4];
+    else if (hit?.mode === 'move') cur = 'move';
+    this.overlay.style.cursor = cur;
+  }
+
+  /** A box with its eight handles (and the rotate dot). */
+  drawBox(c, b, px, rotate) {
+    const cos = Math.cos(b.rot || 0), sin = Math.sin(b.rot || 0);
+    const at = (lx, ly) => [b.cx + lx * cos - ly * sin, b.cy + lx * sin + ly * cos];
+    const hw = b.w / 2, hh = b.h / 2;
+    c.save();
+    c.lineWidth = px;
+    c.beginPath();
+    [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].forEach(([x, y], i) => (i ? c.lineTo(...at(x, y)) : c.moveTo(...at(x, y))));
+    c.closePath();
+    c.strokeStyle = 'rgba(0,0,0,.75)'; c.stroke();
+    c.setLineDash([4 * px, 4 * px]); c.strokeStyle = '#fff'; c.stroke(); c.setLineDash([]);
+    if (rotate) {
+      const r = this.rotHandle(b);
+      c.beginPath(); c.moveTo(...at(0, -hh)); c.lineTo(r.x, r.y); c.strokeStyle = 'rgba(0,0,0,.75)'; c.stroke();
+      c.beginPath(); c.arc(r.x, r.y, 5 * px, 0, Math.PI * 2); c.fillStyle = '#fff'; c.fill(); c.stroke();
+    }
+    const sz = 7 * px;
+    for (const hy of [-1, 0, 1]) for (const hx of [-1, 0, 1]) {
+      if (!hx && !hy) continue;
+      const [x, y] = at(hx * hw, hy * hh);
+      c.fillStyle = '#fff'; c.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+      c.strokeStyle = '#1a1a1a'; c.strokeRect(x - sz / 2, y - sz / 2, sz, sz);
+    }
+    c.restore();
   }
 
   // ================================================================ selection & clipboard
@@ -732,7 +1180,7 @@ export class PaintEditor extends BaseEditor {
         commit: (n) => { L.name = n; this.renderLayers(); this.markDirty(); },
         remove: () => { this.active = this.layers.indexOf(L); this.deleteLayer(); },
       });
-      row.addEventListener('click', () => { this.active = i; this.renderLayers(); });
+      row.addEventListener('click', () => { if (i === this.active) return; this.endXf(); this.active = i; this.renderLayers(); this.drawOverlay(); this.syncProps(); });
       row.addEventListener('dblclick', () => renameInline(row));
       this.layerList.append(row);
     });
@@ -788,6 +1236,11 @@ export class PaintEditor extends BaseEditor {
       { label: 'Flip vertical', action: () => this.transformAll((c, W, H) => { c.translate(0, H); c.scale(1, -1); }) },
       { label: 'Rotate 90° right', icon: 'rotate-cw', action: () => this.rotate(1) },
       { label: 'Rotate 90° left', icon: 'rotate-ccw', action: () => this.rotate(-1) },
+      { sep: true },
+      { label: this.sel ? 'Transform the selection (M)' : 'Transform the layer (M)', icon: 'move', action: () => this.setTool('move') },
+      { label: this.sel ? 'Selection size and angle…' : 'Layer size and angle…', icon: 'resize', action: () => this.xfDialog() },
+      { label: 'Flip layer horizontal', icon: 'flip-h', action: () => this.xfOp((x) => { x.fx *= -1; x.rot = angNorm(-x.rot); }) },
+      { label: 'Flip layer vertical', icon: 'flip-v', action: () => this.xfOp((x) => { x.fy *= -1; x.rot = angNorm(-x.rot); }) },
       { sep: true },
       { label: 'Add image from file as layer…', icon: 'image-plus', action: () => this.layerFromFile() },
       { label: 'New layer from the media dump…', icon: 'image', action: () => this.layerFromDump() },
@@ -980,6 +1433,7 @@ export class PaintEditor extends BaseEditor {
     this.view.style.imageRendering = z >= 2 ? 'pixelated' : 'auto';
     if (this.zoomLabel) this.zoomLabel.textContent = Math.round(z * 100) + '%';
     this.drawOverlay();
+    this.layoutText();
     this.refreshStatus();
   }
 
@@ -1015,14 +1469,24 @@ export class PaintEditor extends BaseEditor {
     const k = e.key.toLowerCase();
     if (ctrl && !e.shiftKey && k === 'z') { e.preventDefault(); return this.undo(); }
     if (ctrl && (k === 'y' || (e.shiftKey && k === 'z'))) { e.preventDefault(); return this.redo(); }
-    if (ctrl && k === 'a') { e.preventDefault(); this.sel = { x: 0, y: 0, w: this.W, h: this.H }; this.setTool('select'); return; }
-    if (ctrl && k === 'd') { e.preventDefault(); this.sel = null; this.drawOverlay(); this.syncProps(); return; }
+    if (ctrl && k === 'a') { e.preventDefault(); this.endXf(); this.sel = { x: 0, y: 0, w: this.W, h: this.H }; this.setTool('select'); return; }
+    if (ctrl && k === 'd') { e.preventDefault(); this.endXf(); this.sel = null; this.drawOverlay(); this.syncProps(); return; }
     if (ctrl && k === 'c') { e.preventDefault(); return this.copySelection(false); }
     if (ctrl && k === 'x' && !e.shiftKey) { e.preventDefault(); return this.copySelection(true); }
     if (ctrl && e.shiftKey && k === 'x') { e.preventDefault(); return this.cropToSel(); }
     if (ctrl || e.altKey) return;
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); return this.clearSelection(); }
-    if (e.key === 'Escape') { this.sel = null; this.drawOverlay(); this.syncProps(); return; }
+    if (e.key === 'Escape') { if (this.xf) return this.cancelXf(); this.sel = null; this.drawOverlay(); this.syncProps(); return; }
+    if (e.key === 'Enter' && this.xf) { e.preventDefault(); return this.endXf(); }
+    const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (arrow && (this.tool === 'move' || (this.tool === 'select' && this.sel))) {
+      e.preventDefault();
+      const n = e.shiftKey ? 10 : 1;
+      if (this.tool === 'select') { this.sel = { ...this.sel, x: this.sel.x + arrow[0] * n, y: this.sel.y + arrow[1] * n }; this.drawOverlay(); return; }
+      const x = this.startXf();
+      if (x) { x.cx += arrow[0] * n; x.cy += arrow[1] * n; this.renderXf(); }
+      return;
+    }
     if (e.key === '[') { this.size = Math.max(1, this.size - (this.size > 20 ? 5 : 1)); this.sizeIn.value = String(this.size); return this.syncProps(); }
     if (e.key === ']') { this.size = Math.min(120, this.size + (this.size >= 20 ? 5 : 1)); this.sizeIn.value = String(this.size); return this.syncProps(); }
     if ((e.key === ',' || e.key === '.') && this.frames.length > 1) { e.preventDefault(); return this.selectFrame((this.fi + (e.key === '.' ? 1 : this.frames.length - 1)) % this.frames.length); }
@@ -1048,6 +1512,7 @@ export class PaintEditor extends BaseEditor {
   }
 
   async serialize(ext) {
+    this.commitText();
     const k = outKind(ext) || 'png';
     if (k === 'gif') {
       const frames = this.frames.map((f) => ({ data: this.flatten(null, f).getContext('2d').getImageData(0, 0, this.W, this.H).data, delay: f.delay }));
@@ -1156,6 +1621,8 @@ export class PaintEditor extends BaseEditor {
 
   selectFrame(i) {
     if (!this.frames[i]) return;
+    this.xf = null;
+    this.commitText();
     this.fi = i;
     this._onionKey = null;
     this.composite();
@@ -1255,6 +1722,7 @@ export class PaintEditor extends BaseEditor {
         { label: 'Cut selection', shortcut: 'Ctrl+X', action: () => this.copySelection(true) },
         { label: 'Select all', shortcut: 'Ctrl+A', action: () => { this.sel = { x: 0, y: 0, w: this.W, h: this.H }; this.drawOverlay(); } },
         { label: 'Deselect', shortcut: 'Ctrl+D', action: () => { this.sel = null; this.drawOverlay(); } },
+        { label: 'Select what’s on this layer', action: () => { const r = this.contentBounds(); if (!r) return toast('This layer is empty.', { type: 'warn' }); this.sel = r; this.setTool('select'); } },
         { label: 'Erase selection', shortcut: 'Del', action: () => this.clearSelection() },
       ],
       tools: [
@@ -1274,5 +1742,5 @@ export class PaintEditor extends BaseEditor {
   }
 
   onShow() { requestAnimationFrame(() => this.applyZoom()); }
-  destroy() { clearTimeout(this.playTimer); this.playing = false; document.removeEventListener('paste', this.pasteHandler); document.removeEventListener('keydown', this.keyHandler); this.dumps?.destroy(); }
+  destroy() { this.cancelText(); clearTimeout(this.playTimer); this.playing = false; document.removeEventListener('paste', this.pasteHandler); document.removeEventListener('keydown', this.keyHandler); this.dumps?.destroy(); }
 }

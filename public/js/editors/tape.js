@@ -162,7 +162,7 @@ export class TapeEditor extends BaseEditor {
       };
     });
     const notes = [];
-    if (res.maybeMore && !res.hasKey) notes.push(h('span', {}, 'Spotify only shows the first 100 songs of a playlist without a key. ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); this.spotifyKey(); } }, 'Add a free Spotify key'), ' to get all of them.'));
+    if (res.maybeMore && !res.hasKey) notes.push(h('span', {}, 'Spotify only gave the first 100 songs this time. ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); this.spotifyKey(); } }, 'Add a free Spotify key'), ' to get all of them.'));
     const n = items.filter((x) => x.already).length;
     if (n) notes.push(`${n} song${n === 1 ? ' is' : 's are'} already in your audio dump, so ${n === 1 ? 'it starts' : 'they start'} unticked.`);
     return { title: res.title, items, notes, spotify: true };
@@ -174,7 +174,7 @@ export class TapeEditor extends BaseEditor {
     const ok = await modal({
       title: 'Spotify key (optional)',
       body: h('div', { class: 'col', style: { gap: '10px' } },
-        h('p', { class: 'dim', style: { margin: 0 } }, 'Only needed for playlists with more than 100 songs. It’s free:'),
+        h('p', { class: 'dim', style: { margin: 0 } }, 'Only needed if a long playlist stops at 100 songs. It’s free:'),
         h('ol', { class: 'dim', style: { margin: 0, paddingLeft: '18px', fontSize: '12.5px' } },
           h('li', {}, 'Go to developer.spotify.com/dashboard and log in.'),
           h('li', {}, 'Create app → any name, Redirect URI http://127.0.0.1, tick “Web API”.'),

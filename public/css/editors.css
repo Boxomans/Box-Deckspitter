@@ -700,6 +700,13 @@ audio.vid-media { display: none; }
 .paint-size-label, .paint-zoomlabel { font-size: 10.5px; min-width: 38px; text-align: center; }
 .paint-proplabel { font-size: 10.5px; }
 .paint-shape { font-size: 11.5px; }
+.paint-optbar { display: inline-flex; align-items: center; gap: 2px; }
+.paint-font { width: 150px; }
+.paint-tsize { width: 56px; }
+.paint-textbox { position: absolute; z-index: 2; }
+.paint-textedit { display: block; box-sizing: content-box; margin: 0; border: 0; outline: 1px dashed rgba(128,128,128,.9); background: transparent; color: transparent; resize: none; overflow: hidden; white-space: pre; }
+.paint-textedit::selection { background: rgba(80,140,255,.35); color: transparent; }
+.paint-textgrip { position: absolute; left: -24px; top: -2px; width: 20px; height: 20px; display: grid; place-items: center; cursor: move; background: var(--bg-1); border: 1px solid var(--line-2); border-radius: 5px; color: var(--text-2); }
 
 /* ---------------------------------------------------------------- BoxDiff */
 .diff-root { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }

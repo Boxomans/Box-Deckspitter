@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.0.41",
+    "date": "2026-10-14",
+    "notes": [
+      "Image editor: the move tool is now a transform box. Drag to move, pull the handles to resize, use the dot to rotate, and flip or set an exact size and angle. Works on a whole layer or just the selection.",
+      "Image editor: selections can be moved and resized with handles, nudged with the arrow keys, and drawn square with Shift. There's also a new “Select what’s on this layer” option.",
+      "Image editor: type text right on the picture, with a font list (your fonts plus every font installed on the PC), a small size dropdown, and bold, italic, underline and alignment.",
+      "BoxTape: Spotify playlists over 100 songs now come through in full without a key.",
+      "Music player: a BoxTape button next to Add songs.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.40",
     "date": "2026-10-14",
     "notes": [

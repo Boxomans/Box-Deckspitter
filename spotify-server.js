@@ -1,7 +1,8 @@
 // Spotify links in BoxTape. Spotify's audio is DRM-protected, so nothing is downloaded from Spotify: this reads
 // the track list (title, artists, length) and finds each song on YouTube, where BoxTape downloads it as an MP3.
-// Track lists come from Spotify's public embed page (no setup, up to 100 songs); a free Spotify developer key
-// (optional, kept in data/secrets.json) gets the rest of longer playlists.
+// Track lists come from Spotify's public embed page (no setup); the embed stops near 100 songs, so longer playlists
+// are paged in with the anonymous token that page hands out. A free Spotify developer key (optional, kept in
+// data/secrets.json) is used first when there is one.
 
 'use strict';
 
@@ -42,7 +43,38 @@ async function fromEmbed({ type, id }) {
     title: t.title, artist: String(t.subtitle || '').replace(/ /g, ' '), duration: Math.round((t.duration || 0) / 1000),
     id: String(t.uri || '').split(':').pop() || null,
   }));
-  return { title: ent.name || ent.title, items, maybeMore: all.length >= 100 }; // the page stops at 100 (a few may be blank)
+  // the page stops at 100 (a few may be blank, so 98 is "maybe more" too)
+  return { title: ent.name || ent.title, items, maybeMore: all.length >= 90, token: JSON.parse(m[1])?.props?.pageProps?.state?.settings?.session?.accessToken || null };
+}
+
+const FETCH_PLAYLIST = '19ff1327c29e99c208c86d7a9d8f1929cfdf3d3202a0ff4253c821f1901aa94d'; // the web player's own query
+
+/** Every song in a playlist, 300 at a time, with the embed page's anonymous token (podcast episodes are skipped). */
+async function fromPathfinder(id, token) {
+  const items = [];
+  let total = Infinity;
+  for (let offset = 0; offset < total && offset < 10000; offset += 300) {
+    const r = await fetch('https://api-partner.spotify.com/pathfinder/v2/query', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'App-Platform': 'WebPlayer', 'User-Agent': UA },
+      body: JSON.stringify({ variables: { uri: `spotify:playlist:${id}`, offset, limit: 300, enableWatchFeedEntrypoint: false }, operationName: 'fetchPlaylist', extensions: { persistedQuery: { version: 1, sha256Hash: FETCH_PLAYLIST } } }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) throw err(502, `Spotify answered ${r.status}.`);
+    const c = (await r.json())?.data?.playlistV2?.content;
+    if (!c?.items) throw err(502, 'Couldn’t read the rest of that playlist.');
+    total = c.totalCount ?? 0;
+    for (const x of c.items) {
+      const t = x.itemV2?.data;
+      if (x.itemV2?.__typename !== 'TrackResponseWrapper' || !t?.name) continue;
+      items.push({
+        title: t.name, artist: (t.artists?.items || []).map((a) => a.profile?.name).filter(Boolean).join(', '),
+        duration: Math.round((t.trackDuration?.totalMilliseconds || 0) / 1000), id: String(t.uri || '').split(':').pop() || null,
+      });
+    }
+    if (!c.items.length) break;
+  }
+  return items;
 }
 
 /** The full list through Spotify's Web API (needs the user's own free client id + secret). */
@@ -145,7 +177,13 @@ module.exports = function createSpotify({ secrets, saveSecrets, readJSONBody, ru
         if (c && link.type !== 'track') {
           try { return { ...(await fromApi(link, c)), source: 'api' }; } catch (e) { if (e.status === 400) throw e; /* fall back to the embed page */ }
         }
-        const r = await fromEmbed(link);
+        const { token, ...r } = await fromEmbed(link);
+        if (link.type === 'playlist' && r.maybeMore && token) {
+          try {
+            const all = await fromPathfinder(link.id, token);
+            if (all.length >= r.items.length) return { ...r, items: all, maybeMore: false, source: 'embed', hasKey: !!c };
+          } catch { /* keep the first 100 */ }
+        }
         return { ...r, source: 'embed', hasKey: !!c };
       },
       // BoxTape word search: the top YouTube results for some words

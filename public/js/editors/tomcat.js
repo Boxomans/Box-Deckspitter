@@ -72,7 +72,7 @@ export const UPGRADES = [
   { id: 'ecm', name: 'ECM pod', what: '+6% enemy missile duds per level, on top of their own dud rate', base: 150, max: 5 },
   { id: 'contracts', name: 'Defense contracts', what: '+10% $ from every kill per level. No limit.', base: 200, max: Infinity, growth: 1.35 },
   { id: 'armor', name: 'Armor plating', what: 'Shrug off one missile hit per sortie per level', base: 2500, max: 3, rebirth: 1 },
-  { id: 'heater', name: 'Heater bay', what: 'Doubles your total AIM-9X count (Extra rails included)', base: 5000, max: 1, rebirth: 1 },
+  { id: 'wingman', name: 'Loyal Wingman', what: 'FQ-50A ‘Goose’ drones on your wing: 3 AIM-9X each, every missile reloads in 20 s. Level 2 adds one on the other side.', base: 300000, growth: 2, max: 2 },
 ];
 export const upgradeCost = (u, level) => Math.round(u.base * (u.growth || 1.6) ** level);
 /**
@@ -85,6 +85,7 @@ export const rebirthTokens = (rebirths = 0) => 2 ** rebirths;
 /** Rebirth-shop perks, bought with tokens: level n costs cost(n) tokens. */
 export const PERKS = [
   { id: 'favor', name: 'Admiral’s favor', what: '+10% $ from every kill per level, on top of Defense contracts. Kept through rebirths. No limit.', max: Infinity, cost: (level) => level + 1 },
+  { id: 'heater', name: 'Heater bay', what: 'Doubles your total AIM-9X count (Extra rails included). Kept through rebirths.', max: 1, cost: () => 3 },
   { id: 'warp', name: 'Time compression', what: 'Level 1 adds 4× speed, level 2 adds 5× (T or the speed button). Kept through rebirths.', max: 2, cost: (level) => [4, 8][level] },
 ];
 export const unlockedUpgrades = (rebirths = 0) => UPGRADES.filter((u) => (u.rebirth || 0) <= rebirths);
@@ -98,6 +99,13 @@ const BANDIT_TYPES = [
 const H20 = { name: 'H-20', mach: 0.85, spawnMin: 150, spawnMax: 155, every: 300, randomFrom: 900, perMinute: 0.08, launchKm: 140, salvos: 2, gap: 18 };
 const H20_FAINT_KM = 60; // stealthy: a faint, flickering return until it's this close
 const H20_COLOR = '#c99bff';
+
+// Loyal Wingman: FQ-50A 'Goose' drones either side of you, each with its own AIM-9Xs that reload one at a time
+const DRONE_AMMO = 3, DRONE_RELOAD = 20, DRONE_GAP = 1.5; // missiles, s per missile, s between one drone's shots
+// a Ghost Bat-style drone from above (a 100-unit box, nose at the top): chined nose, swept wing, canted tails
+const GOOSE_HALF = [[50, 2], [55, 12], [62, 26], [65, 40], [96, 56], [96, 62], [66, 65], [64, 74], [82, 84], [80, 90], [62, 84], [58, 96], [50, 94]];
+const GOOSE_PATH = 'M' + [...GOOSE_HALF, ...GOOSE_HALF.slice(1, -1).reverse().map(([x, y]) => [100 - x, y])].map(([x, y]) => `${x} ${y}`).join('L') + 'Z';
+const GOOSE_NOSE = 'M50 2L55 12L45 12Z';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const rad = (d) => (d * Math.PI) / 180;
@@ -176,6 +184,7 @@ class TomcatGame {
     this.flares = this.flareMax(); this.flareT = 0; this.flareCd = 0; this.flareFx = 0;
     this.notchCd = 0; this.notchHold = 0;
     this.armor = this.upgrades().armor || 0;
+    this.drones = Array.from({ length: this.upgrades().wingman || 0 }, (_, i) => this.newDrone(i));
     this.inv = Object.fromEntries(Object.keys(MISSILES).map((k) => [k, { count: this.spec(k).max, regenT: 0, regenActive: false }]));
     this.foxMode = 'FOX-1';
     this.infoMode = null;
@@ -320,14 +329,7 @@ class TomcatGame {
     const card = this.spec(this.foxMode);
     const inv = this.inv[this.foxMode];
     if (inv.count <= 0) { this.toast(`OUT OF ${card.short} — ${Math.ceil(inv.regenT)}s`, 1.6, '#ffb36b'); return; }
-    const tp = this.posOf(sel.kind, sel.obj.id);
-    const heading = Math.atan2(tp.x, tp.y);
-    this.missiles.push({
-      id: 'M' + this.nextMissileId++, code: card.code, name: card.name, guidance: card.guidance,
-      turnRate: rad(card.turnRateDps), turnDps: card.turnRateDps, speed: card.speedMach * MACH1_KMPS, rMaxKm: card.rMaxKm, activeKm: card.activeKm,
-      state: card.guidance === 'ARH' ? 'inertial' : 'guiding', x: 0, y: 0, heading, rangeKm: 0, bearing: heading, travelled: 0,
-      targetId: sel.obj.id, targetKind: sel.kind, killRadiusKm: card.killRadiusKm, dud: card.dud,
-    });
+    const tp = this.launch(card, sel);
     this.shots++;
     this.onFire?.();
     inv.count--;
@@ -339,13 +341,57 @@ class TomcatGame {
     this.toast(`${card.code} AWAY (${card.short})${far ? ' — OUT OF RANGE' : ''}`, 1.6, far ? '#ffb36b' : '#fff');
   }
 
+  /** A missile off the rails at a track (yours or a drone's). Returns where the target was. */
+  launch(card, sel, extra = {}) {
+    const tp = this.posOf(sel.kind, sel.obj.id);
+    const heading = Math.atan2(tp.x, tp.y);
+    this.missiles.push({
+      id: 'M' + this.nextMissileId++, code: card.code, name: card.name, guidance: card.guidance,
+      turnRate: rad(card.turnRateDps), turnDps: card.turnRateDps, speed: card.speedMach * MACH1_KMPS, rMaxKm: card.rMaxKm, activeKm: card.activeKm,
+      state: card.guidance === 'ARH' ? 'inertial' : 'guiding', x: 0, y: 0, heading, rangeKm: 0, bearing: heading, travelled: 0,
+      targetId: sel.obj.id, targetKind: sel.kind, killRadiusKm: card.killRadiusKm, dud: card.dud, ...extra,
+    });
+    return tp;
+  }
+
+  /** A missile (yours or a drone's) is already chasing this track. */
+  covered(kind, id) { return this.missiles.some((m) => m.targetId === id && m.targetKind === kind && !m.lost); }
+
+  /** Loyal Wingman: drone i (0 on the left, 1 on the right), full of AIM-9Xs. */
+  newDrone(i) { return { side: i ? 1 : -1, ammo: DRONE_AMMO, reload: [], cd: 0 }; }
+
+  /** The drones fly their own fight: each takes the nearest bandit or inbound missile in AIM-9X reach that nothing is
+   *  already chasing. A shot missile comes back 20 s later. They hold fire through a notch, like you. */
+  updateDrones(dt) {
+    if (!this.drones?.length) return;
+    const card = this.spec('FOX-2');
+    const vm = card.speedMach * MACH1_KMPS;
+    this.drones.forEach((d, i) => {
+      d.cd = Math.max(0, d.cd - dt);
+      for (let k = d.reload.length - 1; k >= 0; k--) if ((d.reload[k] -= dt) <= 0) { d.reload.splice(k, 1); d.ammo = Math.min(DRONE_AMMO, d.ammo + 1); }
+      if (d.ammo <= 0 || d.cd > 0 || this.notchHold > 0) return;
+      const t = this.tracksSorted().find(({ kind, obj }) => {
+        if (this.covered(kind, obj.id)) return false;
+        if (this.auto && obj.id === this.selectedId && kind === this.selectedKind) return false; // auto's next shot
+        const vt = kind === 'bandit' ? Math.max(0, obj.closure || 0) : obj.speed;
+        const tp = this.posOf(kind, obj.id);
+        return (Math.hypot(tp.x, tp.y) * vm) / (vm + vt) <= card.rMaxKm;
+      });
+      if (!t) return;
+      this.launch(card, t, { byDrone: i + 1 });
+      d.ammo--; d.reload.push(DRONE_RELOAD); d.cd = DRONE_GAP;
+      this.toast(`GOOSE ${i + 1} FOX-2 (${t.obj.id})`, 1.4, '#9fc2d9');
+    });
+  }
+
   /** A missile's numbers with the hangar upgrades applied. */
   spec(code) {
     const base = MISSILES[code];
     const u = this.upgrades();
+    const heater = code === 'FOX-2' && this.best().perks?.heater; // Heater bay (a perk): twice the AIM-9Xs
     return {
       ...base,
-      max: (base.max + (u.magazine || 0) * MAGAZINE_STEP[code]) * (code === 'FOX-2' && u.heater ? 2 : 1), // Heater bay: twice the AIM-9Xs
+      max: (base.max + (u.magazine || 0) * MAGAZINE_STEP[code]) * (heater ? 2 : 1),
       regen: base.regen * (1 - 0.1 * (u.reload || 0)),
       speedMach: base.speedMach * (1 + 0.08 * (u.motor || 0)),
       turnRateDps: base.turnRateDps * (1 + 0.1 * (u.seeker || 0)),
@@ -477,9 +523,8 @@ class TomcatGame {
   autopilot(dt) {
     this.autoCd = Math.max(0, this.autoCd - dt);
     if (this.autoCd > 0) return;
-    const covered = new Set(this.missiles.filter((m) => !m.lost).map((m) => m.targetId));
     const plans = this.tracksSorted()
-      .filter((t) => !covered.has(t.obj.id))
+      .filter((t) => !this.covered(t.kind, t.obj.id))
       .map((t) => {
         const vt = t.kind === 'bandit' ? Math.max(0.05, t.obj.closure || t.obj.mach * MACH1_KMPS) : t.obj.speed;
         return { t, d: t.dist, vt, deadline: this.deadline(t.kind, t.obj, t.dist, vt) };
@@ -609,6 +654,7 @@ class TomcatGame {
     }
     // targets move first, so the missiles' proximity fuse sees where they went this step
     this.updateHostiles(dt);
+    this.updateDrones(dt);
     this.updateMissiles(dt);
     this.updateFlares(dt);
     if (this.auto && !this.gameOver) {
@@ -854,6 +900,32 @@ class TomcatGame {
     ctx.textAlign = 'center';
     ctx.fillText('F-14F SUPER TOMCAT  ·  FL300  ·  M1.0', cx, cy + L / 2 + 22);
     ctx.restore();
+    this.drawDrones(cx, cy, L);
+  }
+
+  /** The FQ-50A drones off each wing (they turn with you on a notch), with their AIM-9Xs and reload underneath. */
+  drawDrones(cx, cy, L) {
+    const { ctx } = this;
+    const S = L * 0.3; // the drone's size on screen
+    const turn = this.notchHold > 0 ? (Math.PI / 2) * Math.min(1, (NOTCH_HOLD - this.notchHold) / 0.5, this.notchHold / 0.5) : 0;
+    for (const d of this.drones || []) {
+      const x = cx + d.side * L * 0.74, y = cy + L * 0.08;
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(turn); ctx.translate(-S / 2, -S / 2); ctx.scale(S / 100, S / 100);
+      ctx.fillStyle = '#2b2f2b'; ctx.fill(this.goosePath ||= new Path2D(GOOSE_PATH));
+      ctx.fillStyle = '#e8743b'; ctx.fill(this.gooseNose ||= new Path2D(GOOSE_NOSE));
+      ctx.strokeStyle = '#7f8f7f'; ctx.lineWidth = (100 / S) * 1.2; ctx.stroke(this.goosePath);
+      ctx.restore();
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = `12px ${MONO}`;
+      ctx.fillStyle = '#cfe8cf';
+      const timers = [...d.reload].sort((a, b) => a - b).map((t) => `${Math.ceil(t)}s`).join(' ');
+      ctx.fillText(`AIM-9X ${'●'.repeat(d.ammo)}${'○'.repeat(DRONE_AMMO - d.ammo)}  ${timers || `${DRONE_RELOAD}s`}`, x, y + S / 2 + 18);
+      ctx.fillStyle = '#6f7f6f'; ctx.font = `10px ${MONO}`;
+      ctx.fillText('FQ-50A GOOSE', x, y + S / 2 + 33);
+      ctx.restore();
+    }
   }
 
   drawHud() {
@@ -1052,10 +1124,9 @@ class TomcatGame {
       ctx.font = `13px ${MONO}`; ctx.textBaseline = 'middle';
       ctx.fillStyle = empty ? '#888' : '#fff';
       ctx.fillText(`${card.short} | ${inv.count}/${card.max}`, pad + 10, y + h / 2 + 1);
-      if (inv.regenActive) {
-        ctx.fillStyle = '#a8c0ff'; ctx.textAlign = 'right';
-        ctx.fillText(`${Math.ceil(inv.regenT)}s`, pad + w - 8, y + h / 2 + 1);
-      }
+      ctx.textAlign = 'right';
+      ctx.fillStyle = inv.regenActive ? '#a8c0ff' : '#777';
+      ctx.fillText(`${Math.ceil(inv.regenActive ? inv.regenT : card.regen)}s`, pad + w - 8, y + h / 2 + 1);
       ctx.restore();
       y -= h + gap;
     }
@@ -1165,7 +1236,7 @@ class TomcatGame {
         [g.reason, why],
         [`Auto survived ${clock(g.time)}   ·   score ${g.score.toLocaleString()}   ·   +$${g.earned}`],
         [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
-        [this.hangarOpen ? 'Holding while you’re on the carrier' : this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}… · H carrier` : 'Space or START to fly again · H carrier', '#888'],
+        [this.hangarOpen ? 'Holding while you’re on the carrier' : this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}…` : 'Space or START to fly again', '#888'],
       ], edge);
       return;
     }
@@ -1176,7 +1247,7 @@ class TomcatGame {
       [`Survived ${clock(g.time)}`],
       [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
       [`High score ${Math.max(g.score, b.bestScore || 0).toLocaleString()}   ·   best time ${clock(Math.max(g.time, b.bestTime || 0))}`, '#9ecf9f'],
-      ['Space or START to fly again · H carrier', '#888'],
+      ['Space or START to fly again', '#888'],
     ], edge);
   }
 
@@ -1411,6 +1482,12 @@ export class Flight {
     }
     // a sortie still flying when the app closed ended there: what it earned is paid now
     if (app.settings.tomcat?.pending) this.bank();
+    // the Heater bay was a $ upgrade for one version (1.0.40): bought there, it's the perk now
+    const tc = app.settings.tomcat;
+    if (tc?.upgrades?.heater) {
+      const { heater, ...upgrades } = tc.upgrades;
+      app.saveSettings({ tomcat: { ...tc, upgrades, perks: { ...(tc.perks || {}), heater: 1 } } });
+    }
     this.lastBadgeCheck = 0;
     this.view = null; // the TomcatEditor drawing it full size, while that tab is the one on screen
     this.game = new TomcatGame(null, {
@@ -2003,6 +2080,7 @@ export class TomcatEditor extends BaseEditor {
       ['Notch', `ready every ${Math.round(g.notchCooldown())} s`],
       (u.armor || (this.app.settings.tomcat?.rebirths || 0)) ? ['Armor', `${u.armor || 0} hit${u.armor === 1 ? '' : 's'} a sortie${flying ? ` (${g.armor} left)` : ''}`] : null,
       ['$ per kill', `×${(contracts * favor * wavePay).toFixed(2)}`, `Defense contracts ${pct(contracts)} · Admiral’s favor ${pct(favor)} · wave ${pct(wavePay)}`],
+      ['Wingmen', u.wingman ? `${u.wingman} × FQ-50A Goose · ${DRONE_AMMO} AIM-9X each · ${DRONE_RELOAD} s a missile` : 'none'],
       ['Speeds', speedsFor(perks).map((n) => `${n}×`).join(' ')],
     ]);
 
@@ -2070,11 +2148,14 @@ export class TomcatEditor extends BaseEditor {
     const level = perks[p.id] || 0;
     const cost = p.cost(level);
     if (level >= p.max || (t.tokens || 0) < cost) return;
+    const g = this.game;
+    const before = Object.fromEntries(Object.keys(g.inv).map((k) => [k, g.spec(k).max]));
     t.tokens -= cost;
     perks[p.id] = level + 1;
     t.perks = perks;
     this.app.settings.tomcat = t;
     this.flight.flushCash();
+    for (const [k, inv] of Object.entries(g.inv)) inv.count += g.spec(k).max - before[k]; // new rails come loaded
     this.app.sounds?.play?.('click');
     this.renderHangar();
     this.refreshStatus();
@@ -2123,6 +2204,7 @@ export class TomcatEditor extends BaseEditor {
     this.app.settings.tomcat = t;
     this.flight.flushCash();
     if (u.id === 'armor') g.armor = lv.armor; // bought on the ramp: on for this sortie
+    if (u.id === 'wingman') while (g.drones.length < lv.wingman) g.drones.push(g.newDrone(g.drones.length)); // joins you now
     // new rails come loaded
     for (const [k, inv] of Object.entries(g.inv)) inv.count += g.spec(k).max - before[k];
     this.app.sounds?.play?.('click');
