@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.0.35",
+    "date": "2026-10-14",
+    "notes": [
+      "Settings → Appearance → Interface font: pick the font for the app itself (menus, panels, the home screen), or keep the theme's own.",
+      "Settings → Appearance → Animations: turn off hovers, fades and sliding panels; everything still works, it just changes at once.",
+      "Custom theme: Gradient background. Pick the colour it fades to and its direction; the window chrome turns to tinted glass over it.",
+      "Another hidden theme turned up.",
+      "Fixed: in the fullscreen music player, a long library could cover the playlist row under Library/Queue."
+    ]
+  },
+  {
     "version": "1.0.34",
     "date": "2026-10-14",
     "notes": [

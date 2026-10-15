@@ -10,7 +10,7 @@ import { api } from '../core/api.js';
 let monacoPromise = null;
 
 /** The Monaco colour theme that goes with the app theme. */
-export const monacoTheme = (t) => (t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : 'bds-dark');
+export const monacoTheme = (t) => (t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : 'bds-dark');
 
 let themeDefs = null; // the built-in definitions, kept to build the custom one from
 /** Re-made each time (the palette may have changed): the base theme's syntax colours on the palette's backgrounds. */
@@ -181,6 +181,31 @@ function defineThemes(monaco) {
       'editorWidget.background': '#181010', 'editorWidget.border': '#3d2121', 'editorSuggestWidget.background': '#181010',
       'editorSuggestWidget.selectedBackground': '#c8161d33', 'editorHoverWidget.background': '#181010', 'input.background': '#110b0b',
       'input.border': '#3d2121', 'focusBorder': '#c8161d88', 'scrollbarSlider.background': '#3a141688', 'scrollbarSlider.hoverBackground': '#5a1a1eaa',
+    },
+  });
+  // Blurple: a code block in the old chat app
+  monaco.editor.defineTheme('bds-blurple', {
+    base: 'vs-dark', inherit: true,
+    rules: [
+      { token: '', foreground: 'dcddde' },
+      { token: 'comment', foreground: '72767d', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '8ea1e1' }, { token: 'keyword.json', foreground: '8ea1e1' },
+      { token: 'string', foreground: '43b581' }, { token: 'string.key.json', foreground: '8ea1e1' }, { token: 'string.value.json', foreground: '43b581' },
+      { token: 'number', foreground: 'faa61a' }, { token: 'regexp', foreground: 'faa61a' }, { token: 'constant', foreground: 'faa61a' },
+      { token: 'type', foreground: '00b0f4' }, { token: 'type.identifier', foreground: '00b0f4' },
+      { token: 'tag', foreground: '8ea1e1' }, { token: 'attribute.name', foreground: 'faa61a' }, { token: 'attribute.value', foreground: '43b581' },
+      { token: 'delimiter', foreground: 'b9bbbe' }, { token: 'key', foreground: '8ea1e1' }, { token: 'variable', foreground: 'dcddde' },
+    ],
+    colors: {
+      ...darkDef.colors,
+      'editor.background': '#36393f', 'editorGutter.background': '#36393f', 'minimap.background': '#36393f', 'editor.foreground': '#dcddde',
+      'editorLineNumber.foreground': '#5c6067', 'editorLineNumber.activeForeground': '#dcddde', 'editorCursor.foreground': '#dcddde',
+      'editor.selectionBackground': '#7289da55', 'editor.inactiveSelectionBackground': '#7289da2a', 'editor.selectionHighlightBackground': '#7289da22',
+      'editor.lineHighlightBackground': '#32353b', 'editor.findMatchBackground': '#faa61a55', 'editor.findMatchHighlightBackground': '#7289da33',
+      'editorIndentGuide.activeBackground1': '#7289da55', 'editorBracketMatch.background': '#7289da22', 'editorBracketMatch.border': '#7289da88',
+      'editorWidget.background': '#2f3136', 'editorWidget.border': '#202225', 'editorSuggestWidget.background': '#2f3136',
+      'editorSuggestWidget.selectedBackground': '#7289da44', 'editorHoverWidget.background': '#18191c', 'input.background': '#40444b',
+      'input.border': '#40444b', 'focusBorder': '#7289da', 'scrollbarSlider.background': '#20222588', 'scrollbarSlider.hoverBackground': '#18191caa',
     },
   });
   monaco.editor.defineTheme('bds-light', themeDefs.light = {

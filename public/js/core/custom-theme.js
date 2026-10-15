@@ -3,7 +3,7 @@
 // few light-only rules), and the derived colours sit on top as inline variables on <html>, so they win over it.
 // The result is also kept in localStorage so index.html can put it on before the app loads (no flash of the base).
 
-export const CUSTOM_DEFAULT = { base: 'dark', bg: '#0f1620', accent: '#4da3ff', accent2: '#3ee6c4' };
+export const CUSTOM_DEFAULT = { base: 'dark', bg: '#0f1620', accent: '#4da3ff', accent2: '#3ee6c4', gradient: false, bg2: '#2a1240', angle: 135 };
 
 export const CUSTOM_PRESETS = [
   { name: 'Ocean', base: 'dark', bg: '#0f1620', accent: '#4da3ff', accent2: '#3ee6c4' },
@@ -19,7 +19,7 @@ export const CUSTOM_PRESETS = [
 
 const VARS = ['--bg-0', '--bg-1', '--bg-2', '--bg-3', '--bg-4', '--bg-5', '--line', '--line-2', '--text', '--text-2', '--text-3',
   '--accent', '--accent-strong', '--accent-2', '--accent-soft', '--accent-soft-2', '--accent-line', '--gloss', '--focus',
-  '--desk', '--desk-grid', '--scroll', '--scroll-hover'];
+  '--desk', '--desk-grid', '--scroll', '--scroll-hover', '--custom-grad'];
 
 const rgb = (hex) => {
   let x = String(hex || '').replace('#', '');
@@ -39,12 +39,14 @@ export function normalizeCustom(p) {
   return {
     base: p?.base === 'light' ? 'light' : 'dark',
     bg: ok(p?.bg) ? p.bg : d.bg, accent: ok(p?.accent) ? p.accent : d.accent, accent2: ok(p?.accent2) ? p.accent2 : d.accent2,
+    gradient: !!p?.gradient, bg2: ok(p?.bg2) ? p.bg2 : d.bg2,
+    angle: Number.isFinite(Number(p?.angle)) ? ((Math.round(Number(p.angle)) % 360) + 360) % 360 : d.angle,
   };
 }
 
 /** The full set of colours for a palette. */
 export function deriveCustom(palette) {
-  const { base, bg, accent, accent2 } = normalizeCustom(palette);
+  const { base, bg, accent, accent2, gradient, bg2, angle } = normalizeCustom(palette);
   const dark = base === 'dark';
   const far = dark ? '#ffffff' : '#000000'; // what the layers step toward
   const tint = mix(far, accent, 0.12); // text with a hint of the accent, like the built-in themes
@@ -67,6 +69,8 @@ export function deriveCustom(palette) {
     '--focus': `0 0 0 1px ${rgba(accent, 0.55)}, 0 0 14px ${rgba(accent, 0.18)}`,
     '--desk': mix(bg, dark ? '#000000' : '#000000', dark ? 0.35 : 0.08), '--desk-grid': rgba(accent, dark ? 0.035 : 0.05),
   });
+  // the gradient runs from the background colour to the second one; the window chrome turns to tinted glass over it
+  if (gradient) v['--custom-grad'] = `linear-gradient(${angle}deg, ${bg} 0%, ${mix(bg, bg2, 0.55)} 55%, ${bg2} 100%)`;
   return { base, vars: v };
 }
 
@@ -79,6 +83,7 @@ export function applyCustom(palette) {
   for (const k of VARS) root.style.removeProperty(k);
   root.style.removeProperty('--accent-text');
   root.classList.toggle('custom-theme', !!palette);
+  root.classList.toggle('custom-grad', !!palette?.gradient);
   if (!palette) { try { localStorage.removeItem('bds-custom-theme'); } catch { /* ignore */ } return null; }
   const { base, vars } = deriveCustom(palette);
   vars['--accent-text'] = accentText(vars['--accent']);

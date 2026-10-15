@@ -182,6 +182,41 @@
   color-scheme: dark;
 }
 
+/* Blurple (hidden): the classic 2018-era chat-app look. Blurple, four greys, and a server-list layout (below). */
+[data-theme="blurple"] {
+  --bg-0: #36393f;
+  --bg-1: #2f3136;
+  --bg-2: #32353b;
+  --bg-3: #3a3d44;
+  --bg-4: #40444b;
+  --bg-5: #4f545c;
+  --line: #26282c;
+  --line-2: #42454a;
+  --text: #dcddde;
+  --text-2: #b9bbbe;
+  --text-3: #8e9297;
+  --accent: #7289da;
+  --accent-strong: #8ea1e1;
+  --accent-2: #faa61a;
+  --accent-3: #43b581;
+  --accent-soft: rgba(114, 137, 218, 0.15);
+  --accent-soft-2: rgba(114, 137, 218, 0.3);
+  --accent-line: rgba(114, 137, 218, 0.6);
+  --gloss: linear-gradient(#7289da, #7289da);
+  --focus: 0 0 0 2px rgba(114, 137, 218, 0.7);
+  --danger: #f04747;
+  --warn: #faa61a;
+  --ok: #43b581;
+  --shadow: 0 8px 16px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(32, 34, 37, 0.6);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.2);
+  --desk: #202225;
+  --desk-grid: rgba(255, 255, 255, 0.02);
+  --scroll: #202225;
+  --scroll-hover: #18191c;
+  --titlebar-solid: #202225;
+  color-scheme: dark;
+}
+
 :root {
   --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
@@ -1285,6 +1320,8 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .music-full-main > * { flex-shrink: 0; }
 .music-full-side { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .music-full-side > .music-tabs { border-top: 0; padding-top: 0; }
+/* everything above the song list keeps its height; only the list gives way (the chip row scrolls sideways, so flex would squash it flat) */
+.music-full-side > :not(.music-list) { flex-shrink: 0; }
 .music-stage .music-list { max-height: none !important; min-height: 0 !important; flex: 1 1 auto !important; overflow-y: auto !important; }
 .music-art { --hue: 270; align-self: center; width: min(420px, 38vh); aspect-ratio: 1; border-radius: 22px; display: grid; place-items: center; background: linear-gradient(135deg, hsl(var(--hue) 75% 62%), hsl(calc(var(--hue) + 70) 70% 55%) 55%, hsl(calc(var(--hue) + 140) 80% 60%)); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45); transform: scale(calc(1 + var(--beat, 0) * 0.05)); transition: transform 0.08s linear, background 0.6s; }
 .music-art span { font-size: min(120px, 13vh); line-height: 1; color: rgba(255, 255, 255, 0.92); text-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); }
@@ -1426,6 +1463,80 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 [data-theme="blood"] .new-card .nc-title { font-family: var(--serif); font-weight: 400; font-size: 14px; letter-spacing: 0.06em; color: #e2d8d6; }
 [data-theme="blood"] .recent-list { border-color: #241616; }
 [data-theme="blood"] .recent-row .rr-icon { color: #e8363c; }
+
+/* ---------------------------------------------------------------- Blurple: chrome. The left rail is a server list
+   (round buttons that square off and get a white pill), the side panel the channel list, tabs are channels. */
+:root[data-theme="blurple"] { --font-ui: Whitney, 'gg sans', 'Helvetica Neue', Helvetica, Arial, sans-serif; --radius: 4px; --radius-lg: 8px; }
+[data-theme="blurple"] body, [data-theme="blurple"] #app { background: #202225; }
+[data-theme="blurple"] #titlebar { background: #202225; border-bottom-color: #202225; }
+[data-theme="blurple"] #titlebar::after { display: none; }
+[data-theme="blurple"] .brand-name { background: none; color: #72767d; -webkit-text-fill-color: currentColor; font-family: var(--font-ui); font-weight: 800; letter-spacing: 0.04em; }
+[data-theme="blurple"] #tabbar { background: #2f3136; border-bottom: 0; box-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 2px 0 rgba(6, 6, 7, 0.05); position: relative; z-index: 1; padding-bottom: 4px; }
+[data-theme="blurple"] .tab { border: 0; border-radius: 4px; font-family: var(--font-ui); font-size: 14px; font-weight: 500; color: #8e9297; margin: 2px 0; }
+[data-theme="blurple"] .tab:hover { background: rgba(79, 84, 92, 0.32); color: #dcddde; }
+[data-theme="blurple"] .tab.active { background: rgba(79, 84, 92, 0.6); color: #fff; }
+[data-theme="blurple"] .tab.active::before, [data-theme="blurple"] .tab.active::after { display: none; }
+[data-theme="blurple"] .tab.active .tab-icon { color: #fff; }
+[data-theme="blurple"] #toolbar-host { background: #36393f; border-bottom: 0; box-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 1.5px 0 rgba(6, 6, 7, 0.05), 0 2px 0 rgba(4, 4, 5, 0.05); position: relative; z-index: 1; }
+[data-theme="blurple"] #rail { background: #202225; border-right: 0; gap: 8px; padding-top: 12px; }
+[data-theme="blurple"] .rail-btn { border-radius: 50%; background: #36393f; color: #dcddde; transition: border-radius 0.15s ease, background 0.15s, color 0.15s; }
+[data-theme="blurple"] .rail-btn:hover { border-radius: 30%; background: #7289da; color: #fff; }
+[data-theme="blurple"] .rail-btn.active { border-radius: 30%; background: #7289da; color: #fff; }
+[data-theme="blurple"] .rail-btn::before { content: ''; position: absolute; left: -5px; top: 50%; width: 4px; height: 0; border-radius: 0 4px 4px 0; background: #fff; transform: translateY(-50%); transition: height 0.15s; }
+[data-theme="blurple"] .rail-btn:hover::before { height: 18px; }
+[data-theme="blurple"] .rail-btn.active::before { height: 30px; top: 50%; bottom: auto; left: -5px; width: 4px; border-radius: 0 4px 4px 0; background: #fff; box-shadow: none; }
+[data-theme="blurple"] #sidepanel { background: #2f3136; border-right: 0; }
+[data-theme="blurple"] .panel-head { font-family: var(--font-ui); font-size: 15px; font-weight: 600; letter-spacing: 0; text-transform: none; color: #fff; border-bottom: 0; height: 48px; box-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 2px 0 rgba(6, 6, 7, 0.05); }
+[data-theme="blurple"] .settings-group h4 { font-family: var(--font-ui); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: #8e9297; }
+[data-theme="blurple"] #rightrail { background: #2f3136; border-left: 0; }
+[data-theme="blurple"] #rightpanel { background: #2f3136; border-left: 0; }
+[data-theme="blurple"] .rrail-tab.active { color: #fff; background: #7289da; border-color: #7289da; box-shadow: none; }
+[data-theme="blurple"] #statusbar { background: #292b2f; border-top: 0; color: #b9bbbe; }
+[data-theme="blurple"] .sb-item.mode { color: #fff; font-weight: 600; }
+[data-theme="blurple"] .btn { border-radius: 3px; font-weight: 500; }
+[data-theme="blurple"] .btn.primary { background: #7289da; color: #fff; }
+[data-theme="blurple"] .btn.primary:hover { background: #677bc4; }
+[data-theme="blurple"] .btn.danger { color: #f04747; }
+[data-theme="blurple"] a { color: #00b0f4; }
+[data-theme="blurple"] ::selection { background: rgba(114, 137, 218, 0.55); color: #fff; }
+[data-theme="blurple"] ::-webkit-scrollbar { width: 8px; height: 8px; }
+[data-theme="blurple"] ::-webkit-scrollbar-track { background: #2e3338; border-radius: 4px; }
+[data-theme="blurple"] ::-webkit-scrollbar-thumb { background: #202225; border: 0; border-radius: 4px; }
+[data-theme="blurple"] .settings-panel select, [data-theme="blurple"] .settings-panel input[type="text"], [data-theme="blurple"] .settings-panel input[type="number"],
+[data-theme="blurple"] .modal input[type="text"], [data-theme="blurple"] .modal input[type="password"], [data-theme="blurple"] .modal select, [data-theme="blurple"] .modal textarea {
+  background: #40444b; border-color: transparent; border-radius: 5px; color: #dcddde;
+}
+[data-theme="blurple"] .brand-icon, [data-theme="blurple"] .home-hero img { filter: hue-rotate(-50deg) saturate(0.8); }
+
+/* ---------------------------------------------------------------- Blurple: home, laid out like a welcome channel.
+   The logo sits in a big round avatar, headings are category labels, the cards are embeds with a coloured side. */
+[data-theme="blurple"] .home { background: #36393f; }
+[data-theme="blurple"] .home-grid { display: none; }
+[data-theme="blurple"] .home-inner { max-width: 980px; padding-top: 32px; }
+[data-theme="blurple"] .home-hero { gap: 16px; padding-bottom: 22px; margin-bottom: 18px; border-bottom: 1px solid rgba(79, 84, 92, 0.48); }
+[data-theme="blurple"] .home-hero img { width: 68px; height: 68px; padding: 12px; border-radius: 50%; background: #4f545c; box-sizing: border-box; }
+[data-theme="blurple"] .home-title { font-family: var(--font-ui); font-weight: 800; font-size: 28px; letter-spacing: 0; color: #fff; }
+[data-theme="blurple"] .home-title .g { background: none; color: #fff; -webkit-text-fill-color: #fff; }
+[data-theme="blurple"] .home-title .cursor { display: none; }
+[data-theme="blurple"] .home-sub { font-family: var(--font-ui); font-size: 14px; color: #b9bbbe; }
+[data-theme="blurple"] .home-section-title { font-family: var(--font-ui); font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: #8e9297; margin: 20px 0 8px; }
+[data-theme="blurple"] .home-section-title::before { content: '⌄'; margin-right: -4px; font-size: 13px; position: relative; top: -3px; }
+[data-theme="blurple"] .home-section-title::after { display: none; }
+[data-theme="blurple"] .new-cards { gap: 8px; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+[data-theme="blurple"] .new-card { display: grid; grid-template-columns: 40px 1fr; align-content: center; align-items: center; column-gap: 12px; row-gap: 1px; padding: 12px 14px; border: 0; border-left: 4px solid #7289da; border-radius: 4px; background: #2f3136; }
+[data-theme="blurple"] .new-card:nth-child(3n+2) { border-left-color: #43b581; }
+[data-theme="blurple"] .new-card:nth-child(3n+3) { border-left-color: #faa61a; }
+[data-theme="blurple"] .new-card:hover { transform: none; background: #32353b; border-color: inherit; box-shadow: 0 1px 0 rgba(4, 4, 5, 0.2), 0 8px 16px rgba(0, 0, 0, 0.24); }
+[data-theme="blurple"] .new-card .nc-icon { width: 40px; height: 40px; border-radius: 50%; color: #fff; background: #7289da; transition: border-radius 0.15s; grid-row: 1 / span 2; grid-column: 1; }
+[data-theme="blurple"] .new-card:nth-child(3n+2) .nc-icon { color: #fff; background: #43b581; }
+[data-theme="blurple"] .new-card:nth-child(3n+3) .nc-icon { color: #fff; background: #faa61a; }
+[data-theme="blurple"] .new-card:hover .nc-icon { border-radius: 30%; }
+[data-theme="blurple"] .new-card .nc-title { grid-column: 2; align-self: end; font-size: 15px; font-weight: 600; color: #fff; }
+[data-theme="blurple"] .new-card .nc-sub { grid-column: 2; align-self: start; font-family: var(--font-ui); font-size: 12px; line-height: 1.35; color: #b9bbbe; }
+[data-theme="blurple"] .recent-list { border: 0; background: #2f3136; border-radius: 8px; }
+[data-theme="blurple"] .recent-row { border-bottom-color: #36393f; }
+[data-theme="blurple"] .recent-row:hover { background: #32353b; }
+[data-theme="blurple"] .banner { border-radius: 8px; }
 
 /* ---------------------------------------------------------------- AWG-9: the radar scope over everything */
 :root[data-theme="f14"] { --font-ui: ui-monospace, 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace; --radius: 0; --radius-lg: 0; }
@@ -1778,3 +1889,23 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 .ct-pick input[type="color"] { width: 22px; height: 22px; padding: 0; border: 1px solid var(--line-2); border-radius: 4px; background: none; cursor: pointer; }
 .ct-pick input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
 .ct-pick input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
+
+/* Settings → Appearance → Animations off: nothing slides, fades or eases (things still change, just at once) */
+.no-anim *, .no-anim *::before, .no-anim *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+/* ...and hovered things stay put instead of jumping up or growing */
+.no-anim .new-card:hover, .no-anim .swatch:hover { transform: none !important; }
+
+/* custom theme with a gradient background: the gradient behind everything, the window chrome as tinted glass */
+:root.custom-grad body, :root.custom-grad #app { background: var(--custom-grad); background-attachment: fixed; }
+:root.custom-grad #titlebar { background: color-mix(in srgb, var(--bg-1) 55%, transparent); }
+:root.custom-grad #tabbar { background: color-mix(in srgb, var(--bg-1) 45%, transparent); }
+:root.custom-grad .tab.active, :root.custom-grad .tab.active::after { background: color-mix(in srgb, var(--bg-0) 88%, transparent); }
+:root.custom-grad #toolbar-host { background: color-mix(in srgb, var(--bg-0) 85%, transparent); }
+:root.custom-grad #rail, :root.custom-grad #rightrail { background: color-mix(in srgb, var(--bg-0) 45%, transparent); }
+:root.custom-grad #sidepanel, :root.custom-grad #rightpanel { background: color-mix(in srgb, var(--bg-1) 50%, transparent); }
+:root.custom-grad #workspace { background: color-mix(in srgb, var(--bg-0) 30%, transparent); }
+:root.custom-grad .home { background: transparent; }
+:root.custom-grad #statusbar { background: color-mix(in srgb, var(--bg-1) 60%, transparent); }
+:root.custom-grad .new-card { background: color-mix(in srgb, var(--bg-2) 60%, transparent); }
+.ct-angle { width: 90px; }
+.ct-deg { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); min-width: 34px; }

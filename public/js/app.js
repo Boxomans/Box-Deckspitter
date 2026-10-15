@@ -44,7 +44,7 @@ const EDITORS = {
 };
 
 const DEFAULT_SETTINGS = {
-  theme: 'dark', nativeDialogs: true, showHidden: false, drafts: true, spellcheck: true,
+  theme: 'dark', uiFont: 'theme', nativeDialogs: true, showHidden: false, drafts: true, spellcheck: true,
   docFont: 'Calibri', docSize: 11, codeFontSize: 13, textFont: 'mono', textFontSize: 14, paper: 'white',
   sidebar: null, explorerDir: null,
 };
@@ -182,6 +182,21 @@ const THEMES = [
 const HIDDEN_THEMES = [
   ['f14', 'AWG-9', 'AWG-9 — F-14 radar scope', 'f14'],
   ['blood', 'Bloodflame Talons', 'Bloodflame Talons — blood & ember', 'star'],
+  ['blurple', 'Blurple', 'Blurple — old-school chat app', 'star'],
+];
+// Appearance → Interface font. 'theme' keeps whatever the theme uses (each hidden theme has its own).
+const UI_FONTS = [
+  ['theme', 'Theme default'],
+  ['inter', 'Inter', "'Inter', 'Segoe UI', system-ui, sans-serif"],
+  ['segoe', 'Segoe UI', "'Segoe UI', system-ui, sans-serif"],
+  ['arial', 'Arial', "Arial, Helvetica, sans-serif"],
+  ['verdana', 'Verdana', "Verdana, Geneva, sans-serif"],
+  ['trebuchet', 'Trebuchet MS', "'Trebuchet MS', sans-serif"],
+  ['georgia', 'Georgia (serif)', "Georgia, 'Times New Roman', serif"],
+  ['palatino', 'Palatino (serif)', "'Palatino Linotype', 'Book Antiqua', Palatino, serif"],
+  ['plex', 'IBM Plex Mono', "'IBM Plex Mono', Consolas, monospace"],
+  ['consolas', 'Consolas', "Consolas, 'Cascadia Mono', monospace"],
+  ['comic', 'Comic Sans MS', "'Comic Sans MS', 'Comic Sans', cursive"],
 ];
 const THEME_NAME = Object.fromEntries([...THEMES, ...HIDDEN_THEMES].map(([id, name]) => [id, name]));
 // side panels that can move between the right sidebar and the top bar
@@ -238,6 +253,7 @@ class App {
     this.mainWindow = win ? !!win.main : true;
     window.bdsShell?.onMainWindow?.(() => { this.mainWindow = true; this.syncTomcat(); });
     this.applyTheme(this.settings.theme, false);
+    this.applyLook();
     this.setupAppLock(); // before anything is drawn: the lock screen covers it straight away
     this.presence = createPresence(this);
     this.sounds = createSounds(this);
@@ -1067,6 +1083,19 @@ class App {
     const i = ids.indexOf(from);
     if (i < 0) return dir > 0 ? ids[0] : ids[ids.length - 1];
     return ids[(i + dir + ids.length) % ids.length];
+  }
+
+  /** The interface font and UI animations (Settings → Appearance). Kept in localStorage too so the page starts with them. */
+  applyLook() {
+    const root = document.documentElement;
+    const font = UI_FONTS.find(([id]) => id === this.settings.uiFont)?.[2];
+    if (font) root.style.setProperty('--font-ui', font); else root.style.removeProperty('--font-ui');
+    const still = this.settings.animations === false;
+    root.classList.toggle('no-anim', still);
+    try {
+      if (font) localStorage.setItem('bds-ui-font', font); else localStorage.removeItem('bds-ui-font');
+      if (still) localStorage.setItem('bds-no-anim', '1'); else localStorage.removeItem('bds-no-anim');
+    } catch { /* ignore */ }
   }
 
   applyTheme(theme, persist = true) {
@@ -2736,6 +2765,9 @@ class App {
         h('div', { class: 'settings-group' }, h('h4', {}, 'Appearance'),
           sel('theme', this.themeList().map(([id, , label]) => [id, label]), (v) => { this.applyTheme(v); customBox.hidden = v !== 'custom'; }),
           customBox,
+          h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Interface font'),
+          sel('uiFont', UI_FONTS.map(([id, label]) => [id, label]), () => this.applyLook()),
+          check('animations', 'Animations (hovers, fades, sliding panels)', () => this.applyLook()),
           check('sounds', 'Sounds', () => this.syncSoundButton()),
           check('soundTyping', 'Typing sounds'),
           check('soundHover', 'Hover sounds'),
@@ -2808,6 +2840,15 @@ class App {
         }, h('span', { style: { background: p.accent } }), h('span', { style: { background: p.accent2 } })))),
         h('div', { class: 'ct-row' }, h('div', { class: 'seg ct-tone' }, tone('dark', 'Dark'), tone('light', 'Light')),
           pick('bg', 'Background'), pick('accent', 'Accent'), pick('accent2', 'Highlight')),
+        (() => {
+          const on = h('input', { type: 'checkbox', checked: c.gradient });
+          on.addEventListener('change', () => { set({ gradient: on.checked }); draw(); });
+          const ang = h('input', { type: 'range', min: '0', max: '359', step: '1', value: String(c.angle), title: 'Direction', class: 'ct-angle' });
+          const deg = h('span', { class: 'ct-deg' }, `${c.angle}°`);
+          ang.addEventListener('input', () => { deg.textContent = `${ang.value}°`; set({ angle: Number(ang.value) }); });
+          return h('div', { class: 'ct-row' }, h('label', { class: 'check' }, on, 'Gradient background'),
+            c.gradient ? pick('bg2', 'Fades to') : null, c.gradient ? ang : null, c.gradient ? deg : null);
+        })(),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Pick a preset or your own three colours; every other shade is worked out from them.'));
     };
     // keep a little of the old background's colour when switching between dark and light
@@ -2904,7 +2945,7 @@ class App {
       const git = st.gitCheckout;
       toast(git ? `Update ${info.latest} is on GitHub — this is a git copy, so update it with git pull.` : `Box-DocSpitter ${info.latest} is available (you have ${info.current}).`, {
         timeout: 0, closable: true,
-        action: git ? null : { label: 'Update…', fn: () => { this.showPanel('settings'); setTimeout(() => [...document.querySelectorAll('.settings-group h4')].find((x) => x.textContent === 'Updates')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150); } },
+        action: git ? null : { label: 'Update…', fn: () => { this.showPanel('settings'); setTimeout(() => [...document.querySelectorAll('.settings-group h4')].find((x) => x.textContent === 'Updates')?.scrollIntoView({ block: 'start', behavior: this.settings.animations === false ? 'auto' : 'smooth' }), 150); } },
       });
     } catch { /* never bother anyone over a failed check */ }
   }
