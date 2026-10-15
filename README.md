@@ -1,5 +1,7 @@
 # BOX//DOCSPITTER
 
+https://discord.gg/3qxNWFErAV
+
 > local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to
 
 ![Box-DocSpitter home screen](docs/screenshot.png)
