@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.0.43",
+    "date": "2026-10-15",
+    "notes": [
+      "New Tools folder at the bottom of the left sidebar.",
+      "BoxTicker (in Tools): the NASDAQ Composite and the S&P 500, with live prices, today's change, a chart from 1 day to all time with hover read-outs, and a Compare view in % change. Search any ticker or company (stocks worldwide, ETFs, crypto, currencies) to add it as a card of its own. Refreshes every 30 seconds.",
+      "Another hidden theme turned up.",
+      "A hidden theme stopped dripping."
+    ]
+  },
+  {
     "version": "1.0.42",
     "date": "2026-10-14",
     "notes": [

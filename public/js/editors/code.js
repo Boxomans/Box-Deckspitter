@@ -10,7 +10,7 @@ import { api } from '../core/api.js';
 let monacoPromise = null;
 
 /** The Monaco colour theme that goes with the app theme (its right-click menu and lists in the app theme's colours). */
-export const monacoTheme = (t) => withMenus(t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : 'bds-dark');
+export const monacoTheme = (t) => withMenus(t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : t === 'kabuto' ? 'bds-kabuto' : 'bds-dark');
 
 const allDefs = {}; // every Monaco theme as first defined, so the menu colours can be laid over it again
 /** Any CSS colour → #rrggbb (Monaco wants hex; theme variables may be rgb() or a name). */
@@ -221,6 +221,31 @@ function defineThemes(monaco) {
       'editorWidget.background': '#181010', 'editorWidget.border': '#3d2121', 'editorSuggestWidget.background': '#181010',
       'editorSuggestWidget.selectedBackground': '#c8161d33', 'editorHoverWidget.background': '#181010', 'input.background': '#110b0b',
       'input.border': '#3d2121', 'focusBorder': '#c8161d88', 'scrollbarSlider.background': '#3a141688', 'scrollbarSlider.hoverBackground': '#5a1a1eaa',
+    },
+  });
+  // Kabuto-chō: amber LED keywords, green strings, red numbers, on the board's black
+  monaco.editor.defineTheme('bds-kabuto', {
+    base: 'vs-dark', inherit: true,
+    rules: [
+      { token: '', foreground: 'f0e3c8' },
+      { token: 'comment', foreground: '6b5f4a', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'ffa31a' }, { token: 'keyword.json', foreground: 'ffa31a' },
+      { token: 'string', foreground: '2ee86a' }, { token: 'string.key.json', foreground: 'ffa31a' }, { token: 'string.value.json', foreground: '2ee86a' },
+      { token: 'number', foreground: 'ff5a4f' }, { token: 'regexp', foreground: 'ff5a4f' }, { token: 'constant', foreground: 'ff5a4f' },
+      { token: 'type', foreground: 'ffd27a' }, { token: 'type.identifier', foreground: 'ffd27a' },
+      { token: 'tag', foreground: 'ffa31a' }, { token: 'attribute.name', foreground: 'ffd27a' }, { token: 'attribute.value', foreground: '2ee86a' },
+      { token: 'delimiter', foreground: '9a8a6c' }, { token: 'key', foreground: 'ffa31a' }, { token: 'variable', foreground: 'f0e3c8' },
+    ],
+    colors: {
+      ...darkDef.colors,
+      'editor.background': '#050505', 'editorGutter.background': '#050505', 'minimap.background': '#050505', 'editor.foreground': '#f0e3c8',
+      'editorLineNumber.foreground': '#3a3124', 'editorLineNumber.activeForeground': '#ffa31a', 'editorCursor.foreground': '#ffa31a',
+      'editor.selectionBackground': '#ffa31a40', 'editor.inactiveSelectionBackground': '#ffa31a22', 'editor.selectionHighlightBackground': '#ffa31a1c',
+      'editor.lineHighlightBackground': '#ffa31a0a', 'editor.findMatchBackground': '#2ee86a44', 'editor.findMatchHighlightBackground': '#ffa31a33',
+      'editorIndentGuide.activeBackground1': '#ffa31a50', 'editorBracketMatch.background': '#ffa31a22', 'editorBracketMatch.border': '#ffa31a88',
+      'editorWidget.background': '#16130f', 'editorWidget.border': '#3a3124', 'editorSuggestWidget.background': '#16130f',
+      'editorSuggestWidget.selectedBackground': '#ffa31a33', 'editorHoverWidget.background': '#16130f', 'input.background': '#0f0d0b',
+      'input.border': '#3a3124', 'focusBorder': '#ffa31a88', 'scrollbarSlider.background': '#2a221688', 'scrollbarSlider.hoverBackground': '#4a3a20aa',
     },
   });
   // Blurple: a code block in the old chat app

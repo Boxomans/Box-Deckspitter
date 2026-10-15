@@ -102,6 +102,8 @@ export const api = {
   get: (url) => request('GET', url),
   post: (url, json = {}) => request('POST', url, { json }),
   /** dir: a folder in the dump ('' = the top) → its folders and files; leave it out for every file. */
+  marketSearch: (q) => request('GET', `/api/market/search?q=${enc(q)}`),
+  market: (symbol, range = '1d') => request('GET', `/api/market?symbol=${enc(symbol)}&range=${enc(range)}`),
   dumpRev: (kind = 'image') => request('GET', `/api/dump/rev?kind=${enc(kind)}`),
   dump: (kind = 'image', dir) => request('GET', `/api/dump?kind=${enc(kind)}${dir != null ? `&dir=${enc(dir)}` : ''}`),
   dumpFolder: (path, kind = 'media') => request('POST', '/api/dump/folder', { json: { path, kind } }),

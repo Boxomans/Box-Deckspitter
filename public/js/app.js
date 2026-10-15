@@ -40,6 +40,7 @@ const EDITORS = {
   music: () => import('./editors/music.js').then((m) => m.MusicEditor),
   swap: () => import('./editors/swap.js').then((m) => m.SwapEditor),
   tunnel: () => import('./editors/tunnel.js').then((m) => m.TunnelEditor),
+  ticker: () => import('./editors/ticker.js').then((m) => m.TickerEditor),
   paint: () => import('./editors/paint.js').then((m) => m.PaintEditor),
 };
 
@@ -183,6 +184,7 @@ const HIDDEN_THEMES = [
   ['f14', 'AWG-9', 'AWG-9 — F-14 radar scope', 'f14'],
   ['blood', 'Bloodflame Talons', 'Bloodflame Talons — blood & ember', 'star'],
   ['blurple', 'Blurple', 'Blurple — old-school chat app', 'star'],
+  ['kabuto', 'Kabuto-chō', 'Kabuto-chō — 80s Tokyo quote board', 'activity'],
 ];
 // Appearance → Interface font. 'theme' keeps whatever the theme uses (each hidden theme has its own).
 const UI_FONTS = [
@@ -205,15 +207,15 @@ const THEME_NAME = Object.fromEntries([...THEMES, ...HIDDEN_THEMES].map(([id, na
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
 // tabs that are a tool (opened with newDocument(mode)), and the new-document kind for an untitled tab of each mode
-const TOOL_KINDS = new Set(['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'browser', 'tunnel']);
+const TOOL_KINDS = new Set(['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'browser', 'tunnel', 'ticker']);
 const NEW_KIND = { doc: 'doc', text: 'text', code: 'code', sheet: 'sheet', pdf: 'pdf', cut: 'cut', paint: 'paint' };
 const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
 // tool modes and the home-card name they're renamed by
 // files the video editor can use
 const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
-const TOOL_OF_MODE = { klep: 'BoxKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', swap: 'BoxSwap', tunnel: 'BoxTunnel', cut: 'Video editor', secure: 'Secure notes' };
+const TOOL_OF_MODE = { klep: 'BoxKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', scribe: 'BoxScribe', diff: 'BoxDiff', swap: 'BoxSwap', tunnel: 'BoxTunnel', ticker: 'BoxTicker', cut: 'Video editor', secure: 'Secure notes' };
 // tabs that are tools rather than files
-const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'tomcat', 'browser', 'music', 'tunnel'];
+const TOOL_MODES = ['klep', 'storage', 'mail', 'tape', 'scribe', 'diff', 'swap', 'secure', 'tomcat', 'browser', 'music', 'tunnel', 'ticker'];
 const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
 const HOME_TITLE = 'BOX//DOCSPITTER';
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
@@ -577,7 +579,7 @@ class App {
     this.syncFullScreen();
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
-    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'history', calendar: 'calendar', mediadump: 'image', docdump: 'file-pdf', settings: 'settings' };
+    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'history', calendar: 'calendar', mediadump: 'image', docdump: 'file-pdf', tools: 'toolbox', settings: 'settings' };
     for (const b of $$('.rail-btn[data-panel]')) {
       b.append(icon(railIcons[b.dataset.panel], 'lg'));
       b.addEventListener('click', () => this.togglePanel(b.dataset.panel));
@@ -1761,6 +1763,7 @@ class App {
       diff: { mode: 'diff', ext: '', base: this.toolName('BoxDiff') },
       swap: { mode: 'swap', ext: '', base: this.toolName('BoxSwap') },
       tunnel: { mode: 'tunnel', ext: '', base: this.toolName('BoxTunnel') },
+      ticker: { mode: 'ticker', ext: '', base: this.toolName('BoxTicker') },
       secure: { mode: 'secure', ext: '', base: this.toolName('Secure notes') },
       tomcat: { mode: 'tomcat', ext: '', base: 'F-14F Super Tomcat' },
       browser: { mode: 'browser', ext: '', base: 'Browser' },
@@ -1774,7 +1777,7 @@ class App {
       images = await pickOpen({ multi: true, title: 'Choose images', filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
       if (!images) return;
     }
-    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'swap' || kind === 'secure' || kind === 'tomcat' || kind === 'browser' || kind === 'music' || kind === 'tunnel') && !opts.another) {
+    if ((kind === 'klep' || kind === 'storage' || kind === 'mail' || kind === 'tape' || kind === 'scribe' || kind === 'swap' || kind === 'secure' || kind === 'tomcat' || kind === 'browser' || kind === 'music' || kind === 'tunnel' || kind === 'ticker') && !opts.another) {
       const existing = this.tabs.find((t) => t.mode === spec.mode);
       if (existing) { this.activate(existing); return existing; }
     }
@@ -2328,6 +2331,7 @@ class App {
     else if (name === 'recent') this.renderRecentPanel();
     else if (name === 'mediadump') this.renderDumpPanel('media');
     else if (name === 'docdump') this.renderDumpPanel('doc');
+    else if (name === 'tools') this.renderToolsPanel();
     else if (name === 'settings') this.renderSettings();
     else if (name === 'calendar') this.calendar.render(this.sidepanel);
     else if (name === 'spaces') this.ensureSpaces().then((s) => s.render(this.sidepanel));
@@ -2728,6 +2732,21 @@ class App {
     if (parts) toast(`${parts[0].toUpperCase()}${parts.slice(1)} — ${where}${skipped ? ` (${skipped} skipped: wrong kind of file)` : ''}`, { type: 'ok', timeout: 2200 });
     else if (skipped) toast(kind === 'media' ? 'Only pictures, videos and sounds go in the media dump.' : 'Only documents go in the doc dump.', { type: 'warn' });
     return n + moved;
+  }
+
+  /** The Tools folder at the foot of the left rail: tools that live here rather than on the home page. */
+  renderToolsPanel() {
+    const p = clear(this.sidepanel);
+    const tool = (ic, key, sub, open) => {
+      const b = h('button', { class: 'file-row tools-row', title: sub }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
+        h('span', { class: 'fr-name' }, this.toolName(key)), h('span', { class: 'fr-meta' }, sub));
+      b.addEventListener('click', open);
+      return b;
+    };
+    p.append(h('div', { class: 'panel-head' }, 'Tools', h('div', { class: 'grow' }),
+      h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
+    h('div', { class: 'panel-body' }, h('div', { class: 'file-list' },
+      tool('trending-up', 'BoxTicker', 'NASDAQ · S&P 500', () => this.newDocument('ticker')))));
   }
 
   async renderRecentPanel() {

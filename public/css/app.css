@@ -217,6 +217,42 @@
   color-scheme: dark;
 }
 
+/* Kabuto-chō (hidden): a 1980s Tokyo quote board. Amber LED on black, red for up and green for down (the Japanese way round), square cells. */
+[data-theme="kabuto"] {
+  --bg-0: #050505;
+  --bg-1: #0a0908;
+  --bg-2: #0f0d0b;
+  --bg-3: #16130f;
+  --bg-4: #1e1a14;
+  --bg-5: #29231a;
+  --line: #1f1b15;
+  --line-2: #3a3124;
+  --text: #f0e3c8;
+  --text-2: #c2ae88;
+  --text-3: #7d6e55;
+  --accent: #ffa31a;
+  --accent-strong: #ffc04d;
+  --accent-2: #ff3b30;
+  --accent-3: #2ee86a;
+  --accent-soft: rgba(255, 163, 26, 0.10);
+  --accent-soft-2: rgba(255, 163, 26, 0.20);
+  --accent-line: rgba(255, 163, 26, 0.5);
+  --gloss: linear-gradient(180deg, #ffd27a 0%, #ffa31a 55%, #e07a00 100%);
+  --focus: 0 0 0 1px rgba(255, 163, 26, 0.7), 0 0 12px rgba(255, 163, 26, 0.25);
+  --danger: #ff3b30;
+  --warn: #ffa31a;
+  --ok: #2ee86a;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --desk: #040404;
+  --desk-grid: rgba(255, 163, 26, 0.04);
+  --scroll: #2a2216;
+  --scroll-hover: #4a3a20;
+  --titlebar-solid: #000000;
+  --led-dots: radial-gradient(circle, rgba(255, 163, 26, 0.045) 0 0.9px, transparent 1.3px) 0 0 / 4px 4px;
+  color-scheme: dark;
+}
+
 :root {
   --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
@@ -1922,40 +1958,80 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 .ct-deg { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); min-width: 34px; }
 
 /* tool titles (BoxTape, BoxKlep, …) have their own fixed gradients; the custom and hidden themes paint them in their own colours, and type them in their own face where they have one */
-:root.custom-theme .klep-title .g, [data-theme="f14"] .klep-title .g, [data-theme="blood"] .klep-title .g, [data-theme="blurple"] .klep-title .g {
+:root.custom-theme .klep-title .g, [data-theme="f14"] .klep-title .g, [data-theme="blood"] .klep-title .g, [data-theme="blurple"] .klep-title .g, [data-theme="kabuto"] .klep-title .g {
   background: var(--gloss) !important; -webkit-background-clip: text !important; background-clip: text !important; color: transparent; }
 [data-theme="blood"] .klep-title { font-family: var(--serif); letter-spacing: 0.14em; }
 [data-theme="blurple"] .klep-title { font-family: var(--font-ui); letter-spacing: 0; font-weight: 700; }
 
-/* ---------------------------------------------------------------- Bloodflame Talons, deeper: blood running down
-   from the top of every page, a rune ring turning round the sigil, embers rising off the pool, drips off the cards,
-   and the window's edges stained dark red. All decoration: pointer-events off, and Animations off stills it. */
+/* ---------------------------------------------------------------- Kabuto-chō: chrome and its own home (a quote board) */
+:root[data-theme="kabuto"] { --font-ui: 'MS Gothic', 'Osaka-Mono', ui-monospace, Consolas, monospace; --font-mono: 'MS Gothic', 'Osaka-Mono', Consolas, monospace; --radius: 0; --radius-lg: 0; }
+[data-theme="kabuto"] body, [data-theme="kabuto"] #app { background: #000; }
+[data-theme="kabuto"] ::selection { background: rgba(255, 163, 26, 0.45); color: #000; }
+[data-theme="kabuto"] #titlebar { background: #000; }
+[data-theme="kabuto"] #titlebar::after { background: linear-gradient(90deg, #ff3b30 0 33%, #ffa31a 33% 67%, #2ee86a 67%); opacity: 0.75; height: 2px; }
+[data-theme="kabuto"] .brand-name { background: none; -webkit-text-fill-color: currentColor; color: #ffa31a; text-shadow: 0 0 8px rgba(255, 163, 26, 0.55); letter-spacing: 0.16em; }
+[data-theme="kabuto"] .brand-icon, [data-theme="kabuto"] .home-hero img { filter: hue-rotate(150deg) saturate(1.4) drop-shadow(0 0 10px rgba(255, 163, 26, 0.45)); }
+[data-theme="kabuto"] .tab { border-radius: 0; }
+[data-theme="kabuto"] .tab.active { color: #ffa31a; background: #0f0d0b; }
+[data-theme="kabuto"] .tab.active::before { top: 0; left: 0; right: 0; height: 2px; border-radius: 0; background: #ffa31a; box-shadow: 0 0 8px rgba(255, 163, 26, 0.7); opacity: 1; }
+[data-theme="kabuto"] .rail-btn.active { color: #ffa31a; background: rgba(255, 163, 26, 0.10); }
+[data-theme="kabuto"] .rail-btn.active::before { background: #ffa31a; box-shadow: 0 0 6px #ffa31a; }
+[data-theme="kabuto"] #statusbar { background: #000; color: #c2ae88; box-shadow: inset 0 1px 0 #3a3124; }
+[data-theme="kabuto"] .sb-item.mode { background: #ffa31a; color: #000; padding: 0 6px; font-weight: 700; letter-spacing: 0.12em; }
+[data-theme="kabuto"] .panel-head, [data-theme="kabuto"] .settings-group h4 { color: #ffa31a; letter-spacing: 0.18em; }
+[data-theme="kabuto"] .btn.primary { background: #ffa31a; color: #000; font-weight: 700; box-shadow: 0 0 10px rgba(255, 163, 26, 0.3); }
+[data-theme="kabuto"] .btn.primary:hover { background: #ffc04d; }
+[data-theme="kabuto"] a { color: #ffc04d; }
+[data-theme="kabuto"] ::-webkit-scrollbar-thumb { border-radius: 0; }
+[data-theme="kabuto"] #workspace { background: var(--led-dots), var(--bg-0); }
+/* home: the board. A ticker tape running along the top, the title lit in LED dots, cards as quote cells */
+[data-theme="kabuto"] .home { background: var(--led-dots), radial-gradient(1200px 400px at 50% 115%, rgba(255, 163, 26, 0.08), transparent 65%), #030303; }
+[data-theme="kabuto"] .home-grid { display: none; }
+[data-theme="kabuto"] .home::before {
+  content: '日経平均 38,915.87 ▲ +412.30   ◆   トヨタ自動車 7203  2,840 ▲ +35   ◆   ソニー 6758  7,420 ▼ −60   ◆   任天堂 7974  48,100 ▲ +900   ◆   日本電信電話 9432  1,640,000 ▲ +20,000   ◆   松下電器 6752  2,370 ▼ −10   ◆   日立 6501  1,180 ▲ +12   ◆   野村證券 8604  3,290 ▲ +50   ◆   新日鐵 5401  790 ▼ −4   ◆   富士通 6702  1,510 ▲ +20   ◆   円 / ドル 143.40   ◆   日経平均 38,915.87 ▲ +412.30   ◆   トヨタ自動車 7203  2,840 ▲ +35   ◆   ソニー 6758  7,420 ▼ −60   ◆   任天堂 7974  48,100 ▲ +900   ◆   日本電信電話 9432  1,640,000 ▲ +20,000   ◆   松下電器 6752  2,370 ▼ −10   ◆   日立 6501  1,180 ▲ +12   ◆   野村證券 8604  3,290 ▲ +50   ◆   新日鐵 5401  790 ▼ −4   ◆   富士通 6702  1,510 ▲ +20   ◆   円 / ドル 143.40   ◆   ';
+  display: block; position: sticky; top: 0; z-index: 3; width: max-content; height: 28px; line-height: 28px; white-space: pre; pointer-events: none;
+  font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: #ffa31a; text-shadow: 0 0 6px rgba(255, 163, 26, 0.6);
+  background: #000; border-bottom: 1px solid #3a3124;
+  animation: kb-tape 90s linear infinite;
+}
+@keyframes kb-tape { to { transform: translateX(-50%); } }
+[data-theme="kabuto"] .home-inner { padding-top: 40px; }
+[data-theme="kabuto"] .home-hero { padding: 18px 22px; background: #000; border: 1px solid #2a2418; box-shadow: inset 0 0 30px rgba(255, 163, 26, 0.06); }
+[data-theme="kabuto"] .home-title { font-family: var(--font-mono); font-size: 34px; font-weight: 700; letter-spacing: 0.14em; color: #ffa31a; text-shadow: 0 0 10px rgba(255, 163, 26, 0.7);
+  -webkit-mask-image: radial-gradient(circle, #000 0 1.15px, rgba(0, 0, 0, 0.35) 1.4px); -webkit-mask-size: 3px 3px; mask-image: radial-gradient(circle, #000 0 1.15px, rgba(0, 0, 0, 0.35) 1.4px); mask-size: 3px 3px; }
+[data-theme="kabuto"] .home-title .g { background: none; -webkit-text-fill-color: #ffa31a; color: #ffa31a; }
+[data-theme="kabuto"] .home-title .cursor { background: #2ee86a; border-radius: 0; }
+[data-theme="kabuto"] .home-sub { color: #2ee86a; }
+[data-theme="kabuto"] .home-sub::after { content: '東京証券取引所  ·  兜町  ·  前場'; display: block; margin-top: 6px; color: #7d6e55; letter-spacing: 0.3em; }
+[data-theme="kabuto"] .home-section-title { color: #000; background: #ffa31a; padding: 3px 10px; font-weight: 700; letter-spacing: 0.24em; }
+[data-theme="kabuto"] .home-section-title::before { content: '■'; flex: none; }
+[data-theme="kabuto"] .home-section-title::after { display: none; }
+[data-theme="kabuto"] .new-cards { gap: 2px; }
+[data-theme="kabuto"] .new-card { border: 0; border-radius: 0; background: #000; box-shadow: none; outline: 2px solid #2a2418; }
+[data-theme="kabuto"] .new-card:hover { transform: none; background: #0f0b05; box-shadow: inset 0 0 0 1px #ffa31a, 0 0 14px rgba(255, 163, 26, 0.25); }
+[data-theme="kabuto"] .new-card .nc-icon { border-radius: 0; color: #ffa31a; background: rgba(255, 163, 26, 0.08); }
+[data-theme="kabuto"] .new-card:nth-child(3n+2) .nc-icon { color: #ff3b30; background: rgba(255, 59, 48, 0.08); }
+[data-theme="kabuto"] .new-card:nth-child(3n+3) .nc-icon { color: #2ee86a; background: rgba(46, 232, 106, 0.08); }
+[data-theme="kabuto"] .new-card .nc-title { color: #ffa31a; font-weight: 700; text-shadow: 0 0 6px rgba(255, 163, 26, 0.35); }
+[data-theme="kabuto"] .new-card .nc-sub { color: #7d6e55; }
+[data-theme="kabuto"] .recent-list { border-color: #2a2418; border-radius: 0; background: #000; }
+[data-theme="kabuto"] .recent-row:nth-child(2n) { background: #070604; }
+[data-theme="kabuto"] .recent-row:hover { background: #16110a; }
+[data-theme="kabuto"] .recent-row .rr-icon { color: #ffa31a; }
+
+/* ---------------------------------------------------------------- Bloodflame Talons, deeper: a rune ring turning
+   round the sigil, embers rising off the pool, and the window's edges stained dark red. All decoration: pointer-events off, and Animations off stills it. */
 :root[data-theme="blood"] {
-  --bf-drips: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='120' viewBox='0 0 420 120'%3E%3Cdefs%3E%3ClinearGradient id='b' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%233a0306'/%3E%3Cstop offset='0.35' stop-color='%238a0a10'/%3E%3Cstop offset='1' stop-color='%23c8161d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg fill='url%28%23b%29'%3E%3Crect x='0' y='0' width='420' height='9'/%3E%3Cpath d='M0 9 Q6 10.7 12 9 Q18 11.6 24 9 Q30 11.1 36 9 Q42 11.8 48 9 Q54 11.9 60 9 Q66 10.2 72 9 Q78 10.0 84 9 Q90 12.5 96 9 Q102 10.8 108 9 Q114 10.7 120 9 Q126 13.0 132 9 Q138 11.4 144 9 Q150 12.5 156 9 Q162 11.4 168 9 Q174 11.9 180 9 Q186 10.5 192 9 Q198 11.9 204 9 Q210 12.6 216 9 Q222 11.6 228 9 Q234 12.2 240 9 Q246 12.0 252 9 Q258 10.2 264 9 Q270 12.3 276 9 Q282 11.8 288 9 Q294 10.9 300 9 Q306 10.1 312 9 Q318 12.6 324 9 Q330 11.4 336 9 Q342 12.2 348 9 Q354 12.6 360 9 Q366 12.1 372 9 Q378 12.8 384 9 Q390 11.2 396 9 Q402 12.4 408 9 Q414 11.3 420 9 V0 H0Z'/%3E%3Cpath d='M39.0 8 C42.4 11 42.0 65.0 40.8 67.2 A3.7 3.7 0 1 0 47.5 67.2 C46.3 65.0 45.9 11 49.3 8Z'/%3E%3Cpath d='M51.6 8 C57.1 11 56.5 69.9 54.0 73.9 A6.6 6.6 0 1 0 66.0 73.9 C63.6 69.9 63.0 11 68.4 8Z'/%3E%3Cpath d='M85.3 8 C90.6 11 90.0 101.5 88.0 105.1 A6.0 6.0 0 1 0 98.8 105.1 C96.8 101.5 96.2 11 101.5 8Z'/%3E%3Cpath d='M124.0 8 C126.6 11 126.4 93.2 125.2 95.0 A3.2 3.2 0 1 0 130.9 95.0 C129.7 93.2 129.4 11 132.0 8Z'/%3E%3Cpath d='M154.5 8 C160.0 11 159.4 59.2 157.3 63.0 A6.3 6.3 0 1 0 168.7 63.0 C166.5 59.2 165.9 11 171.4 8Z'/%3E%3Cpath d='M179.4 8 C182.2 11 181.9 90.4 180.9 92.2 A3.1 3.1 0 1 0 186.5 92.2 C185.5 90.4 185.2 11 188.0 8Z'/%3E%3Cpath d='M208.3 8 C211.3 11 211.0 13.5 209.7 15.6 A3.6 3.6 0 1 0 216.3 15.6 C215.0 13.5 214.6 11 217.7 8Z'/%3E%3Cpath d='M253.2 8 C259.1 11 258.4 10.8 256.0 14.9 A6.8 6.8 0 1 0 268.3 14.9 C265.9 10.8 265.3 11 271.1 8Z'/%3E%3Cpath d='M360.6 8 C364.2 11 363.8 22.0 362.8 24.2 A3.7 3.7 0 1 0 369.4 24.2 C368.4 22.0 368.0 11 371.6 8Z'/%3E%3Cpath d='M381.8 8 C386.8 11 386.3 91.8 385.2 94.6 A4.8 4.8 0 1 0 393.8 94.6 C392.7 91.8 392.1 11 397.1 8Z'/%3E%3Cpath d='M395.1 8 C399.4 11 399.0 9.4 397.3 12.4 A5.0 5.0 0 1 0 406.3 12.4 C404.6 9.4 404.1 11 408.5 8Z'/%3E%3C/g%3E%3C/svg%3E");
-  --bf-drips-sm: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='26' viewBox='0 0 300 26'%3E%3Cdefs%3E%3ClinearGradient id='b' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%233a0306'/%3E%3Cstop offset='0.35' stop-color='%238a0a10'/%3E%3Cstop offset='1' stop-color='%23c8161d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg fill='url%28%23b%29'%3E%3Crect x='0' y='0' width='300' height='3'/%3E%3Cpath d='M0 3 Q6 5.4 12 3 Q18 5.7 24 3 Q30 6.8 36 3 Q42 5.4 48 3 Q54 5.5 60 3 Q66 5.8 72 3 Q78 4.6 84 3 Q90 5.5 96 3 Q102 5.9 108 3 Q114 6.4 120 3 Q126 4.3 132 3 Q138 4.9 144 3 Q150 4.3 156 3 Q162 6.4 168 3 Q174 6.1 180 3 Q186 4.1 192 3 Q198 6.9 204 3 Q210 6.9 216 3 Q222 6.0 228 3 Q234 5.8 240 3 Q246 4.5 252 3 Q258 4.0 264 3 Q270 5.6 276 3 Q282 4.2 288 3 Q294 4.6 300 3 V0 H0Z'/%3E%3Cpath d='M10.3 2 C11.9 5 11.7 8.5 11.0 9.7 A2.0 2.0 0 1 0 14.6 9.7 C13.8 8.5 13.7 5 15.3 2Z'/%3E%3Cpath d='M71.1 2 C73.4 5 73.1 17.0 72.2 18.6 A2.7 2.7 0 1 0 77.1 18.6 C76.2 17.0 75.9 5 78.2 2Z'/%3E%3Cpath d='M130.4 2 C131.9 5 131.7 8.5 131.3 9.4 A1.5 1.5 0 1 0 134.0 9.4 C133.6 8.5 133.4 5 134.9 2Z'/%3E%3Cpath d='M137.7 2 C138.9 5 138.7 18.1 138.4 18.8 A1.2 1.2 0 1 0 140.6 18.8 C140.2 18.1 140.1 5 141.2 2Z'/%3E%3Cpath d='M146.6 2 C148.8 5 148.6 9.4 147.6 11.0 A2.6 2.6 0 1 0 152.3 11.0 C151.3 9.4 151.1 5 153.2 2Z'/%3E%3Cpath d='M152.3 2 C154.4 5 154.2 3.5 153.6 4.8 A2.2 2.2 0 1 0 157.5 4.8 C157.0 3.5 156.7 5 158.9 2Z'/%3E%3Cpath d='M187.5 2 C189.8 5 189.5 10.6 188.5 12.3 A2.7 2.7 0 1 0 193.4 12.3 C192.4 10.6 192.2 5 194.4 2Z'/%3E%3Cpath d='M195.0 2 C196.6 5 196.4 5.4 195.9 6.5 A1.8 1.8 0 1 0 199.0 6.5 C198.4 5.4 198.3 5 199.8 2Z'/%3E%3Cpath d='M246.8 2 C248.9 5 248.7 8.4 248.2 9.6 A2.0 2.0 0 1 0 251.8 9.6 C251.3 8.4 251.1 5 253.1 2Z'/%3E%3C/g%3E%3C/svg%3E");
-  --bf-drips-card: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='26' viewBox='0 0 160 26'%3E%3Cdefs%3E%3ClinearGradient id='b' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%233a0306'/%3E%3Cstop offset='0.35' stop-color='%238a0a10'/%3E%3Cstop offset='1' stop-color='%23c8161d'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg fill='url%28%23b%29'%3E%3Crect x='0' y='0' width='160' height='2'/%3E%3Cpath d='M0 2 Q6 4.9 12 2 Q18 5.2 24 2 Q30 5.4 36 2 Q42 5.8 48 2 Q54 5.2 60 2 Q66 5.8 72 2 Q78 3.1 84 2 Q90 4.4 96 2 Q102 5.8 108 2 Q114 4.9 120 2 Q126 5.7 132 2 Q138 3.3 144 2 Q150 4.4 156 2 Q162 3.7 168 2 V0 H0Z'/%3E%3Cpath d='M4.1 1 C5.3 4 5.2 20.3 4.7 21.1 A1.4 1.4 0 1 0 7.3 21.1 C6.8 20.3 6.6 4 7.8 1Z'/%3E%3Cpath d='M35.3 1 C36.4 4 36.2 18.6 36.0 19.3 A1.1 1.1 0 1 0 37.9 19.3 C37.6 18.6 37.5 4 38.6 1Z'/%3E%3Cpath d='M84.3 1 C85.8 4 85.6 5.9 85.3 6.8 A1.5 1.5 0 1 0 88.0 6.8 C87.7 5.9 87.5 4 89.0 1Z'/%3E%3Cpath d='M88.4 1 C90.3 4 90.1 6.8 89.6 7.9 A1.8 1.8 0 1 0 92.9 7.9 C92.4 6.8 92.2 4 94.0 1Z'/%3E%3C/g%3E%3C/svg%3E");
   --bf-ring: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3Cpath id='c' d='M100 100 m-84 0 a84 84 0 1 1 168 0 a84 84 0 1 1 -168 0'/%3E%3C/defs%3E%3Cg fill='none' stroke='%23b3121a' stroke-opacity='0.75'%3E%3Ccircle cx='100' cy='100' r='96' stroke-width='1.4'/%3E%3Ccircle cx='100' cy='100' r='73' stroke-width='0.8'/%3E%3Ccircle cx='100' cy='100' r='93' stroke-width='0.5' stroke-dasharray='1 5'/%3E%3C/g%3E%3Ctext font-family='Segoe UI Historic%2C Segoe UI Symbol%2C serif' font-size='13' fill='%23d0141c' letter-spacing='2.2'%3E%3CtextPath href='%23c' textLength='520'%3E%E1%9A%BE%E1%9B%81%E1%9A%BA%E1%9B%81%E1%9B%9A %E1%9B%AB %E1%9A%BE%E1%9B%81%E1%9A%BA%E1%9B%81%E1%9B%9A %E1%9B%AB %E1%9A%BE%E1%9B%81%E1%9A%BA%E1%9B%81%E1%9B%9A %E1%9B%AB %E1%9B%92%E1%9B%9A%E1%9B%9F%E1%9B%9E %E1%9A%A0%E1%9B%9A%E1%9A%A8%E1%9B%97%E1%9B%96 %E1%9B%AB %E1%9B%97%E1%9B%9F%E1%9A%BA%E1%9A%B7 %E1%9B%AB %E1%9A%A6%E1%9B%96 %E1%9A%A0%E1%9B%9F%E1%9A%B1%E1%9B%97%E1%9B%9A%E1%9B%96%E1%9B%8B%E1%9B%8B %E1%9B%97%E1%9B%9F%E1%9A%A6%E1%9B%96%E1%9A%B1 %E1%9B%AB %3C/textPath%3E%3C/text%3E%3C/svg%3E");
   --bg-0: #080404; --bg-1: #0d0606; --bg-2: #130909; --line: #2a1414; --line-2: #461c1e;
   caret-color: #ff3b33;
 }
-/* blood run down from under the tab bar over whatever is open */
-[data-theme="blood"] #workspace::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 26px; z-index: 40; pointer-events: none;
-  background: var(--bf-drips-sm) 0 0 / 300px 26px repeat-x; opacity: 0.85; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6));
-}
-/* and the edges of the window stained */
+/* the edges of the window stained */
 [data-theme="blood"] #workspace::after {
   content: ''; position: absolute; inset: 0; z-index: 39; pointer-events: none;
   box-shadow: inset 0 0 120px rgba(110, 0, 8, 0.45), inset 0 0 26px rgba(60, 0, 4, 0.6);
 }
 [data-theme="blood"] #titlebar::after { height: 2px; }
-/* home: long drips hanging off the top that stay put while the page scrolls under them */
-[data-theme="blood"] .home::before {
-  content: ''; display: block; position: sticky; top: 0; height: 120px; margin-bottom: -120px; z-index: 3; pointer-events: none;
-  background: var(--bf-drips) 0 0 / 420px 120px repeat-x; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 6px rgba(200, 20, 28, 0.35));
-  animation: bf-seep 9s ease-in-out infinite;
-}
-@keyframes bf-seep { 0%, 100% { background-size: 420px 120px; } 50% { background-size: 420px 132px; } }
 [data-theme="blood"] .home {
   background:
     radial-gradient(1400px 360px at 50% 112%, rgba(255, 60, 25, 0.26), transparent 70%),
@@ -1991,14 +2067,8 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 [data-theme="blood"] .home-section-title { color: #b0201f; }
 [data-theme="blood"] .home-section-title::before, [data-theme="blood"] .home-section-title::after { background: linear-gradient(90deg, transparent, #9a0c12); height: 1px; }
 [data-theme="blood"] .home-section-title::after { background: linear-gradient(90deg, #9a0c12, transparent); }
-/* altar cards: blood seeping from the top edge, a darker stone */
+/* altar cards: a darker stone */
 [data-theme="blood"] .new-card { position: relative; overflow: hidden; border-top: 2px solid #7a0a10; background: linear-gradient(180deg, #160909, #0a0505 70%); }
-[data-theme="blood"] .new-card::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 26px; pointer-events: none; opacity: 0.8;
-  background: var(--bf-drips-card) var(--bf-x, 0) 0 / 160px 26px repeat-x;
-}
-[data-theme="blood"] .new-card:nth-child(2n)::before { --bf-x: -57px; }
-[data-theme="blood"] .new-card:nth-child(3n)::before { --bf-x: -103px; }
 [data-theme="blood"] .new-card > * { position: relative; }
 [data-theme="blood"] .new-card:hover { background: linear-gradient(180deg, #230b0c, #0d0606 75%); }
 [data-theme="blood"] .new-card .nc-title { color: #ecdcd9; }
