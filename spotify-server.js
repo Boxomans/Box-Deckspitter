@@ -37,11 +37,12 @@ async function fromEmbed({ type, id }) {
   if (type === 'track') {
     return { title: ent.name || ent.title, items: [{ title: ent.name || ent.title, artist: (ent.artists || []).map((a) => a.name).join(', '), duration: Math.round((ent.duration || 0) / 1000), id }] };
   }
-  const items = (ent.trackList || []).filter((t) => t.title).map((t) => ({
+  const all = ent.trackList || [];
+  const items = all.filter((t) => t.title).map((t) => ({
     title: t.title, artist: String(t.subtitle || '').replace(/ /g, ' '), duration: Math.round((t.duration || 0) / 1000),
     id: String(t.uri || '').split(':').pop() || null,
   }));
-  return { title: ent.name || ent.title, items, maybeMore: items.length >= 100 };
+  return { title: ent.name || ent.title, items, maybeMore: all.length >= 100 }; // the page stops at 100 (a few may be blank)
 }
 
 /** The full list through Spotify's Web API (needs the user's own free client id + secret). */
@@ -76,9 +77,18 @@ async function fromApi({ type, id }, { clientId, clientSecret }) {
 
 // ---------------------------------------------------------------- matching a song on YouTube
 
-const norm = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+// accents come off Latin letters; Japanese, Korean, Cyrillic etc. stay (recomposed, so ド is still one letter)
+const norm = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const CJK = /[぀-ヿ㐀-鿿가-힯]/;
+/** How much of one wanted word is in a title: whole-word for spaced scripts; for Japanese/Chinese/Korean (no spaces), the
+ *  share of its two-character pieces that turn up (so 夏の終りの… still matches 夏の終わりの…). */
+function wordHit(w, t) {
+  if (!CJK.test(w) || w.length < 3) return t.includes(w) ? 1 : 0;
+  const grams = Array.from({ length: w.length - 1 }, (_, i) => w.slice(i, i + 2));
+  return grams.filter((g) => t.includes(g)).length / grams.length;
+}
 // versions you almost never want unless the Spotify title says so
-const AVOID = ['live', 'cover', 'karaoke', 'instrumental', 'remix', 'sped up', 'slowed', 'nightcore', '8d', 'reverb', 'reaction', 'tutorial', 'lesson', 'extended', '1 hour', '10 hours', 'loop', 'bass boosted', 'acapella', 'acoustic', 'demo', 'concert'];
+const AVOID = ['live', 'cover', 'karaoke', 'instrumental', 'remix', 'sped up', 'slowed', 'nightcore', '8d', 'reverb', 'reaction', 'tutorial', 'lesson', 'extended', '1 hour', '10 hours', 'loop', 'bass boosted', 'acapella', 'acoustic', 'demo', 'concert', 'club mix'];
 
 function score(c, want) {
   const t = norm(c.title);
@@ -90,8 +100,8 @@ function score(c, want) {
     const d = Math.abs(c.duration - want.duration);
     s += d <= 3 ? 40 : d <= 8 ? 28 : d <= 15 ? 12 : d <= 30 ? -10 : -80;
   } else if (want.duration) s -= 15; // only a penalty when we know how long the song should be (typed songs don't)
-  const words = wantT.split(' ').filter((w) => w.length > 1);
-  const hit = words.filter((w) => t.includes(w)).length / (words.length || 1);
+  const words = wantT.split(' ').filter((w) => w.length > 1 || CJK.test(w));
+  const hit = words.reduce((n, w) => n + wordHit(w, t), 0) / (words.length || 1);
   s += Math.round(hit * 35);
   if (firstArtist && (t.includes(firstArtist) || ch.includes(firstArtist))) s += 20;
   if (/ topic$/.test(ch)) s += 25; // YouTube's auto-generated "Artist - Topic" uploads are the studio recording
@@ -109,13 +119,15 @@ module.exports = function createSpotify({ secrets, saveSecrets, readJSONBody, ru
     const exe = tools().ytdlp;
     if (!exe) throw err(400, 'yt-dlp is not installed (winget install yt-dlp)');
     const artist = String(want.artist || '').split(',')[0].trim();
-    const q = (artist ? `${artist} - ${want.title}` : want.title).replace(/["\n]/g, ' ');
-    const json = JSON.parse(await runCapture(exe, ['-J', '--flat-playlist', '--no-warnings', '--', `ytsearch8:${q}`], timeoutMs));
-    const cands = (json.entries || []).filter((e) => e && (e.url || e.id)).map((e) => ({
-      url: e.url && /^https?:/.test(e.url) ? e.url : `https://www.youtube.com/watch?v=${e.id}`, title: e.title, duration: e.duration, channel: e.channel || e.uploader,
-    }));
-    const ranked = cands.map((c) => ({ ...c, score: score(c, want) })).sort((a, b) => b.score - a.score);
-    const best = ranked[0];
+    const search = async (q) => {
+      const json = JSON.parse(await runCapture(exe, ['-J', '--flat-playlist', '--no-warnings', '--', `ytsearch8:${q.replace(/["\n]/g, ' ')}`], timeoutMs));
+      return (json.entries || []).filter((e) => e && (e.url || e.id)).map((e) => ({
+        url: e.url && /^https?:/.test(e.url) ? e.url : `https://www.youtube.com/watch?v=${e.id}`, title: e.title, duration: e.duration, channel: e.channel || e.uploader,
+      })).map((c) => ({ ...c, score: score(c, want) })).sort((a, b) => b.score - a.score)[0];
+    };
+    let best = await search(artist ? `${artist} - ${want.title}` : want.title);
+    // nothing close: try the title on its own (Spotify's English artist name often isn't how YouTube writes it, e.g. Yasuha / 泰葉)
+    if ((!best || best.score < 35) && artist) { const b2 = await search(want.title); if (b2 && (!best || b2.score > best.score)) best = b2; }
     if (!best || best.score < 35) throw err(404, 'no close enough match on YouTube');
     return best;
   }

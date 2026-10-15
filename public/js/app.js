@@ -1110,6 +1110,9 @@ class App {
     clear(b).append(icon(THEMES.find(([id]) => id === next)?.[3] || 'moon')); // shows where a click goes
     b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[next]}, right-click for ${THEME_NAME[this.themeStep(-1, theme)]}`;
     if (persist) this.saveSettings({ theme });
+    // Settings open (the top-bar button or View menu changed it): keep its dropdown and the custom palette box in step
+    const pick = document.querySelector('select.set-theme');
+    if (pick) { pick.value = theme; const ct = document.querySelector('.ct-box'); if (ct) ct.hidden = theme !== 'custom'; }
     for (const t of this.tabs) t.editor?.onThemeChange?.(theme);
     if (window.bdsShell) {
       const cs = getComputedStyle(document.documentElement);
@@ -2763,7 +2766,7 @@ class App {
       h('div', { class: 'panel-head' }, 'Settings', h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
       h('div', { class: 'panel-body' }, h('div', { class: 'settings-panel' },
         h('div', { class: 'settings-group' }, h('h4', {}, 'Appearance'),
-          sel('theme', this.themeList().map(([id, , label]) => [id, label]), (v) => { this.applyTheme(v); customBox.hidden = v !== 'custom'; }),
+          Object.assign(sel('theme', this.themeList().map(([id, , label]) => [id, label]), (v) => this.applyTheme(v)), { className: 'set-theme' }),
           customBox,
           h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Interface font'),
           sel('uiFont', UI_FONTS.map(([id, label]) => [id, label]), () => this.applyLook()),

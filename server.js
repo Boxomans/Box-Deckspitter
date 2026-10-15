@@ -1000,7 +1000,7 @@ function retagMp3(file, { title, artist }) {
   });
 }
 
-async function grabAudio(job, items, parallel = 3, folder = '') {
+async function grabAudio(job, items, parallel = 3, folder = '', retries = 3) {
   // folder: a playlist (a folder in the audio dump) to save into; '' = the top of the audio dump
   const destDir = folder ? dumpAbs('audio', folder) : AUDIO_DUMP;
   await fsp.mkdir(destDir, { recursive: true });
@@ -1012,6 +1012,22 @@ async function grabAudio(job, items, parallel = 3, folder = '') {
   job.failed = 0;
   job.parallel = parallel;
   const overall = () => { job.progress = job.tracks.reduce((a, t) => a + (t.status === 'done' || t.status === 'failed' ? 1 : t.progress || 0), 0) / items.length; };
+  // YouTube turns down some of many requests made at once (403s, timeouts, "try again later") and lets the same one
+  // through a few seconds later, so each step gets a few tries before the song counts as failed. Not for answers
+  // that won't change: no match, missing tools, a video that's gone/private/age-locked.
+  const FINAL = /unavailable|private video|removed|confirm your age|age-restricted|copyright|not available in your country|members-only|premieres/i;
+  const retrying = async (tr, what, fn, tries = retries + 1) => {
+    for (let n = 1; ; n++) {
+      try { return await fn(); } catch (e) {
+        if (cancelled || n >= tries || e.status === 404 || e.status === 400 || e.name === 'AbortError' || FINAL.test(e.message)) throw e;
+        tr.note = `${what} — try ${n + 1} of ${tries}`;
+        tr.progress = 0;
+        overall();
+        await new Promise((r) => setTimeout(r, 2000 * n + Math.random() * 1500 * n)); // 2 s, 4 s, 6 s… staggered so the workers don't retry in step
+        if (cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
+      }
+    }
+  };
   let next = 0;
   async function worker() {
     while (!cancelled && next < items.length) {
@@ -1027,7 +1043,7 @@ async function grabAudio(job, items, parallel = 3, folder = '') {
         if (it.type === 'spotify') {
           // Spotify only gives us the song; find the same recording on YouTube and download that
           tr.note = 'finding it on YouTube';
-          const match = await spotify.findOnYouTube(it);
+          const match = await retrying(tr, 'finding it on YouTube', () => spotify.findOnYouTube(it));
           if (cancelled) throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
           tr.note = `from: ${match.title}`;
           const firstArtist = String(it.artist || '').split(',')[0].trim();
@@ -1040,7 +1056,7 @@ async function grabAudio(job, items, parallel = 3, folder = '') {
           const tmp = path.join(AUDIO_DUMP, '.incoming', crypto.randomBytes(6).toString('hex'));
           await fsp.mkdir(tmp, { recursive: true });
           try {
-            const made = await ytdlpToMp3(tr, it.url, tmp, onProgress, onChild, it.outName);
+            const made = await retrying(tr, 'downloading', () => ytdlpToMp3(tr, it.url, tmp, onProgress, onChild, it.outName));
             if (it.tags) await retagMp3(made, it.tags).catch(() => {}); // Spotify's title/artist, not the YouTube upload's
             const dest = await uniquePath(destDir, path.basename(made));
             await fsp.rename(made, dest);
@@ -1984,7 +2000,7 @@ const routes = {
 
   // Links → MP3s in the audio dump (one at a time; failures are skipped and reported per track).
   'POST /api/audio/grab': async (req) => {
-    const { items, parallel, folder } = await readJSONBody(req);
+    const { items, parallel, folder, retries } = await readJSONBody(req);
     const list = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.url === 'string').slice(0, 500);
     const lanes = Math.max(1, Math.min(6, Number(parallel) || 3));
     if (!list.length) throw Object.assign(new Error('Nothing to download'), { status: 400 });
@@ -1992,7 +2008,8 @@ const routes = {
     const sub = folder ? dumpRel(folder, 'audio', { folder: true }) : '';
     if (sub.includes('/')) throw Object.assign(new Error('A playlist is a single folder name'), { status: 400 });
     const job = newJob(list.length === 1 ? (list[0].title || list[0].url) : `${list.length} tracks`);
-    return startJob(job, () => grabAudio(job, list, lanes, sub));
+    const again = Number.isFinite(Number(retries)) ? Math.max(0, Math.min(10, Math.round(Number(retries)))) : 3;
+    return startJob(job, () => grabAudio(job, list, lanes, sub, again));
   },
 
   'POST /api/klep/download': async (req) => {

@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.0.36",
+    "date": "2026-10-14",
+    "notes": [
+      "BoxTape: songs YouTube turns down are tried again automatically, a few seconds apart. Pick how many retries next to “at a time”.",
+      "BoxTape: better matching for songs with Japanese, Korean or other non-English titles, and a second search when the first finds nothing close.",
+      "BoxTape: YouTube playlists now spot songs already in your audio dump (they start unticked), like Spotify links do.",
+      "BoxTape: the note about adding a Spotify key for playlists over 100 songs shows up again.",
+      "Music: EQ presets are a dropdown now, and you can save your own (and delete them).",
+      "The theme dropdown in Settings follows the theme button.",
+      "Tool titles take on the custom theme's colours.",
+      "A hidden theme got a lot more… itself."
+    ]
+  },
+  {
     "version": "1.0.35",
     "date": "2026-10-14",
     "notes": [

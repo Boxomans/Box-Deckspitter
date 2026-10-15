@@ -14,8 +14,9 @@ const post = (url, body) => fetch(url, { method: 'POST', headers: { 'X-BDS-Token
 const get = (url) => fetch(url, { headers: { 'X-BDS-Token': api.token } }).then((r) => r.json());
 
 // same idea as the music player's duplicate check: "Artist - Song (Official Video) (1)" ≈ "artist song"
+// (NFKC first: yt-dlp's Windows-safe file names turn : ? | " into their full-width look-alikes, ： ？ ｜ ＂)
 function songKey(s) {
-  return String(s).toLowerCase()
+  return String(s).normalize('NFKC').toLowerCase()
     .replace(/[([](?:official(?: music)?(?: video| audio| visualizer| lyric video)?|music video|lyric video|lyrics?|audio|video|visualizer|hd|hq|4k|explicit|clean)[)\]]/gi, ' ')
     .replace(/\s*\(\d+\)\s*$/, '')
     .replace(/[^a-z0-9\u00c0-\uffff]+/g, ' ')
@@ -65,7 +66,7 @@ export class TapeEditor extends BaseEditor {
       isLink ? 'reading the playlist… (big playlists take a few seconds)' : list ? 'lining up your songs…' : 'searching YouTube…')));
     try {
       const res = !isLink ? (list ? await this.fromList(list) : await this.search(url))
-        : /^spotify:|^https?:\/\/(open\.spotify\.com|spotify\.link)\//i.test(url) ? await this.fromSpotify(url) : await post('/api/klep/scan', { url, mode: 'ytdlp', playlist: 'on' });
+        : /^spotify:|^https?:\/\/(open\.spotify\.com|spotify\.link)\//i.test(url) ? await this.fromSpotify(url) : await this.fromLink(url);
       this.items = (res.items || []).filter((x) => x.url);
       this.title = res.title || '';
       this.render(res);
@@ -97,6 +98,23 @@ export class TapeEditor extends BaseEditor {
     });
     const n = items.filter((x) => x.already).length;
     return { title: `${items.length} songs from your list`, items, notes: [`Each song is matched to the best YouTube upload when it downloads.${n ? ` ${n} already in your audio dump start unticked.` : ''}`] };
+  }
+
+  /** A YouTube (or other yt-dlp) link or playlist → its videos; ones already in the audio dump start unticked. */
+  async fromLink(url) {
+    const res = await post('/api/klep/scan', { url, mode: 'ytdlp', playlist: 'on' });
+    let have = new Set();
+    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
+    // downloads are named after the video title, cut to 120 bytes, so a long title is looked for both whole and cut
+    const cut = (t) => { const b = new TextEncoder().encode(t); return b.length <= 120 ? t : new TextDecoder().decode(b.slice(0, 120)).replace(/�$/, ''); };
+    const items = res.items || [];
+    for (const it of items) {
+      const t = String(it.title || '');
+      if (t && (have.has(songKey(t)) || have.has(songKey(cut(t))))) it.already = true;
+    }
+    const n = items.filter((x) => x.already).length;
+    res.notes = [...(res.notes || []), ...(n ? [`${n} song${n === 1 ? ' is' : 's are'} already in your audio dump, so ${n === 1 ? 'it starts' : 'they start'} unticked.`] : [])];
+    return res;
   }
 
   /** Spotify → the song list (YouTube matching happens per song while downloading). */
@@ -173,6 +191,12 @@ export class TapeEditor extends BaseEditor {
     this.lanes = h('select', { class: 'tape-lanes', title: 'How many tracks download at the same time' }, [1, 2, 3, 4, 5, 6].map((n) => h('option', { value: String(n) }, `${n} at a time`)));
     this.lanes.value = String(this.app.settings.tapeParallel || 3);
     this.lanes.addEventListener('change', () => this.app.saveSettings({ tapeParallel: Number(this.lanes.value) }));
+    // a song YouTube turns down gets tried again this many times (a few seconds apart) before it counts as failed
+    this.retries = h('select', { class: 'tape-lanes', title: 'If YouTube turns a song down, try it again this many times (a few seconds apart) before giving up on it' },
+      [0, 1, 2, 3, 5, 10].map((n) => h('option', { value: String(n) }, n ? `${n} ${n === 1 ? 'retry' : 'retries'}` : 'No retries')));
+    this.retries.value = String(this.app.settings.tapeRetries ?? 3);
+    if (!this.retries.value) this.retries.value = '3';
+    this.retries.addEventListener('change', () => this.app.saveSettings({ tapeRetries: Number(this.retries.value) }));
     // tick everything you don't have yet, untick what's already in the audio dump
     const newOnly = this.items.some((x) => x.already)
       ? h('button', { class: 'btn sm', 'data-tip': 'Select only the songs that aren’t in your audio dump yet', onclick: () => {
@@ -181,7 +205,7 @@ export class TapeEditor extends BaseEditor {
       } }, icon('check', 'sm'), 'Only new songs')
       : null;
     R.append(h('div', { class: 'klep-results-head' }, h('label', { class: 'check' }, all, count), newOnly,
-      this.title ? h('span', { class: 'faint klep-pagetitle' }, '· ' + this.title) : null, h('div', { class: 'grow' }), this.destPicker(), this.lanes, goBtn), list);
+      this.title ? h('span', { class: 'faint klep-pagetitle' }, '· ' + this.title) : null, h('div', { class: 'grow' }), this.destPicker(), this.lanes, this.retries, goBtn), list);
     update();
   }
 
@@ -284,6 +308,7 @@ export class TapeEditor extends BaseEditor {
           ? { url: it.url, type: 'spotify', title: it.title, artist: it.artist, duration: it.duration, label: it.label }
           : { url: it.url, type: 'ytdlp', title: it.title })),
         parallel,
+        retries: Number(this.retries?.value ?? this.app.settings.tapeRetries ?? 3),
         folder: batch.folder || '',
       });
       batch.jobId = id;

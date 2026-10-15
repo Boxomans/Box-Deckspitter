@@ -199,7 +199,7 @@ export function createMusic(app) {
   // title with download junk around it — "Song (2).mp3", "Song (Official Video).mp3", "song - copy.mp3".
   const JUNK = /[([](?:official(?: music)?(?: video| audio| visualizer| lyric video)?|music video|lyric video|lyrics?|audio|video|visualizer|hd|hq|4k|explicit|clean|mv|m\/v)[)\]]/gi;
   function songKey(name) {
-    return stripExt(name).toLowerCase()
+    return stripExt(name).normalize('NFKC').toLowerCase()
       .replace(JUNK, ' ')
       .replace(/\s*\(\d+\)\s*$/, '')
       .replace(/\s*-\s*copy(\s*\(\d+\))?\s*$/, '')
@@ -728,14 +728,57 @@ export function createMusic(app) {
       markPreset();
       drawCurve();
     };
-    const presetRow = h('div', { class: 'music-presets' }, Object.keys(PRESETS).map((name) =>
-      h('button', { class: 'chip', dataset: { preset: name }, onclick: () => applyPreset(PRESETS[name]) }, name)));
+    // presets: a dropdown of the built-in ones and your own (saved in settings as musicEqPresets { name: { eq, low, high } })
+    const mine = () => {
+      const m = app.settings.musicEqPresets;
+      return m && typeof m === 'object' ? Object.fromEntries(Object.entries(m).filter(([, p]) => Array.isArray(p?.eq) && p.eq.length === NB)) : {};
+    };
+    const same = (p) => p.eq.every((v, i) => v === state.eq[i]) && Math.abs(p.low - state.low) < 2 && Math.abs(p.high - state.high) < 30;
+    const presetSel = h('select', { class: 'music-preset-sel', 'data-tip': 'EQ preset' });
+    const delB = h('button', { class: 'btn sm ghost', 'data-tip': 'Delete this preset of yours', onclick: () => deletePreset() }, icon('trash', 'sm'));
+    const saveB = h('button', { class: 'btn sm', 'data-tip': 'Save the current mixer settings as a preset', onclick: () => savePreset() }, icon('plus', 'sm'), 'Save preset');
+    const fillPresets = () => {
+      const own = mine();
+      clear(presetSel).append(
+        h('option', { value: '', hidden: true }, 'Custom (unsaved)'),
+        h('optgroup', { label: 'Presets' }, Object.keys(PRESETS).map((n) => h('option', { value: `b:${n}` }, n))),
+        Object.keys(own).length ? h('optgroup', { label: 'Yours' }, Object.keys(own).map((n) => h('option', { value: `u:${n}` }, n))) : null);
+    };
+    presetSel.addEventListener('change', () => {
+      const [kind, name] = [presetSel.value.slice(0, 1), presetSel.value.slice(2)];
+      const p = kind === 'b' ? PRESETS[name] : mine()[name];
+      if (p) applyPreset(p);
+    });
+    const savePreset = async () => {
+      const cur = presetSel.value.startsWith('u:') ? presetSel.value.slice(2) : '';
+      const name = (await promptDialog('Save EQ preset', 'Name', cur, { placeholder: 'e.g. Car speakers' }))?.trim();
+      if (!name) return;
+      if (PRESETS[name]) { toast(`“${name}” is a built-in preset; pick another name.`); return; }
+      const own = mine();
+      if (own[name] && name !== cur && !await confirmDialog('Replace preset?', `You already have a preset called “${name}”. Replace it?`, { okLabel: 'Replace' })) return;
+      await app.saveSettings({ musicEqPresets: { ...own, [name]: { eq: [...state.eq], low: state.low, high: state.high } } });
+      fillPresets();
+      markPreset();
+    };
+    const deletePreset = async () => {
+      if (!presetSel.value.startsWith('u:')) return;
+      const name = presetSel.value.slice(2);
+      if (!await confirmDialog('Delete preset?', `Delete your EQ preset “${name}”? The mixer keeps its current settings.`, { okLabel: 'Delete', danger: true })) return;
+      const own = mine();
+      delete own[name];
+      await app.saveSettings({ musicEqPresets: own });
+      fillPresets();
+      markPreset();
+    };
+    const presetRow = h('div', { class: 'music-presets' }, h('span', { class: 'dim' }, 'Preset'), presetSel, saveB, delB);
     function markPreset() {
-      for (const b of presetRow.children) {
-        const p = PRESETS[b.dataset.preset];
-        b.classList.toggle('on', p.eq.every((v, i) => v === state.eq[i]) && Math.abs(p.low - state.low) < 2 && Math.abs(p.high - state.high) < 30);
-      }
+      // shows the preset that matches the sliders (yours first if one of yours matches), or "Custom (unsaved)"
+      const u = Object.entries(mine()).find(([, p]) => same(p))?.[0];
+      const b = Object.entries(PRESETS).find(([, p]) => same(p))?.[0];
+      presetSel.value = u ? `u:${u}` : b ? `b:${b}` : '';
+      delB.hidden = !u;
     }
+    fillPresets();
     showCuts();
     markPreset();
     eqWrap.append(
