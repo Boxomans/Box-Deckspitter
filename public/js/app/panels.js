@@ -1,0 +1,112 @@
+// Box-DocSpitter app shell, the left side panel: switching it, the Toolbox and Recent.
+// Methods of App (app.js mixes this class into it).
+
+import { $, $$, h, clear, timeAgo } from '../core/dom.js';
+import { icon } from '../core/icons.js';
+import { api } from '../core/api.js';
+import { contextMenu, rubberSelect } from '../core/ui.js';
+import { iconForName } from '../core/filetypes.js';
+import { TOOLS, offered } from '../core/tools.js';
+
+export class PanelsPart {
+  togglePanel(name) {
+    if (this.panel === name) this.hidePanel();
+    else this.showPanel(name);
+  }
+
+  hidePanel() {
+    this.panel = null;
+    this.sidepanel.hidden = true;
+    $$('.rail-btn').forEach((b) => b.classList.remove('active'));
+    this.saveSettings({ sidebar: null });
+    this.active?.editor?.onShow?.();
+  }
+
+  showPanel(name) {
+    this.panel = name;
+    this.sidepanel.hidden = false;
+    $$('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.panel === name));
+    if (name !== 'settings') this.saveSettings({ sidebar: name });
+    if (name === 'explorer') this.renderExplorer();
+    else if (name === 'recent') this.renderRecentPanel();
+    else if (name === 'mediadump') this.renderDumpPanel('media');
+    else if (name === 'docdump') this.renderDumpPanel('doc');
+    else if (name === 'tools') this.renderToolsPanel();
+    else if (name === 'settings') this.renderSettings();
+    else if (name === 'calendar') this.calendar.render(this.sidepanel);
+    else if (name === 'spaces') this.ensureSpaces().then((s) => s.render(this.sidepanel));
+    this.active?.editor?.onShow?.();
+  }
+
+  /** The Toolbox at the foot of the left rail: every tool in one list. */
+  renderToolsPanel() {
+    const p = clear(this.sidepanel);
+    const row = ([ic, key, sub, open, cls = '']) => {
+      const b = h('button', { class: `file-row tools-row ${cls}`, title: sub }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
+        h('span', { class: 'tools-text' }, h('span', { class: 'fr-name' }, this.toolName(key)), h('span', { class: 'tools-sub' }, sub)));
+      b.addEventListener('click', open);
+      b._find = `${this.toolName(key)} ${key} ${sub}`.toLowerCase();
+      return b;
+    };
+    // the home page's tools in your order (Music, Browser and BoxSpaces fill the window), then the rest
+    const groups = [
+      ['Tools', [...this.ordered('tools', this.homeTools(), (c) => c[1]),
+        ...TOOLS.filter((t) => t.toolbox && offered(t)).map((t) => [t.icon, t.name, t.toolbox, () => this.newDocument(t.mode)])]],
+      ['More', [
+        ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
+        ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
+        ...(this.settings.tomcatEnabled ? [['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.newDocument('tomcat')]] : []),
+      ]],
+    ];
+    const list = h('div', { class: 'file-list tools-list' });
+    for (const [title, items] of groups) list.append(h('div', { class: 'tools-group' }, title), ...items.map(row));
+    const filter = h('input', { type: 'search', class: 'tools-filter', placeholder: 'Filter tools…', spellcheck: false });
+    filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      for (const el of list.children) if (el._find !== undefined) el.hidden = !!q && !el._find.includes(q);
+      for (const g of list.querySelectorAll('.tools-group')) {
+        let n = g.nextElementSibling, any = false;
+        while (n && !n.classList.contains('tools-group')) { if (!n.hidden) any = true; n = n.nextElementSibling; }
+        g.hidden = !any;
+      }
+    });
+    filter.addEventListener('keydown', (e) => { if (e.key === 'Enter') [...list.children].find((el) => el._find !== undefined && !el.hidden)?.click(); });
+    // the sortie flying right now isn't in the totals until it ends
+    if (this.settings.tomcatEnabled && this._flight) this._flight.then((f) => {
+      const g = f.game;
+      const sub = list.querySelector('.tools-row:last-child .tools-sub');
+      if (g && !g.gameOver && sub && this.panel === 'tools') sub.textContent = this.splashLine(g.splashes);
+    }).catch(() => {});
+    p.append(h('div', { class: 'panel-head' }, 'Toolbox', h('div', { class: 'grow' }),
+      h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
+    h('div', { class: 'tools-filter-box' }, filter),
+    h('div', { class: 'panel-body' }, list));
+  }
+
+  async renderRecentPanel() {
+    const p = clear(this.sidepanel);
+    const list = h('div', { class: 'file-list' });
+    p.append(h('div', { class: 'panel-head' }, 'Recent', h('div', { class: 'grow' }),
+      h('button', { class: 'icon-btn', 'data-tip': 'Clear list', onclick: async () => { await api.removeRecent(null); this.renderRecentPanel(); } }, icon('trash', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
+    h('div', { class: 'panel-body' }, list));
+    rubberSelect(list, { scroller: () => list.parentElement, menu: (items) => this.recentManyMenu(items, () => this.renderRecentPanel()), onDelete: (items) => this.forgetRecents(items, () => this.renderRecentPanel()), onOpen: (items) => this.openMany(items) });
+    try {
+      const recent = await api.recent();
+      if (!recent.length) list.append(h('div', { class: 'empty-note' }, 'Nothing yet.'));
+      for (const r of recent) {
+        const row = h('button', { class: `file-row ${r.exists ? '' : 'muted'}`, title: r.path },
+          h('span', { class: 'fr-icon' }, icon(iconForName(r.name), 'sm')),
+          h('span', { class: 'fr-name' }, r.name),
+          h('span', { class: 'fr-meta' }, timeAgo(r.at)));
+        row.addEventListener('click', () => r.exists && this.openPath(r.path));
+        row.addEventListener('contextmenu', (e) => contextMenu(e, [
+          { label: 'Show in folder', disabled: !r.exists, action: () => api.reveal(r.path) },
+          { label: 'Remove from list', action: () => api.removeRecent(r.path).then(() => this.renderRecentPanel()) },
+        ]));
+        row._item = r;
+        list.append(row);
+      }
+    } catch (e) { list.append(h('div', { class: 'empty-note' }, e.message)); }
+  }
+}

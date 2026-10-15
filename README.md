@@ -410,4 +410,12 @@ The desktop window is Electron. `electron/main.js` is a tiny boot file that inst
 back; `electron/shell.js` is the window itself, which runs `server.js` as a child process. Server modules:
 `mail-server.js` (BoxMail), `update-server.js` (updates), `spotify-server.js` (Spotify links),
 `file-assoc.js` (Windows file types), `render-server.js` (video editor export), `swap-server.js` (BoxSwap),
-`settings-transfer.js` (setup export/import and the app PIN lock). `electron/secure-notes.js` runs in the window process, not the server.
+`settings-transfer.js` (setup export/import and the app PIN lock), `dumps-server.js` (the dumps), `media-server.js`
+(streaming, yt-dlp / ffmpeg, BoxKlep and BoxTape downloads), `appearance-server.js` (backgrounds and your fonts),
+`spaces-server.js` (BoxSpaces), `storage-server.js` (StoragePeek), `market-server.js` (BoxTicker),
+`presence-server.js` (Discord), `ai-server.js` (Ask Claude) and `secrets-store.js` (the sealed keys and passwords).
+`electron/secure-notes.js` runs in the window process, not the server.
+
+The page is plain ES modules. `public/js/app.js` starts the app; its methods are spread over `public/js/app/`, a
+file per part (tabs, menus, home page, settings and so on). `public/js/core/tools.js` is the one list of tools:
+a new tool is an entry there plus its editor in `public/js/editors/`.

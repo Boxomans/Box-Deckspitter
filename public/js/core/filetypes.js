@@ -1,6 +1,7 @@
 // File type → editor mode / language detection.
 
 import { extOf, basename, looksLikeText } from './dom.js';
+import { TOOL_ICON, TOOL_LABEL } from './tools.js';
 
 export const DOC_EXT = ['docx', 'docm', 'dotx', 'odt', 'rtf'];
 export const TEXT_EXT = ['txt', 'text', 'log', 'nfo', 'diz', 'asc', 'me', '1st', 'readme', 'out', 'srt', 'vtt', 'lrc'];
@@ -96,12 +97,12 @@ export function extForLang(lang) {
 
 export const MODE_ICON = {
   doc: 'file-doc', pdf: 'file-pdf', text: 'file-text', code: 'file-code', sheet: 'sheet', image: 'image', hex: 'binary',
-  video: 'video', cut: 'video', form: 'form-fill', klep: 'magnet', storage: 'layers', mail: 'mail', tape: 'music', scribe: 'scan-text', paint: 'brush', diff: 'diff', ai: 'bot', secure: 'lock', tomcat: 'f14', browser: 'globe', swap: 'swap', music: 'music', tunnel: 'tunnel', ticker: 'trending-up',
+  video: 'video', cut: 'video', form: 'form-fill', paint: 'brush', ai: 'bot', ...TOOL_ICON,
 };
 
-export const MODE_LABEL = { cut: 'Video editor', secure: 'Secure notes', tomcat: 'F-14F Super Tomcat', browser: 'Browser',
+export const MODE_LABEL = {
   doc: 'Document', pdf: 'PDF', text: 'Text', code: 'Code', sheet: 'Sheet', image: 'Image', hex: 'Binary',
-  video: 'Video', form: 'Form', klep: 'BoxKlep', storage: 'StoragePeek', mail: 'BoxMail', tape: 'BoxTape', music: 'Music', scribe: 'BoxScribe', paint: 'BoxPaint', diff: 'BoxDiff', swap: 'BoxSwap', tunnel: 'BoxTunnel', ticker: 'BoxTicker',
+  video: 'Video', form: 'Form', paint: 'BoxPaint', ...TOOL_LABEL,
 };
 
 export function iconForName(name, isDir) {

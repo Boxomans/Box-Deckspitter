@@ -1590,8 +1590,16 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 [data-theme="f14"] .home-title, [data-theme="f14"] .brand-name { text-shadow: 0 0 10px rgba(84, 255, 107, 0.35); }
 /* the scope's sweep: faint scanlines and a green glow from the bottom of the workspace, never in the way of clicks */
 [data-theme="f14"] #workspace { background: radial-gradient(1200px 500px at 50% 120%, rgba(84, 255, 107, 0.07), transparent 65%), var(--bg-0); }
+/* the scope's CRT: scanlines with a green phosphor edge, dark corners, and a refresh band rolling down the screen */
 [data-theme="f14"] #app::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
-  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0.12) 3px); mix-blend-mode: multiply; }
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.32) 0 1px, rgba(84, 255, 107, 0.035) 1px 2px, transparent 2px 4px),
+    radial-gradient(ellipse at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.38) 100%); }
+[data-theme="f14"] #app::before { content: ''; position: fixed; left: 0; right: 0; top: -30vh; height: 30vh; pointer-events: none; z-index: 9999;
+  background: linear-gradient(180deg, transparent, rgba(84, 255, 107, 0.045) 80%, rgba(84, 255, 107, 0.09) 97%, transparent);
+  animation: f14-refresh 7s linear infinite; }
+@keyframes f14-refresh { to { transform: translateY(130vh); } }
+@media (prefers-reduced-motion: reduce) { [data-theme="f14"] #app::before { display: none; } }
 
 .music-q-row.shuffled .music-track-n { color: var(--text-3); opacity: 0.7; }
 .music-q-head + .music-q-row.shuffled, .music-q-row + .music-q-head { margin-top: 6px; }

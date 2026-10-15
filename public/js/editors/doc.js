@@ -10,7 +10,7 @@ import {
 import { api } from '../core/api.js';
 import { pickOpen } from '../core/files.js';
 import { PAGE_SIZES, FONTS, FONT_SIZES, LH_FACTOR, pageDims, fontStack, docContentCss, printCss } from './doc/styles.js';
-import { sanitizeHtml, textToHtml, htmlToMarkdown, BLOCK_RE } from './doc/html-tools.js';
+import { sanitizeHtml, textToHtml, htmlToMarkdown, BLOCK_RE, safeUrl } from './doc/html-tools.js';
 import { importDocx } from './doc/docx-import.js';
 import { DumpDock, DUMP_MIME } from './doc/image-dump.js';
 import { PageTools } from './doc/pages.js';
@@ -1129,7 +1129,7 @@ export class DocEditor extends BaseEditor {
       e.preventDefault();
       const href = a.getAttribute('href');
       if (href.startsWith('#')) { const target = this.body.querySelector(href); if (target) this.scrollToEl(target); }
-      else window.open(href, '_blank', 'noopener');
+      else if (safeUrl(href)) window.open(href, '_blank', 'noopener');
       return;
     }
     const li = t.closest('ul.checklist > li');

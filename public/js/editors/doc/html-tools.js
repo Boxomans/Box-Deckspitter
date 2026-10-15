@@ -18,12 +18,14 @@ const KNOWN_CLASSES = new Set(['title', 'subtitle', 'checklist', 'page-break', '
 
 export const BLOCK_RE = /^(P|DIV|H[1-6]|UL|OL|LI|TABLE|THEAD|TBODY|TFOOT|TR|TD|TH|BLOCKQUOTE|PRE|HR|FIGURE|FIGCAPTION|DL|DT|DD|ADDRESS|CAPTION|COLGROUP|COL|CENTER)$/;
 
-function safeUrl(u, img) {
+/** A link or picture address that's safe to keep (no javascript: and the like); null when it isn't. */
+export function safeUrl(u, img) {
   const s = String(u || '').trim();
-  if (/^(https?:|mailto:|tel:|#)/i.test(s)) return s;
-  if (img && /^data:image\//i.test(s)) return s;
-  if (img && /^blob:/i.test(s)) return s;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) return s; // relative
+  const t = s.replace(/[\u0000-\u0020\u007f]/g, ''); // browsers skip tabs and newlines in a scheme (java\tscript:)
+  if (/^(https?:|mailto:|tel:|#)/i.test(t)) return s;
+  if (img && /^data:image\//i.test(t)) return s;
+  if (img && /^blob:/i.test(t)) return s;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(t)) return s; // relative
   return null;
 }
 

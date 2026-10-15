@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.0.45",
+    "date": "2026-10-15",
+    "notes": [
+      "Your API keys, tokens and email app passwords are now saved encrypted to your Windows account, so a copy of the data folder doesn't give them away. Moved to another PC or Windows account, they need entering again.",
+      "Links inside opened Word documents are checked like every other file type's, so a document can't sneak a script link in.",
+      "Opening several files at once outside the desktop app opens all of them, not just the first.",
+      "Fresh installs are about 130 MB smaller: parts of the code editor and PDF libraries the app never uses are skipped.",
+      "A hidden theme got scanlines.",
+      "Under the hood: the biggest code files are split into smaller parts. Nothing works differently; it just makes the app easier to keep fixing."
+    ]
+  },
+  {
     "version": "1.0.44",
     "date": "2026-10-15",
     "notes": [

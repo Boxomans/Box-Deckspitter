@@ -1,13 +1,14 @@
 {
   "name": "box-docspitter",
-  "version": "1.0.44",
+  "version": "1.0.45",
   "description": "Box-DocSpitter — a self-hosted document, PDF, text and code editor that runs entirely on your PC.",
   "main": "server.js",
   "private": true,
   "scripts": {
     "start": "node server.js",
     "app": "electron electron/main.js",
-    "browser": "node server.js --open"
+    "browser": "node server.js --open",
+    "postinstall": "node -e \"const fs=require('fs'),j=require('path').join;for(const[p,n,ds,k]of[['monaco-editor','min/vs/loader.js',['dev','esm','min-maps']],['pdf-lib','dist/pdf-lib.min.js',['es','cjs','src','ts3.4'],'pdf-lib.min.js'],['@cantoo/pdf-lib','cjs/index.js',['es','src','ts3.4'],'']])try{const b=j('node_modules',p);if(!fs.existsSync(j(b,n))||fs.lstatSync(b).isSymbolicLink())continue;for(const d of ds)fs.rmSync(j(b,d),{recursive:true,force:true});if(k!=null)for(const f of fs.readdirSync(j(b,'dist')))if(f.startsWith('pdf-lib')&&f!==k)fs.rmSync(j(b,'dist',f),{force:true})}catch(e){}\""
   },
   "author": "boxbind (Discord: @boxbind)",
   "license": "MIT",

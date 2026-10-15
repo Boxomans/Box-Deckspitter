@@ -2,6 +2,7 @@
 
 import { vendor, bytesToBase64 } from '../../core/dom.js';
 import { LH_FACTOR } from './styles.js';
+import { safeUrl } from './html-tools.js';
 
 const HIGHLIGHT = {
   yellow: '#ffff00', green: '#00ff00', cyan: '#00ffff', magenta: '#ff00ff', blue: '#0000ff', red: '#ff0000',
@@ -440,7 +441,7 @@ class Converter {
         case 'w:hyperlink': {
           const id = n.getAttribute('r:id');
           const anchor = n.getAttribute('w:anchor');
-          const href = id && this.rels[id] ? this.rels[id].target : anchor ? '#' + anchor : null;
+          const href = safeUrl(id && this.rels[id] ? this.rels[id].target : anchor ? '#' + anchor : null);
           const a = document.createElement('a');
           if (href) a.setAttribute('href', href);
           const prev = ctx.target;
@@ -456,7 +457,8 @@ class Converter {
           const m = /HYPERLINK\s+"([^"]+)"/.exec(instr);
           if (m) {
             const a = document.createElement('a');
-            a.setAttribute('href', m[1]);
+            const href = safeUrl(m[1]);
+            if (href) a.setAttribute('href', href);
             const prev = ctx.target;
             const outer = ctx.target();
             ctx.target = () => a;
