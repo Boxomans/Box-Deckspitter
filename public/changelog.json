@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.0.39",
+    "date": "2026-10-14",
+    "notes": [
+      "PDF editor and PDF from images: Ctrl+wheel zooms, and big image pages open fitted to the window instead of overflowing.",
+      "Background image: Settings → Appearance → Choose a picture, or right-click any picture → Set as app background. Sliders for how much theme shows over it and blur. It comes along in the setup export.",
+      "Pictures can also be set as your Windows desktop background (right-click, or the Background button in the image editor).",
+      "Your fonts: type any Google font's name in Settings → Appearance and click Get. Case, spaces and dashes don't matter, near misses get suggestions, and you can add your own .ttf / .otf.",
+      "Improved entertainment feature."
+    ]
+  },
+  {
     "version": "1.0.38",
     "date": "2026-10-14",
     "notes": [

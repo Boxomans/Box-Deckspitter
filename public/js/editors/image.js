@@ -250,6 +250,9 @@ export class ImageEditor extends BaseEditor {
       this.animated && this.tab.path ? tbButton('pages', 'Edit every frame in Paint', () => this.app.reopenAs(this.tab, 'paint'), { text: 'Frames' }) : null,
       tbSep(),
       tbButton('image', 'Send to media dump', () => this.toDump(), { text: 'To dump' }),
+      this.tab.path && this.app.backgroundMenu([this.tab.path]).length
+        ? tbButton('window', 'Set as the app or desktop background', (e) => showMenu(this.app.backgroundMenu([this.tab.path]), { anchor: e.currentTarget }), { text: 'Background' })
+        : null,
       this.tab.ext === 'svg' && this.tab.path ? tbButton('code', 'Edit SVG source', () => this.app.reopenAs(this.tab, 'code'), { text: 'Source' }) : null,
     );
   }

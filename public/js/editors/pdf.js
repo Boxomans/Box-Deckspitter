@@ -44,7 +44,7 @@ export class PdfEditor extends BaseEditor {
     this.pages = [];
     this.assets = new Map();
     this.textCache = new Map();
-    this.zoom = 1;
+    this.zoomLevel = 1;
     this.tool = 'select';
     this.pdfMode = this.constructor.mode === 'pdf' ? (['edit', 'view', 'fill'].includes(this.app.settings.pdfMode) ? this.app.settings.pdfMode : 'edit') : 'fill';
     this.props = { stroke: '#e53935', fill: null, width: 2, opacity: 1, color: '#111111', font: 'Helvetica', size: 14, bold: false, italic: false, highlight: '#ffd54f', whiteout: '#ffffff' };
@@ -66,9 +66,17 @@ export class PdfEditor extends BaseEditor {
     this.pages = src.pageModels;
     await this.loadForms(src).catch((e) => console.warn('forms', e));
     this.renderAll();
+    // pages bigger than the window (photos made into pages, large drawings) open fitted instead of at 100%
+    requestAnimationFrame(() => {
+      const pm = this.pages[0];
+      if (!pm || !this.scroller.clientWidth) return;
+      const d = displaySize(pm);
+      if (opts.images?.length) this.setZoom('page');
+      else if (d.w * PT_TO_PX > this.scroller.clientWidth - 48) this.setZoom('width');
+    });
   }
 
-  get k() { return PT_TO_PX * this.zoom; }
+  get k() { return PT_TO_PX * this.zoomLevel; }
 
   // =================================================================== sources
 
@@ -1494,18 +1502,18 @@ export class PdfEditor extends BaseEditor {
       const availH = this.scroller.clientHeight - 32;
       const zW = availW / (d.w * PT_TO_PX);
       const zP = Math.min(zW, availH / (d.h * PT_TO_PX));
-      this.zoom = clamp(v === 'width' ? zW : zP, 0.1, 6);
-    } else this.zoom = Number(v);
+      this.zoomLevel = clamp(v === 'width' ? zW : zP, 0.1, 6);
+    } else this.zoomLevel = Number(v);
     const cur = this.currentPage;
     this.renderAll(false);
     this.scrollToPage(cur);
-    if (this.zoomSel && ZOOMS.includes(this.zoom)) this.zoomSel.value = String(this.zoom);
+    if (this.zoomSel && ZOOMS.includes(this.zoomLevel)) this.zoomSel.value = String(this.zoomLevel);
   }
 
   zoomBy(dir) {
-    const i = ZOOMS.findIndex((z) => z >= this.zoom - 0.001);
-    const next = dir > 0 ? ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS[i] > this.zoom + 0.001 ? i : i + 1)] : ZOOMS[Math.max(0, i - 1)];
-    this.setZoom(next ?? this.zoom);
+    const i = ZOOMS.findIndex((z) => z >= this.zoomLevel - 0.001);
+    const next = dir > 0 ? ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS[i] > this.zoomLevel + 0.001 ? i : i + 1)] : ZOOMS[Math.max(0, i - 1)];
+    this.setZoom(next ?? this.zoomLevel);
   }
 
   zoom(delta) { if (delta === 0) this.setZoom(1); else this.zoomBy(delta); }
@@ -1600,7 +1608,7 @@ export class PdfEditor extends BaseEditor {
         ...(annots ? [{ text: `${annots} mark${annots === 1 ? '' : 's'}` }] : []),
         ...(this.fields.length ? [{ text: `${this.fields.length} form fields`, icon: 'form' }] : []),
       ],
-      right: [{ text: Math.round(this.zoom * 100) + '%', action: (e, el) => showMenu(ZOOMS.map((z) => ({ label: Math.round(z * 100) + '%', checked: z === this.zoom, action: () => this.setZoom(z) })).concat([{ sep: true }, { label: 'Fit width', action: () => this.setZoom('width') }, { label: 'Fit page', action: () => this.setZoom('page') }]), { anchor: el }) }],
+      right: [{ text: Math.round(this.zoomLevel * 100) + '%', action: (e, el) => showMenu(ZOOMS.map((z) => ({ label: Math.round(z * 100) + '%', checked: z === this.zoomLevel, action: () => this.setZoom(z) })).concat([{ sep: true }, { label: 'Fit width', action: () => this.setZoom('width') }, { label: 'Fit page', action: () => this.setZoom('page') }]), { anchor: el }) }],
     };
   }
 

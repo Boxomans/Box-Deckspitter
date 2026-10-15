@@ -119,7 +119,8 @@ files in to keep them, and use "Save this doc here" to put the open document in 
 
 **PDF** View, highlight, draw, add text, edit existing text, add shapes, arrows, whiteout, images and
 signatures. Fill form fields. Rotate, reorder (drag thumbnails), insert, duplicate, delete and extract
-pages, or merge in other PDFs and images. Saves a real PDF, or exports a flattened copy or PNGs.
+pages, or merge in other PDFs and images. Saves a real PDF, or exports a flattened copy or PNGs. Ctrl+wheel
+zooms (here and in PDF from images), and big image pages open fitted to the window.
 
 **Fill a form** A PDF mode built for government-style forms. Forms locked against editing (common on
 government sites) are opened as an unlocked copy automatically, so their fields work. It has a field list with progress, "next
@@ -359,6 +360,12 @@ the point of the encryption. Keep the sticky note somewhere other than next to t
   base, with an optional gradient background. Menus, dropdowns, the code editor and tool titles all follow
   the theme. Appearance also has an **Interface font** for the app itself and an **Animations** switch
   (off: nothing slides, fades or eases).
+- **Your fonts** (Settings → Appearance): type any Google font's name and click **Get**. Case, spaces,
+  dashes and symbols don't matter, and near misses get "Did you mean" suggestions. Fonts come free from
+  Fontsource and are saved in `data/fonts`. **Add a font file…** takes a .ttf or .otf of your own.
+- **Background image** (Settings → Appearance, or right-click a picture → *Set as app background*): a picture
+  behind the whole app, with sliders for how much theme shows over it and blur. It's included in the setup
+  export. Pictures also have *Set as desktop background* (Windows; JPG, PNG or BMP).
 - Windows open/save dialogs, or the built-in file browser.
 - **Sounds** for hover, clicks, typing, opening and closing documents (`public/assets/sounds/`). Click the
   speaker button to mute them. Hover it for a volume slider. Typing and hover sounds can be switched off
@@ -379,6 +386,8 @@ the point of the encryption. Keep the sticky note somewhere other than next to t
 |---|---|
 | `data/settings.json` | your preferences, Discord lines, My info |
 | `data/secrets.json` | keys you add: Anthropic, Gmail app passwords, GitHub token, Spotify key |
+| `data/fonts/` | fonts you added under Your fonts |
+| `data/backgrounds/` | the app background picture |
 | `data/boxswap/` | BoxSwap's profiles, the originals they replaced, and anything removed (`.removed`) |
 | `data/backups/` | previous versions of files you saved |
 | `data/backups/app/` | the app's own files from before each update (kept for "Go back") |

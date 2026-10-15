@@ -162,6 +162,7 @@ export class Spaces {
       { label: 'Open', icon: 'file', action: () => this.app.openPath(e.path) },
       { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document'], ['text', 'Text'], ['code', 'Code'], ['pdf', 'PDF'], ['sheet', 'Spreadsheet'], ['image', 'Image'], ['video', 'Video'], ['hex', 'Hex']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.app.openPath(e.path, { mode: m }) })) },
       ...this.app.videoEditorMenu([e.path]),
+      ...this.app.backgroundMenu([e.path]),
       { sep: true },
       { label: 'Compare with…', icon: 'diff', action: () => this.app.compareWith(e.path) },
       { label: 'Rename…', shortcut: 'F2', action: () => this.rename(e.path) },

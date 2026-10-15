@@ -16,11 +16,13 @@ const KIND = 'box-docspitter-setup';
 const LOCAL_ONLY = new Set(['explorerDir', 'spaces', 'musicLast', 'musicPos', 'musicPlaying', 'musicQueue', 'musicShuffleOrder', 'lastSeenVersion', 'welcomed', 'browserTabs', 'browserActive', 'browserPinned',
   'pinnedTabs', 'tunnel']); // pinned file paths and audio devices are this PC's too
 const NOTE_FILES = ['notes.bdsv', 'device.key'];
-const MAX_ZIP = 50 * 1024 * 1024;
+const MAX_ZIP = 90 * 1024 * 1024;
+const BG_RE = /^background\/(bg-[0-9a-f]{8}\.(?:jpg|jpeg|png|webp|gif|bmp))$/; // the app background picture, if there is one
 
 module.exports = function createTransfer({ root, data, version, settings, saveSettings, readJSONBody, requirePath, log }) {
   const JSZip = require(path.join(root, 'node_modules', 'jszip'));
   const NOTES = path.join(data, 'secure-notes');
+  const BGS = path.join(data, 'backgrounds');
   const LOCK = path.join(data, 'applock.json');
 
   // ---------------------------------------------------------------- app PIN lock
@@ -63,6 +65,8 @@ module.exports = function createTransfer({ root, data, version, settings, saveSe
       const f = path.join(NOTES, n);
       if (fs.existsSync(f)) { zip.file(`secure-notes/${n}`, fs.readFileSync(f)); files.push(n); }
     }
+    const bg = s.bgImage?.file;
+    if (bg && BG_RE.test(`background/${bg}`) && fs.existsSync(path.join(BGS, bg))) zip.file(`background/${bg}`, fs.readFileSync(path.join(BGS, bg)));
     zip.file('manifest.json', JSON.stringify({ kind: KIND, app: 'Box-DocSpitter', version, exported: new Date().toISOString(), secureNotes: files.includes('notes.bdsv') }, null, 2));
     const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     const tmp = `${out}.${crypto.randomBytes(4).toString('hex')}.tmp`;
@@ -83,7 +87,7 @@ module.exports = function createTransfer({ root, data, version, settings, saveSe
     let manifest;
     try { manifest = JSON.parse(await zip.file('manifest.json').async('string')); } catch { manifest = null; }
     if (manifest?.kind !== KIND) throw err(400, 'That .zip isn’t a Box-DocSpitter export.');
-    if (names.some((n) => !allowed.has(n))) throw err(400, 'That export has files in it that don’t belong; not importing it.');
+    if (names.some((n) => !allowed.has(n) && !BG_RE.test(n))) throw err(400, 'That export has files in it that don’t belong; not importing it.');
     let s = {};
     if (zip.file('settings.json')) {
       try { s = JSON.parse(await zip.file('settings.json').async('string')); } catch { throw err(400, 'The settings in that export are damaged.'); }
@@ -96,7 +100,9 @@ module.exports = function createTransfer({ root, data, version, settings, saveSe
       try { const j = JSON.parse(notes['notes.bdsv'].toString('utf8')); ok = j.magic === 'BDS-SECURE-NOTES'; } catch { /* no */ }
       if (!ok) throw err(400, 'The Secure notes in that export are damaged.');
     }
-    return { manifest, settings: s, notes };
+    const bgName = names.find((n) => BG_RE.test(n));
+    const bg = bgName ? { name: BG_RE.exec(bgName)[1], buf: await zip.file(bgName).async('nodebuffer') } : null;
+    return { manifest, settings: s, notes, bg };
   }
 
   async function importFrom(file, { replaceNotes = false } = {}) {
@@ -105,6 +111,11 @@ module.exports = function createTransfer({ root, data, version, settings, saveSe
     const cur = settings();
     const next = { ...cur };
     for (const [k, v] of Object.entries(x.settings)) if (!LOCAL_ONLY.has(k)) next[k] = v;
+    if (x.bg) {
+      await fsp.mkdir(BGS, { recursive: true });
+      for (const f of await fsp.readdir(BGS)) if (f !== x.bg.name) await fsp.rm(path.join(BGS, f), { force: true });
+      await fsp.writeFile(path.join(BGS, x.bg.name), x.bg.buf);
+    }
     await saveSettings(next);
     let notes = 'none';
     if (x.notes['notes.bdsv']) {

@@ -2014,3 +2014,41 @@ select option:checked { color: var(--accent-strong); }
 select option::checkmark { color: var(--accent); }
 select optgroup { color: var(--text-3); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; padding-top: 4px; }
 select optgroup option { font-size: 12.5px; font-weight: 400; letter-spacing: 0; }
+
+/* ---------------------------------------------------------------- Background image (Settings → Appearance): the picture
+   on a fixed layer behind everything, the theme's background laid over it (how much is the "Theme over it" slider), and
+   the window chrome turned to glass, as with the custom gradient. Documents keep their own solid pages. */
+:root.bg-image body, :root.bg-image #app { background: transparent; }
+:root.bg-image body::before {
+  content: ''; position: fixed; inset: calc(var(--bg-blur, 0px) * -2); z-index: -1; pointer-events: none;
+  background: linear-gradient(color-mix(in srgb, var(--bg-0) var(--bg-cover, 55%), transparent), color-mix(in srgb, var(--bg-0) var(--bg-cover, 55%), transparent)), var(--bg-image) center / cover no-repeat, var(--bg-0);
+  filter: blur(var(--bg-blur, 0px));
+}
+:root.bg-image #titlebar { background: color-mix(in srgb, var(--bg-1) 55%, transparent); }
+:root.bg-image #tabbar { background: color-mix(in srgb, var(--bg-1) 45%, transparent); }
+:root.bg-image .tab.active, :root.bg-image .tab.active::after { background: color-mix(in srgb, var(--bg-0) 88%, transparent); }
+:root.bg-image #toolbar-host { background: color-mix(in srgb, var(--bg-0) 85%, transparent); }
+:root.bg-image #rail, :root.bg-image #rightrail { background: color-mix(in srgb, var(--bg-0) 45%, transparent); }
+:root.bg-image #sidepanel, :root.bg-image #rightpanel { background: color-mix(in srgb, var(--bg-1) 70%, transparent); }
+:root.bg-image #workspace { background: transparent; }
+:root.bg-image .home { background: transparent; }
+:root.bg-image #statusbar { background: color-mix(in srgb, var(--bg-1) 60%, transparent); }
+:root.bg-image .new-card { background: color-mix(in srgb, var(--bg-2) 60%, transparent); }
+.bgi-box { display: flex; flex-direction: column; gap: 6px; }
+.bgi-row { align-items: center; gap: 8px; }
+.bgi-thumb { width: 64px; height: 40px; border-radius: 6px; border: 1px solid var(--line-2); background: center / cover no-repeat var(--bg-2); flex-shrink: 0; }
+.bgi-slider { align-items: center; gap: 8px; }
+.bgi-slider > span:first-child { width: 92px; flex-shrink: 0; }
+.bgi-slider input { flex: 1; min-width: 0; }
+.bgi-val { width: 44px; text-align: right; font-size: 11px; }
+/* Settings → Appearance → Your fonts */
+.uf-box { display: flex; flex-direction: column; gap: 6px; }
+.uf-row { gap: 6px; }
+.uf-input { flex: 1; min-width: 0; }
+.uf-status { font-size: 11px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.uf-status:empty { display: none; }
+.uf-status .spinner { width: 12px; height: 12px; }
+.uf-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.uf-font { display: inline-flex; align-items: center; gap: 2px; font-size: 13px; padding-right: 2px; }
+.uf-x { border: 0; background: none; color: var(--text-3); padding: 0 2px; display: inline-flex; cursor: pointer; }
+.uf-x:hover { color: var(--text); }

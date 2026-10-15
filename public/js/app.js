@@ -198,6 +198,8 @@ const UI_FONTS = [
   ['consolas', 'Consolas', "Consolas, 'Cascadia Mono', monospace"],
   ['comic', 'Comic Sans MS', "'Comic Sans MS', 'Comic Sans', cursive"],
 ];
+/** A font family name made safe to put inside quotes in CSS. */
+const cssFamily = (s) => String(s).replace(/['"\\<>;{}]/g, '');
 const THEME_NAME = Object.fromEntries([...THEMES, ...HIDDEN_THEMES].map(([id, name]) => [id, name]));
 // side panels that can move between the right sidebar and the top bar
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
@@ -254,6 +256,7 @@ class App {
     window.bdsShell?.onMainWindow?.(() => { this.mainWindow = true; this.syncTomcat(); });
     this.applyTheme(this.settings.theme, false);
     this.applyLook();
+    this.loadUserFonts();
     this.setupAppLock(); // before anything is drawn: the lock screen covers it straight away
     this.presence = createPresence(this);
     this.sounds = createSounds(this);
@@ -1088,10 +1091,18 @@ class App {
   /** The interface font and UI animations (Settings → Appearance). Kept in localStorage too so the page starts with them. */
   applyLook() {
     const root = document.documentElement;
-    const font = UI_FONTS.find(([id]) => id === this.settings.uiFont)?.[2];
+    const font = this.uiFontList().find(([id]) => id === this.settings.uiFont)?.[2];
     if (font) root.style.setProperty('--font-ui', font); else root.style.removeProperty('--font-ui');
     const still = this.settings.animations === false;
     root.classList.toggle('no-anim', still);
+    // a picture behind the whole app, under whatever theme is on
+    const bg = this.settings.bgImage;
+    root.classList.toggle('bg-image', !!bg?.file);
+    if (bg?.file) {
+      root.style.setProperty('--bg-image', `url("/bg/${encodeURIComponent(bg.file)}")`);
+      root.style.setProperty('--bg-cover', `${bg.cover ?? 55}%`);
+      root.style.setProperty('--bg-blur', `${bg.blur ?? 0}px`);
+    } else for (const k of ['--bg-image', '--bg-cover', '--bg-blur']) root.style.removeProperty(k);
     try {
       if (font) localStorage.setItem('bds-ui-font', font); else localStorage.removeItem('bds-ui-font');
       if (still) localStorage.setItem('bds-no-anim', '1'); else localStorage.removeItem('bds-no-anim');
@@ -2404,6 +2415,7 @@ class App {
       { label: 'Open', icon: 'file', action: () => this.openPath(e.path) },
       { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['paint', 'Paint (layers, GIF frames)'], ['video', 'Video trimmer'], ['hex', 'Hex viewer']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.openPath(e.path, { mode: m }) })) },
       ...this.videoEditorMenu([e.path]),
+      ...this.backgroundMenu([e.path]),
       { sep: true },
       { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
       { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
@@ -2769,7 +2781,9 @@ class App {
           Object.assign(sel('theme', this.themeList().map(([id, , label]) => [id, label]), (v) => this.applyTheme(v)), { className: 'set-theme' }),
           customBox,
           h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Interface font'),
-          sel('uiFont', UI_FONTS.map(([id, label]) => [id, label]), () => this.applyLook()),
+          sel('uiFont', this.uiFontList().map(([id, label]) => [id, label]), () => this.applyLook()),
+          this.userFontSettings(),
+          this.backgroundSettings(),
           check('animations', 'Animations (hovers, fades, sliding panels)', () => this.applyLook()),
           check('sounds', 'Sounds', () => this.syncSoundButton()),
           check('soundTyping', 'Typing sounds'),
@@ -2814,6 +2828,150 @@ class App {
         h('div', { class: 'settings-group' }, h('h4', {}, 'Community'),
           h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Questions, ideas or bugs? Come say hi.'),
           h('button', { class: 'btn sm', onclick: () => window.open(DISCORD_INVITE, '_blank', 'noopener') }, icon('external', 'sm'), 'Join the Discord')))));
+  }
+
+  // ---------------------------------------------------------------- your own fonts (data/fonts)
+
+  /** The built-in interface fonts, then yours (ids "u:<id>"). */
+  uiFontList() {
+    const back = { serif: 'Georgia, serif', monospace: 'Consolas, monospace', handwriting: 'cursive' };
+    return [...UI_FONTS, ...(this.userFonts || []).map((f) => [`u:${f.id}`, `${f.family} (yours)`, `'${cssFamily(f.family)}', ${back[f.category] || "'Segoe UI', system-ui, sans-serif"}`])];
+  }
+
+  /** Reads data/fonts and puts their @font-face rules on the page. */
+  async loadUserFonts() {
+    try { this.userFonts = (await api.fonts()).fonts || []; } catch { this.userFonts = []; }
+    let el = document.getElementById('user-fonts');
+    if (!el) { el = document.createElement('style'); el.id = 'user-fonts'; document.head.append(el); }
+    el.textContent = this.userFonts.flatMap((f) => f.faces.map((x) => `@font-face { font-family: '${cssFamily(f.family)}'; font-style: normal; font-display: swap; font-weight: ${x.weight}; `
+      + `src: url('/userfonts/${x.file.split('/').map(encodeURIComponent).join('/')}') format('${x.format}');${x.range ? ` unicode-range: ${x.range};` : ''} }`)).join('\n');
+    this.applyLook(); // a font of yours picked as the interface font only resolves once the list is in
+  }
+
+  /** Settings → Appearance → Your fonts: type a name and it's fetched, or add a file; each one can be removed. */
+  userFontSettings() {
+    const status = h('div', { class: 'uf-status faint' });
+    const input = h('input', { type: 'text', class: 'input uf-input', placeholder: 'Font name, e.g. Cinzel Decorative', spellcheck: 'false' });
+    const getBtn = h('button', { class: 'btn sm primary' }, icon('download', 'sm'), 'Get');
+    const get = async (name) => {
+      if (!name.trim()) { input.focus(); return; }
+      getBtn.disabled = true;
+      clear(status).append(h('div', { class: 'spinner' }), ` Looking for “${name.trim()}”…`);
+      try {
+        const r = await api.getFont(name);
+        if (r.font) return this.fontAdded(r.font);
+        clear(status);
+        if (!r.suggestions?.length) { status.textContent = `No font called “${name.trim()}”. Check the spelling, or add a font file instead.`; return; }
+        status.append(h('span', {}, 'Did you mean '), ...r.suggestions.map((s) => h('button', { class: 'chip uf-sugg', onclick: () => { input.value = s.family; get(s.family); } }, s.family)));
+      } catch (e) { status.textContent = e.message; } finally { getBtn.disabled = false; }
+    };
+    getBtn.addEventListener('click', () => get(input.value));
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); get(input.value); } });
+    const mine = (this.userFonts || []).map((f) => h('span', { class: 'chip uf-font', style: { fontFamily: `'${cssFamily(f.family)}', sans-serif` }, title: f.source === 'file' ? 'From a file' : `${f.category || 'font'} · ${f.license || ''}` },
+      f.family, h('button', { class: 'uf-x', 'data-tip': 'Remove', onclick: () => this.removeUserFont(f) }, icon('x', 'sm'))));
+    return h('div', { class: 'uf-box' },
+      h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Your fonts'),
+      h('div', { class: 'row uf-row' }, input, getBtn),
+      status,
+      mine.length ? h('div', { class: 'uf-list' }, ...mine) : null,
+      h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Any Google font by name (free, from Fontsource), or a .ttf / .otf of your own.'),
+      h('div', { class: 'row' }, h('button', { class: 'btn sm ghost', onclick: () => this.addFontFile() }, icon('folder-open', 'sm'), 'Add a font file…')));
+  }
+
+  /** A font just arrived: it becomes the interface font (easy to change back), and the list shows it. */
+  async fontAdded(font) {
+    await this.saveSettings({ uiFont: `u:${font.id}` });
+    await this.loadUserFonts();
+    this.redrawSettings();
+    toast(`${font.family} added and set as the interface font. Change it back under Interface font.`, { type: 'ok', timeout: 4500 });
+  }
+
+  async addFontFile() {
+    let p = await pickOpen({ title: 'Choose a font file', filters: [{ name: 'Fonts', extensions: ['ttf', 'otf', 'woff', 'woff2'] }] });
+    if (Array.isArray(p)) p = p[0];
+    if (!p) return;
+    try { this.fontAdded((await api.addFontFile(p)).font); } catch (e) { errorToast(e, 'Couldn’t add that font'); }
+  }
+
+  async removeUserFont(f) {
+    try { await api.removeFont(f.id); } catch (e) { return errorToast(e, 'Couldn’t remove that font'); }
+    if (this.settings.uiFont === `u:${f.id}`) await this.saveSettings({ uiFont: 'theme' });
+    await this.loadUserFonts();
+    this.redrawSettings();
+  }
+
+  /** Draws Settings again where you were (lists in it have changed). */
+  redrawSettings() {
+    if (this.panel !== 'settings') return;
+    const y = this.sidepanel.querySelector('.panel-body')?.scrollTop || 0;
+    this.renderSettings();
+    const body = this.sidepanel.querySelector('.panel-body');
+    if (body) body.scrollTop = y;
+  }
+
+  /** Settings → Appearance → Background image: any picture behind the app, under any theme. */
+  backgroundSettings() {
+    const box = h('div', { class: 'bgi-box' });
+    const draw = () => {
+      const bg = this.settings.bgImage;
+      const set = (patch) => { this.saveSettings({ bgImage: { ...this.settings.bgImage, ...patch } }); this.applyLook(); };
+      clear(box).append(h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Background image'));
+      if (!bg?.file) {
+        box.append(h('div', { class: 'row' }, h('button', { class: 'btn sm', onclick: () => this.setAppBackground().then(draw) }, icon('image', 'sm'), 'Choose a picture…')));
+        return;
+      }
+      const slider = (key, min, max, step, def, label, fmt) => {
+        const r = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(bg[key] ?? def) });
+        const out = h('span', { class: 'faint mono bgi-val' }, fmt(bg[key] ?? def));
+        r.addEventListener('input', () => { out.textContent = fmt(Number(r.value)); set({ [key]: Number(r.value) }); });
+        return h('label', { class: 'row bgi-slider' }, h('span', { class: 'dim' }, label), r, out);
+      };
+      box.append(
+        h('div', { class: 'row bgi-row' }, h('div', { class: 'bgi-thumb', style: { backgroundImage: `url("/bg/${encodeURIComponent(bg.file)}")` } }),
+          h('button', { class: 'btn sm', onclick: () => this.setAppBackground().then(draw) }, 'Change…'),
+          h('button', { class: 'btn sm ghost', onclick: () => this.clearAppBackground().then(draw) }, icon('x', 'sm'), 'Remove')),
+        slider('cover', 0, 90, 5, 55, 'Theme over it', (v) => `${v}%`),
+        slider('blur', 0, 30, 1, 0, 'Blur', (v) => (v ? `${v} px` : 'off')));
+    };
+    draw();
+    return box;
+  }
+
+  /** Puts a picture behind the app (asks for one when no path is given). */
+  async setAppBackground(p) {
+    if (!p) p = await pickOpen({ title: 'Choose a background picture', filters: [{ name: 'Pictures', extensions: ['jpg', 'jpeg', 'jfif', 'png', 'webp', 'gif', 'bmp'] }] });
+    if (Array.isArray(p)) p = p[0];
+    if (!p) return;
+    try {
+      const { file } = await api.setBackground(p);
+      await this.saveSettings({ bgImage: { cover: 55, blur: 0, ...this.settings.bgImage, file } });
+      this.applyLook();
+      toast('App background set. Settings → Appearance changes how much the theme covers it.', { type: 'ok', timeout: 3500 });
+    } catch (e) { errorToast(e, 'Couldn’t set the background'); }
+  }
+
+  async clearAppBackground() {
+    try { await api.clearBackground(); } catch { /* the setting going is what matters */ }
+    await this.saveSettings({ bgImage: null });
+    this.applyLook();
+  }
+
+  async setDesktopBackground(p) {
+    try {
+      await api.setWallpaper(p);
+      toast('Desktop background set.', { type: 'ok', timeout: 2500 });
+    } catch (e) { errorToast(e, 'Couldn’t set the desktop background'); }
+  }
+
+  /** "Set as app background" / "Set as desktop background" for one picture (nothing for other files). */
+  backgroundMenu(paths) {
+    if (paths.length !== 1 || !/\.(png|jpe?g|jfif|webp|gif|bmp)$/i.test(paths[0])) return [];
+    const p = paths[0];
+    const desk = /\.(png|jpe?g|jfif|bmp)$/i.test(p) && this.info?.platform === 'win32';
+    return [
+      { label: 'Set as app background', icon: 'image', action: () => this.setAppBackground(p) },
+      ...(desk ? [{ label: 'Set as desktop background', icon: 'window', action: () => this.setDesktopBackground(p) }] : []),
+    ];
   }
 
   /** Settings → Appearance → Custom: a few colours (or a preset) and everything else is worked out from them. */

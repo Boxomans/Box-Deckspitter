@@ -1039,3 +1039,6 @@ textarea.sn-input { resize: none; min-height: 140px; height: 100%; line-height: 
 .sp-row.sp-off { opacity: 0.45; }
 .sp-row.sp-off:hover { opacity: 0.75; }
 .sp-row.sp-off .sp-row-name .icon { vertical-align: -2px; margin-right: 5px; }
+.th-pending { color: #6bb8ff; font-size: 12px; margin-left: 6px; }
+.th-tiers { margin-top: 5px; font-size: 11px; letter-spacing: 1px; color: #4a5a4a; cursor: help; }
+.th-tiers .on { color: #ffd36b; }

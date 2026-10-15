@@ -58,6 +58,13 @@ export const api = {
 
   settings: () => request('GET', '/api/settings'),
   saveSettings: (patch) => request('POST', '/api/settings', { json: patch }),
+  setBackground: (path) => request('POST', '/api/background', { json: { path } }),
+  clearBackground: () => request('POST', '/api/background/clear', { json: {} }),
+  setWallpaper: (path) => request('POST', '/api/wallpaper', { json: { path } }),
+  fonts: () => request('GET', '/api/fonts'),
+  getFont: (name) => request('POST', '/api/fonts/get', { json: { name } }),
+  addFontFile: (path) => request('POST', '/api/fonts/file', { json: { path } }),
+  removeFont: (id) => request('POST', '/api/fonts/remove', { json: { id } }),
 
   versions: (path) => request('GET', `/api/versions?path=${enc(path)}`),
   async readVersion(path, id) {

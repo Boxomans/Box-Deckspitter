@@ -45,11 +45,11 @@ const HOSTILE_MISSILES = {
 };
 // points and $ per kill
 const INCOME = 0.5; // $ per kill is half the bounty below
-const BOUNTY = { 'J-11': [100, 10], 'J-36': [150, 15], 'PL-15': [50, 5], 'PL-21': [80, 8] };
+const BOUNTY = { 'J-11': [100, 10], 'J-36': [150, 15], 'H-20': [2000, 200], 'PL-15': [50, 5], 'PL-21': [80, 8] };
 const NOTCH_HOLD = 5; // seconds without firing after a notch
 // missiles don't always kill: a target breaks hard as one closes in (the seeker has to out-turn it), and a fuse can dud
 const JINK_KM = 6; // the target sees it coming and breaks
-const AGILITY = { 'J-11': 1, 'J-36': 0.8, 'PL-15': 0.5, 'PL-21': 0.4 };
+const AGILITY = { 'J-11': 1, 'J-36': 0.8, 'H-20': 0.3, 'PL-15': 0.5, 'PL-21': 0.4 };
 const overshootChance = (agility, turnDps) => clamp(0.25 * agility * (20 / turnDps) ** 2, 0.02, 0.6);
 const dudChance = (fuseLevel) => Math.max(0.02, 0.15 - 0.025 * fuseLevel);
 export const SPEEDS = [1, 2, 3];
@@ -93,6 +93,10 @@ const BANDIT_TYPES = [
   { name: 'J-36', mach: 3.0, spawnMin: 180, spawnMax: 185 },
   { name: 'J-11', mach: 2.0, spawnMin: 118, spawnMax: 122 },
 ];
+// the H-20: a stealth bomber, always at 5:00 and 15:00 on the sortie clock, then a small chance every minute after 15:00
+const H20 = { name: 'H-20', mach: 0.85, spawnMin: 150, spawnMax: 155, sureAt: [300, 900], randomFrom: 900, perMinute: 0.08, launchKm: 140, salvos: 2, gap: 18 };
+const H20_FAINT_KM = 60; // stealthy: a faint, flickering return until it's this close
+const H20_COLOR = '#c99bff';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const rad = (d) => (d * Math.PI) / 180;
@@ -104,7 +108,7 @@ function shortCode(name) { const m = /AIM-(\d+)([A-Z]+)/.exec(name); return m ? 
 export function clock(t) { const m = Math.floor(t / 60); const s = Math.floor(t % 60); const cs = Math.floor((t - Math.floor(t)) * 100); return `${pad2(m)}:${pad2(s)}.${pad2(cs)}`; }
 
 class TomcatGame {
-  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onHangar, onFlare, onFire, onVolume, speed = 1, onSpeed, onStart, mergeSkip } = {}) {
+  constructor(canvas, { onGameOver, best, auto = false, onAuto, upgrades, onEarn, onBank, onHangar, onFlare, onFire, onVolume, speed = 1, onSpeed, onStart, mergeSkip } = {}) {
     this.canvas = null;
     this.mergeSkip = mergeSkip || (() => false); // (auto) → true: no click minigame, straight to the 50/50 roll
     this.ctx = null;
@@ -112,6 +116,7 @@ class TomcatGame {
     this.onAuto = onAuto;
     this.upgrades = upgrades || (() => ({}));
     this.onEarn = onEarn;
+    this.onBank = onBank;
     this.onHangar = onHangar;
     this.onFlare = onFlare;
     this.onFire = onFire;
@@ -157,11 +162,13 @@ class TomcatGame {
 
   /** A fresh sortie, waiting on the ramp (or straight into the air with start). */
   reset({ start = false } = {}) {
+    if (this.started && !this.gameOver) this.onBank?.(); // a sortie thrown away (closing the game) still pays
     this.started = false;
     this.bandits = []; this.missiles = []; this.hostiles = [];
     this.selectedId = null; this.selectedKind = 'bandit';
     this.nextId = 1; this.nextMissileId = 1; this.nextHostileId = 1;
     this.spawnT = 0; this.nextSpawn = rand(3, 7);
+    this.h20Sure = [...H20.sureAt]; this.h20At = this.h20Sure[0];
     this.simTime = 0; this.gameOver = null; this.dogfight = null;
     this.splashes = 0; this.intercepts = 0; this.shots = 0; this.score = 0; this.earned = 0;
     this.usedAuto = this.auto; this.autoCd = 0; this.restartIn = 0;
@@ -185,8 +192,10 @@ class TomcatGame {
     this.onStart?.();
   }
 
-  /** The hangar is open on the ramp and between sorties, never mid-run. */
-  canHangar() { return !this.started || !!this.gameOver; }
+  /** The carrier opens any time. Mid-sortie a manual sortie holds while you're there (nobody's flying it); automatic
+   *  keeps flying. */
+  canHangar() { return true; }
+  holding() { return !!this.hangarOpen && this.started && !this.gameOver && !this.auto; }
 
   toast(msg, t = 1.6, color = '#fff') { this.toasts.push({ msg, t, color }); if (this.toasts.length > 8) this.toasts.shift(); }
 
@@ -226,6 +235,38 @@ class TomcatGame {
     };
     this.bandits.push(b);
     if (!this.selectedId) { this.selectedId = b.id; this.selectedKind = 'bandit'; }
+  }
+
+  /** The H-20 shows up at 5:00 and 15:00 for sure, then rolls a small chance every minute (one in the air at a time;
+   *  a sure one that finds one still flying comes a minute later). */
+  maybeH20() {
+    if (this.simTime < this.h20At) return;
+    const sure = this.h20Sure.length && this.simTime >= this.h20Sure[0];
+    if (this.bandits.some((b) => b.type === H20.name)) { this.h20At = this.simTime + (sure ? 1 : 60); return; }
+    if (sure) this.h20Sure.shift();
+    this.h20At = Math.min(this.simTime + 60, this.h20Sure[0] ?? Infinity);
+    if (!sure && (this.simTime < H20.randomFrom || Math.random() >= H20.perMinute)) return;
+    const distance = rand(H20.spawnMin, H20.spawnMax);
+    const b = {
+      id: 'B' + this.nextId++, type: H20.name, angle: rand(-AZ_LIMIT, AZ_LIMIT) * 0.7, distance, prevDistance: distance,
+      altitude: rand(MAX_ALT_M * 0.7, MAX_ALT_M), mach: H20.mach * this.banditPace(), climb: 0,
+      closure: 0, shots: 0, salvo: H20.salvos, launchKm: H20.launchKm, nextShotAt: null,
+    };
+    this.bandits.push(b); // over the bandit limit: it's not one of the wave
+    this.toast(`${b.id} H-20 STEALTH BOMBER INBOUND`, 3.2, H20_COLOR);
+  }
+
+  /** One H-20 salvo: a fan of PL-15s, or two PL-21s. */
+  h20Salvo(b) {
+    if (Math.random() < 0.5) {
+      this.spawnHostile(b, 'PL-21', { spread: -0.06, quiet: true });
+      this.spawnHostile(b, 'PL-21', { spread: 0.06, quiet: true });
+      this.toast(`${b.id} FOX (2× PL-21)`, 2, H20_COLOR);
+    } else {
+      const n = Math.min(9, 5 + Math.floor(this.heat() / 4));
+      for (let i = 0; i < n; i++) this.spawnHostile(b, 'PL-15', { spread: (i / (n - 1) - 0.5) * 1.0, quiet: true });
+      this.toast(`${b.id} FOX (${n}× PL-15 FAN)`, 2, H20_COLOR);
+    }
   }
 
   // ---------------------------------------------------------------- tracks
@@ -494,15 +535,15 @@ class TomcatGame {
     }
   }
 
-  spawnHostile(b, wpn) {
+  spawnHostile(b, wpn, { spread = 0, quiet = false } = {}) {
     const spec = HOSTILE_MISSILES[wpn];
     const x = Math.sin(b.angle) * b.distance, y = b.distance;
-    const heading = Math.atan2(-x, -y);
+    const heading = Math.atan2(-x, -y) + spread; // a fan leaves off-line and curves in
     this.hostiles.push({
       id: 'H' + this.nextHostileId++, wpn, speed: spec.speedMach * MACH1_KMPS * this.missilePace(), turnRate: rad(spec.turnRateDps * this.missileTurn()), heading,
       x, y, px: x, py: y, bearing: heading, rangeKm: y, altitude: b.altitude, distance: Math.hypot(x, y),
     });
-    this.toast(`${b.id} FOX (${wpn})`, 1.8, '#ff8080');
+    if (!quiet) this.toast(`${b.id} FOX (${wpn})`, 1.8, '#ff8080');
   }
 
   updateHostiles(dt) {
@@ -532,7 +573,7 @@ class TomcatGame {
   // ---------------------------------------------------------------- loop
 
   update(dt) {
-    if (this.paused) return;
+    if (this.paused || this.holding()) return;
     for (let i = this.toasts.length - 1; i >= 0; i--) if ((this.toasts[i].t -= dt) <= 0) this.toasts.splice(i, 1);
     if (this.gameOver) {
       // automatic mode flies again on its own (not while you're shopping in the hangar)
@@ -545,6 +586,7 @@ class TomcatGame {
     this.score += dt; // a point a second
     this.spawnT += dt;
     if (this.spawnT >= this.nextSpawn) { this.spawnT = 0; this.nextSpawn = rand(...this.spawnGap()); this.spawnBandit(); }
+    this.maybeH20();
 
     for (const b of this.bandits) {
       b.prevDistance = b.distance;
@@ -554,9 +596,10 @@ class TomcatGame {
       if (b.altitude < MIN_ALT_M) { b.altitude = MIN_ALT_M; b.climb = Math.abs(b.climb); }
       if (b.altitude > MAX_ALT_M) { b.altitude = MAX_ALT_M; b.climb = -Math.abs(b.climb); }
       if (b.shots < b.salvo && (b.shots ? this.simTime >= b.nextShotAt : b.distance <= b.launchKm)) {
-        this.spawnHostile(b, b.type === 'J-36' ? 'PL-21' : 'PL-15');
+        if (b.type === H20.name) this.h20Salvo(b);
+        else this.spawnHostile(b, b.type === 'J-36' ? 'PL-21' : 'PL-15');
         b.shots++;
-        b.nextShotAt = this.simTime + this.shotGap(b.type);
+        b.nextShotAt = this.simTime + (b.type === H20.name ? H20.gap : this.shotGap(b.type));
       }
     }
     // targets move first, so the missiles' proximity fuse sees where they went this step
@@ -611,7 +654,7 @@ class TomcatGame {
       f.hold -= dt;
       if (f.hold > 0) { if ((f.tumble = (f.tumble || 0) + dt) > 0.07) { f.tumble = 0; f.face = 1 + Math.floor(Math.random() * 6); } return; }
       f.face = 1 + Math.floor(Math.random() * 6);
-      f.win = f.face >= 4; // 4, 5, 6: guns kill · 1, 2, 3: you're hit
+      f.win = f.face >= (f.bandit.type === H20.name ? 3 : 4); // 4, 5, 6: guns kill · 1, 2, 3: you're hit (a bomber: 3 too)
       f.phase = 'result';
       f.hold = 1.5;
     } else if (f.phase === 'result') {
@@ -639,10 +682,17 @@ class TomcatGame {
     return true;
   }
 
-  end(reason) {
+  /** END SORTIE: bring it home. The sortie counts and pays like any other. */
+  endSortie() {
+    if (!this.started || this.gameOver) return;
+    this.dogfight = null; this.paused = false;
+    this.end('Back on deck: you ended the sortie', { ended: true });
+  }
+
+  end(reason, { ended = false } = {}) {
     if (this.gameOver) return;
     const before = { ...this.best() };
-    this.gameOver = { reason, time: this.simTime, splashes: this.splashes, intercepts: this.intercepts, score: Math.floor(this.score), earned: this.earned, auto: this.usedAuto, before };
+    this.gameOver = { reason, ended, time: this.simTime, splashes: this.splashes, intercepts: this.intercepts, score: Math.floor(this.score), earned: this.earned, auto: this.usedAuto, before };
     this.restartIn = 5;
     this.onGameOver?.(this.gameOver);
   }
@@ -710,7 +760,7 @@ class TomcatGame {
     this.drawPanel();
     this.drawHud();
     const ts = (b) => Math.max(9, b.size * this.topScale);
-    this.button(this.restartBtn, 'RESTART', false, ts(this.restartBtn));
+    this.button(this.restartBtn, 'END SORTIE', false, ts(this.restartBtn), !this.started || !!this.gameOver);
     this.button(this.pauseBtn, !this.started || this.gameOver ? 'START' : this.paused ? 'RESUME' : 'PAUSE', this.paused, ts(this.pauseBtn));
     this.button(this.autoBtn, this.auto ? 'AUTO ON' : 'AUTO', this.auto, ts(this.autoBtn));
     this.button(this.hangarBtn, 'CARRIER', !!this.hangarOpen, ts(this.hangarBtn), !this.canHangar());
@@ -826,6 +876,12 @@ class TomcatGame {
     ctx.fillStyle = '#ffd36b';
     ctx.font = `bold 16px ${MONO}`;
     ctx.fillText(`$${(best.cash || 0).toLocaleString()}`, 14, 58);
+    if (this.started && !this.gameOver) {
+      // what this sortie has earned: it's paid when the sortie ends
+      ctx.fillStyle = '#6bb8ff';
+      ctx.font = `bold 12px ${MONO}`;
+      ctx.fillText(`+$${Math.round(this.earned).toLocaleString()} this sortie`, 14, 78);
+    }
     if (this.notchHold > 0 && !this.gameOver) {
       ctx.textAlign = 'center';
       ctx.font = `bold 18px ${MONO}`;
@@ -909,7 +965,11 @@ class TomcatGame {
       const y = by + BSCOPE_SIZE - b.distance * kmToPx;
       const xDot = this.scopeX(b.distance, b.angle, bx);
       b._sx = xDot; b._sy = y;
-      ctx.fillStyle = '#ff4d4d'; ctx.beginPath(); ctx.arc(xDot, y, 4, 0, Math.PI * 2); ctx.fill();
+      const h20 = b.type === H20.name;
+      ctx.save();
+      if (h20 && b.distance > H20_FAINT_KM) ctx.globalAlpha = 0.15 + 0.35 * Math.abs(Math.sin(this.simTime * 3 + b.distance));
+      ctx.fillStyle = h20 ? H20_COLOR : '#ff4d4d'; ctx.beginPath(); ctx.arc(xDot, y, h20 ? 5 : 4, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
       if (sel?.kind === 'bandit' && sel.obj === b) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(xDot, y, 8, 0, Math.PI * 2); ctx.stroke(); }
     }
     if (hovered) {
@@ -1057,7 +1117,7 @@ class TomcatGame {
 
   drawToasts() {
     const { ctx } = this;
-    let y = this.hudLow ? 104 : 84;
+    let y = this.hudLow || (this.started && !this.gameOver) ? 104 : 84; // under the sortie $ line while flying
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const t = this.toasts[i];
       ctx.save();
@@ -1092,24 +1152,25 @@ class TomcatGame {
 
   drawGameOver() {
     const g = this.gameOver, b = g.before || {};
+    const title = g.ended ? 'SORTIE OVER' : 'GAME OVER', edge = g.ended ? '#8afc96' : '#ff4d4d', why = g.ended ? '#9ecf9f' : '#ff8080';
     if (g.auto) {
-      this.card('GAME OVER', [
-        [g.reason, '#ff8080'],
+      this.card(title, [
+        [g.reason, why],
         [`Auto survived ${clock(g.time)}   ·   score ${g.score.toLocaleString()}   ·   +$${g.earned}`],
         [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
         [this.hangarOpen ? 'Holding while you’re on the carrier' : this.auto ? `Flying again in ${Math.max(0, Math.ceil(this.restartIn))}… · H carrier` : 'Space or START to fly again · H carrier', '#888'],
-      ], '#ff4d4d');
+      ], edge);
       return;
     }
     const newBest = g.score > (b.bestScore || 0);
-    this.card('GAME OVER', [
-      [g.reason, '#ff8080'],
+    this.card(title, [
+      [g.reason, why],
       [`Score ${g.score.toLocaleString()}${newBest ? '  — NEW HIGH SCORE' : ''}   ·   +$${g.earned}`, newBest ? '#8afc96' : '#ddd'],
       [`Survived ${clock(g.time)}`],
       [`Splashes ${g.splashes}   Intercepts ${g.intercepts}`],
       [`High score ${Math.max(g.score, b.bestScore || 0).toLocaleString()}   ·   best time ${clock(Math.max(g.time, b.bestTime || 0))}`, '#9ecf9f'],
       ['Space or START to fly again · H carrier', '#888'],
-    ], '#ff4d4d');
+    ], edge);
   }
 
   /** The merge: two jets chasing each other round a circle, the click meter, then the dice. */
@@ -1134,7 +1195,7 @@ class TomcatGame {
     const at = (ang) => [cx + Math.cos(ang) * r, cy + Math.sin(ang) * r];
     // going round clockwise: the nose points along the circle (a + π in drawJet's frame), the bandit on its tail
     this.drawJet(...at(a), a + Math.PI, 'f14', '#cfe8cf');
-    this.drawJet(...at(a - 1.0), a - 1.0 + Math.PI, f.bandit.type === 'J-36' ? 'j36' : 'flanker', red);
+    this.drawJet(...at(a - 1.0), a - 1.0 + Math.PI, { 'J-36': 'j36', 'H-20': 'h20' }[f.bandit.type] || 'flanker', red);
     ctx.font = `11px ${MONO}`;
     ctx.fillStyle = '#cfe8cf'; ctx.fillText('F-14F', ...at(a).map((v, i) => v + (i ? -16 : 0)));
     ctx.fillStyle = red; ctx.fillText(f.bandit.type, ...at(a - 1.0).map((v, i) => v + (i ? -16 : 0)));
@@ -1194,7 +1255,10 @@ class TomcatGame {
       return;
     } else {
       // the right half, nose to tail, mirrored for the left
-      const half = kind === 'j36'
+      const half = kind === 'h20'
+        // H-20: a flying wing, swept leading edge and a W-shaped trailing edge
+        ? [[0, -13], [3, -10], [24, 6], [24, 8.5], [16, 8.5], [11, 4.5], [6, 9.5], [0, 6]]
+        : kind === 'j36'
         // J-36: big tailless cranked delta, long chined nose, sawtooth trailing edge
         ? [[0, -22], [1.6, -16], [3, -9], [6, -3], [18, 11], [18, 12.5], [11, 13], [7, 17], [3, 14], [0, 16]]
         // J-11 (Su-27 clone): needle nose, curved LERX into a clipped trapezoid wing, wide-set engines,
@@ -1211,12 +1275,12 @@ class TomcatGame {
   }
 
   drawPaused() {
-    this.card('PAUSED', [['P or Space to resume', '#ddd'], ['F fire · 1 2 3 weapon · ↑ ↓ / Tab target', '#888'], ['X flare · N notch · A auto · T speed · R restart', '#888']], '#9ecf9f');
+    this.card('PAUSED', [['P or Space to resume', '#ddd'], ['F fire · 1 2 3 weapon · ↑ ↓ / Tab target', '#888'], ['X flare · N notch · A auto · T speed · R end sortie', '#888']], '#9ecf9f');
   }
 
   drawReady() {
     if (this.hangarOpen) return;
-    this.card('READY', [['Space, Enter or START to take off', '#ddd'], ['H carrier: upgrades are bought between sorties', '#888'], ['A auto · T speed', '#888']], '#8afc96');
+    this.card('READY', [['Space, Enter or START to take off', '#ddd'], ['H carrier: spend $ any time · a sortie pays when it ends', '#888'], ['A auto · T speed', '#888']], '#8afc96');
   }
 
   // ---------------------------------------------------------------- input
@@ -1226,7 +1290,7 @@ class TomcatGame {
   key(e) {
     const k = e.key.toLowerCase();
     if ((!this.started || this.gameOver) && (k === ' ' || k === 'enter')) { if (!this.hangarOpen) this.start(); return true; }
-    if (this.dogfight && !this.gameOver) return k !== 'r' ? ['f', 'x', 'n', ' ', 'p', 'a', 'h', 'tab'].includes(k) : (this.reset(), true); // the merge is clicks only
+    if (this.dogfight && !this.gameOver) return k !== 'r' ? ['f', 'x', 'n', ' ', 'p', 'a', 'h', 'tab'].includes(k) : (this.endSortie(), true); // the merge is clicks only
     if (k === 'f') this.fire();
     else if (k === 'x') this.flare();
     else if (k === 'n') this.notch();
@@ -1234,7 +1298,7 @@ class TomcatGame {
     else if (k === 'arrowup' || k === 'w') this.cycleTarget(-1);
     else if (k === 'arrowdown' || k === 's' || (k === 'tab' && !e.shiftKey)) this.cycleTarget(1);
     else if (k === 'tab') this.cycleTarget(-1);
-    else if (k === 'r') this.reset();
+    else if (k === 'r') this.endSortie();
     else if (k === 'a') this.toggleAuto();
     else if (k === 't') this.cycleSpeed();
     else if (k === 'v') this.onVolume?.(this.volBtn);
@@ -1250,7 +1314,7 @@ class TomcatGame {
     if (this.dogfight && !this.gameOver) return; // counted on pointerdown
     const { x, y } = this.local(e);
     this.layout();
-    if (inRect(x, y, this.restartBtn)) return this.reset();
+    if (inRect(x, y, this.restartBtn)) return this.endSortie();
     if (inRect(x, y, this.pauseBtn)) return !this.started || this.gameOver ? this.start() : this.togglePause();
     if (inRect(x, y, this.autoBtn)) return this.toggleAuto();
     if (inRect(x, y, this.hangarBtn)) return this.onHangar?.();
@@ -1302,7 +1366,7 @@ class TomcatGame {
 // radar you can drag anywhere, or folded into the right sidebar. It only stops for the hangar or for P.
 
 // Badges: lifetime totals (manual and automatic sorties together). Score counts when a sortie ends, plus the one in
-// the air; time is real time spent flying (not sped-up sim time), paused and carrier time not included.
+// the air; time is flying time at the game's speed (an hour at 5× counts 5 hours), paused and carrier time not included.
 const BADGES = [
   { id: 'score-25k', kind: 'score', goal: 25000, name: 'Nugget', what: '25,000 points in total' },
   { id: 'score-250k', kind: 'score', goal: 250000, name: 'Ace', what: '250,000 points in total' },
@@ -1311,8 +1375,11 @@ const BADGES = [
   { id: 'time-10h', kind: 'time', goal: 36000, name: 'Long haul', what: '10 hours in the air' },
   { id: 'time-24h', kind: 'time', goal: 86400, name: 'Round the clock', what: '24 hours in the air' },
   { id: 'time-100h', kind: 'time', goal: 360000, name: 'Centurion', what: '100 hours in the air' },
+  ...[[250, 'Old salt'], [500, 'Iron seat'], [1000, 'Thousand-hour club'], [2000, 'Graybeard'], [3000, 'Part of the airframe'],
+      [4000, 'Living legend'], [5000, 'Five thousand']]
+    .map(([h, name]) => ({ id: `time-${h}h`, kind: 'time', goal: h * 3600, name, what: `${h.toLocaleString()} hours in the air` })),
 ];
-const hours = (s) => (s >= 36000 ? `${Math.floor(s / 3600)} h` : s >= 3600 ? `${(s / 3600).toFixed(1)} h` : `${Math.floor(s / 60)} min`);
+const hours = (s) => (s >= 36000 ? `${Math.floor(s / 3600).toLocaleString()} h` : s >= 3600 ? `${(s / 3600).toFixed(1)} h` : `${Math.floor(s / 60)} min`);
 const short = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K` : String(Math.floor(n)));
 
 const SOUND_FILE = { flare: '/assets/sounds/cm.mp3', missile: '/assets/sounds/missile.mp3', rwr: '/assets/sounds/rwr.mp3' };
@@ -1335,6 +1402,8 @@ export class Flight {
       if (next.playTime == null) next.playTime = (next.flightTime || 0) + (next.auto?.flightTime || 0);
       app.saveSettings({ tomcat: next });
     }
+    // a sortie still flying when the app closed ended there: what it earned is paid now
+    if (app.settings.tomcat?.pending) this.bank();
     this.lastBadgeCheck = 0;
     this.view = null; // the TomcatEditor drawing it full size, while that tab is the one on screen
     this.game = new TomcatGame(null, {
@@ -1344,6 +1413,7 @@ export class Flight {
       onAuto: (on) => app.saveSettings({ tomcatAuto: on }),
       upgrades: () => app.settings.tomcat?.upgrades || {},
       onEarn: (n) => this.earn(n),
+      onBank: () => this.bank(),
       onHangar: () => this.view?.toggleHangar(),
       onFlare: () => this.sound('flare'),
       onFire: () => this.sound('missile'),
@@ -1420,12 +1490,12 @@ export class Flight {
 
   // ---- badges
 
-  /** Real time in the air (a sortie flying, not paused, not over), saved every 30 s and with the $. */
+  /** Time in the air at the game's speed (a sortie flying, not paused, not over), saved every 30 s and with the $. */
   logTime(real, now) {
     const g = this.game;
-    if (!g.started || g.paused || g.gameOver || g.hangarOpen || real <= 0) return;
+    if (!g.started || g.paused || g.gameOver || g.holding() || real <= 0) return;
     const t = (this.app.settings.tomcat ||= {});
-    t.playTime = (t.playTime || 0) + real;
+    t.playTime = (t.playTime || 0) + real * (g.dogfight ? 1 : g.speed); // sped up: 4× and 5× earn time badges faster
     if (!this.saveCash && now - (this.lastTimeSave || 0) > 30000) { this.lastTimeSave = now; this.saveCash = setTimeout(() => this.flushCash(), 3000); }
     if (now - this.lastBadgeCheck > 2000) { this.lastBadgeCheck = now; this.checkBadges(); }
   }
@@ -1451,13 +1521,15 @@ export class Flight {
     t.badges = { ...(t.badges || {}) };
     for (const b of fresh) t.badges[b.id] = Date.now();
     this.flushCash();
-    for (const b of fresh) toast(`★ Badge: ${b.name} — ${b.what}`, { type: 'ok', timeout: 6000 });
+    const lv = (b) => BADGES.filter((x) => x.kind === b.kind).indexOf(b) + 1;
+    for (const b of fresh) toast(`★ Badge LV ${lv(BADGES.find((x) => x.id === b.id))}: ${b.name} — ${b.what}`, { type: 'ok', timeout: 6000 });
     this.app.sounds?.play?.('click');
     if (this.view?.hangar) this.view.renderHangar();
   }
 
   /** Lifetime stats (the badges count from these). Sorties flown in automatic mode count separately (s.auto). */
   record(g) {
+    this.bank(false);
     const all = { ...(this.app.settings.tomcat || {}) };
     const s = g.auto ? { ...(all.auto || {}) } : all;
     s.games = (s.games || 0) + 1;
@@ -1491,12 +1563,23 @@ export class Flight {
     a.play().catch(() => {});
   }
 
-  /** $ from kills: added right away, saved a few seconds later (a busy fight is a lot of kills). */
+  /** $ from kills: held for the sortie (pending) and paid when it ends; saved a few seconds later (a busy fight is a lot
+   *  of kills), so a sortie cut short by closing the app is still paid next time. */
   earn(n) {
     const t = (this.app.settings.tomcat ||= {});
-    t.cash = (t.cash || 0) + n;
+    t.pending = (t.pending || 0) + n;
     clearTimeout(this.saveCash);
     this.saveCash = setTimeout(() => this.flushCash(), 3000);
+    if (this.view?.hangar) this.view.renderHangar();
+  }
+
+  /** The sortie's over: its pending $ goes into the bank. */
+  bank(save = true) {
+    const t = this.app.settings.tomcat;
+    if (!t?.pending) return;
+    t.cash = (t.cash || 0) + t.pending;
+    t.pending = 0;
+    if (save) this.flushCash();
     if (this.view?.hangar) this.view.renderHangar();
   }
 
@@ -1649,7 +1732,7 @@ export class Flight {
       ctx.strokeStyle = 'rgba(140,255,140,.25)'; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(...at(sweep, RADAR_RANGE_KM)); ctx.stroke();
     }
     const dot = docked ? 1.6 : 2.4;
-    for (const b of g.bandits) { ctx.fillStyle = b.type === 'J-36' ? '#ffd27a' : '#8ef08e'; ctx.beginPath(); ctx.arc(...at(b.angle, b.distance), dot, 0, Math.PI * 2); ctx.fill(); }
+    for (const b of g.bandits) { ctx.fillStyle = b.type === H20.name ? H20_COLOR : b.type === 'J-36' ? '#ffd27a' : '#8ef08e'; ctx.beginPath(); ctx.arc(...at(b.angle, b.distance), dot, 0, Math.PI * 2); ctx.fill(); }
     const blink = Math.floor(performance.now() / 250) % 2 === 0;
     for (const m of g.hostiles) { ctx.fillStyle = blink ? '#ff4d4d' : '#ff9a9a'; ctx.beginPath(); ctx.arc(...at(m.bearing, m.distance), dot, 0, Math.PI * 2); ctx.fill(); }
     // ours: blue, like on the B-scope
@@ -1794,7 +1877,6 @@ export class TomcatEditor extends BaseEditor {
   toggleHangar() {
     if (this.hangar) return this.closeHangar();
     const g = this.game;
-    if (!g.canHangar()) { g.toast('BACK TO THE CARRIER BETWEEN SORTIES', 1.6, '#ffb36b'); return; }
     g.hangarOpen = true;
     this.hangar = h('div', { class: 'tomcat-hangar', tabindex: '-1' });
     this.hangar.addEventListener('keydown', (e) => {
@@ -1843,7 +1925,8 @@ export class TomcatEditor extends BaseEditor {
     const focused = this.hangar.contains(document.activeElement);
     this.hangar.replaceChildren(h('div', { class: 'th-card' },
       h('div', { class: 'th-head' }, h('span', {}, 'BACK ON THE CARRIER'), reborn ? h('span', { class: 'th-stars', title: `Reborn ${reborn}×` }, `★${reborn}`) : null,
-        h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`), tokens || reborn ? h('span', { class: 'th-tokens', title: 'Rebirth tokens' }, `◆${tokens}`) : null, close),
+        h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`),
+        t.pending ? h('span', { class: 'th-pending', title: 'What this sortie has earned so far: paid when it ends' }, `+$${Math.round(t.pending).toLocaleString()}`) : null, tokens || reborn ? h('span', { class: 'th-tokens', title: 'Rebirth tokens' }, `◆${tokens}`) : null, close),
       h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP'), tab('badges', 'BADGES')),
       h('div', { class: 'th-sub' }, badges
         ? 'For your totals: every sortie’s score, manual and automatic, and the time you spend in the air. Kept forever.'
@@ -1854,18 +1937,28 @@ export class TomcatEditor extends BaseEditor {
     if (focused) this.hangar.focus();
   }
 
-  /** Badges: earned ones with their date, the rest with how far along they are. */
+  /** One row per kind of badge (score, time): its level and latest name, and progress to the next. */
   badgeRows() {
     const list = this.flight.badgeList();
     const got = list.filter((b) => b.earned).length;
-    return [h('div', { class: 'th-badge-sum' }, `${got} of ${list.length} earned`), ...list.map((b) => {
-      const pct = Math.floor((b.have / b.goal) * 100);
-      const fmt = b.kind === 'time' ? hours : short;
-      return h('div', { class: `th-row th-badge${b.earned ? ' on' : ''}` },
-        h('div', { class: 'th-medal' }, b.earned ? '★' : '☆'),
-        h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, b.name), h('div', { class: 'th-what' }, b.what),
-          b.earned ? null : h('div', { class: 'th-bar' }, h('span', { style: `width:${pct}%` }))),
-        h('div', { class: 'th-badge-val' }, b.earned ? new Date(b.earned).toLocaleDateString() : `${fmt(b.have)} / ${fmt(b.goal)}`));
+    const KIND = { score: 'Total score', time: 'Time in the air' };
+    return [h('div', { class: 'th-badge-sum' }, `${got} of ${list.length} levels`), ...[...new Set(list.map((b) => b.kind))].map((k) => {
+      const tiers = list.filter((b) => b.kind === k);
+      const fmt = k === 'time' ? hours : short;
+      const done = tiers.filter((b) => b.earned);
+      const last = done[done.length - 1];
+      const next = tiers.find((b) => !b.earned);
+      return h('div', { class: `th-row th-badge${last ? ' on' : ''}` },
+        h('div', { class: 'th-medal' }, last ? '★' : '☆'),
+        h('div', { class: 'th-info' },
+          h('div', { class: 'th-name' }, `${KIND[k] || k}${last ? ` · ${last.name}` : ''}`),
+          h('div', { class: 'th-what' }, next ? `Next: ${next.name}, ${next.what}` : 'Every badge here earned'),
+          next ? h('div', { class: 'th-bar' }, h('span', { style: `width:${Math.floor((next.have / next.goal) * 100)}%` })) : null,
+          h('div', {
+            class: 'th-tiers',
+            title: tiers.map((b) => `LV ${tiers.indexOf(b) + 1} ${b.name}: ${b.what}${b.earned ? ` · earned ${new Date(b.earned).toLocaleDateString()}` : ''}`).join('\n'),
+          }, h('span', { class: done.length ? 'on' : '' }, `LV ${done.length}`), ` / ${tiers.length}`)),
+        h('div', { class: 'th-badge-val' }, next ? `${fmt(next.have)} / ${fmt(next.goal)}` : `${done.length} / ${tiers.length}`));
     })];
   }
 
@@ -1972,7 +2065,7 @@ export class TomcatEditor extends BaseEditor {
   status() {
     const s = this.app.settings.tomcat || {};
     return {
-      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · V settings · H carrier (between sorties) · P pause · R restart' }],
+      left: [{ text: 'Space start · F fire · X flare · N notch · 1 2 3 weapon · ↑↓ target · A auto · T speed · V settings · H carrier · P pause · R end sortie' }],
       right: [{ text: `high score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()}` }],
     };
   }
