@@ -9,8 +9,43 @@ import { api } from '../core/api.js';
 
 let monacoPromise = null;
 
-/** The Monaco colour theme that goes with the app theme. */
-export const monacoTheme = (t) => (t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : 'bds-dark');
+/** The Monaco colour theme that goes with the app theme (its right-click menu and lists in the app theme's colours). */
+export const monacoTheme = (t) => withMenus(t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : 'bds-dark');
+
+const allDefs = {}; // every Monaco theme as first defined, so the menu colours can be laid over it again
+/** Any CSS colour → #rrggbb (Monaco wants hex; theme variables may be rgb() or a name). */
+function hex(c) {
+  const x = document.createElement('canvas').getContext('2d');
+  x.fillStyle = '#000';
+  x.fillStyle = String(c || '').trim() || '#000';
+  const f = x.fillStyle;
+  if (f.startsWith('#')) return f;
+  const m = /rgba?\(([^)]+)\)/.exec(f);
+  return m ? '#' + m[1].split(',').slice(0, 3).map((n) => Math.round(Number(n)).toString(16).padStart(2, '0')).join('') : '#000000';
+}
+/** Re-defines a theme with the editor's menus, suggestion list and quick-pick in the current app theme's colours
+ *  (read live from the page, so the hidden and custom themes get theirs too) instead of Monaco's blue. */
+function withMenus(name) {
+  const def = allDefs[name];
+  if (!window.monaco || !def) return name;
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n) => hex(cs.getPropertyValue(n));
+  const acc = v('--accent'), bg = v('--bg-3'), fg = v('--text'), line = v('--line-2');
+  window.monaco.editor.defineTheme(name, {
+    ...def,
+    colors: {
+      ...def.colors,
+      'menu.background': bg, 'menu.foreground': fg, 'menu.border': line, 'menu.separatorBackground': line,
+      'menu.selectionBackground': acc + '3d', 'menu.selectionForeground': fg, 'menu.selectionBorder': acc + '00',
+      'list.activeSelectionBackground': acc + '3d', 'list.activeSelectionForeground': fg, 'list.focusBackground': acc + '33',
+      'list.hoverBackground': acc + '1f', 'list.inactiveSelectionBackground': acc + '26', 'list.highlightForeground': v('--accent-strong'),
+      'quickInputList.focusBackground': acc + '3d', 'quickInput.background': bg, 'pickerGroup.foreground': acc,
+      'editorSuggestWidget.selectedBackground': acc + '33', 'editorSuggestWidget.highlightForeground': v('--accent-strong'),
+      'widget.border': line, 'focusBorder': acc + '88',
+    },
+  }, true);
+  return name;
+}
 
 let themeDefs = null; // the built-in definitions, kept to build the custom one from
 /** Re-made each time (the palette may have changed): the base theme's syntax colours on the palette's backgrounds. */
@@ -61,6 +96,11 @@ export function loadMonaco() {
 }
 
 function defineThemes(monaco) {
+  if (!monaco.editor.__bdsKept) {
+    const define = monaco.editor.defineTheme.bind(monaco.editor);
+    monaco.editor.defineTheme = (name, def, again) => { if (!again) allDefs[name] = def; return define(name, def); };
+    monaco.editor.__bdsKept = true;
+  }
   const shared = [
     { token: 'comment', fontStyle: 'italic' },
   ];

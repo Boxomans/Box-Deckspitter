@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.0.37",
+    "date": "2026-10-14",
+    "notes": [
+      "BoxTape: missing yt-dlp or ffmpeg? “Install them for me” installs them with winget, ready straight away.",
+      "Dropdown lists follow the theme instead of Windows' blue highlight.",
+      "The code editor's right-click menu, suggestions and command palette follow the theme too.",
+      "README: BoxSwap, BoxTunnel, themes and the newer BoxTape and mixer features are written up."
+    ]
+  },
+  {
     "version": "1.0.36",
     "date": "2026-10-14",
     "notes": [

@@ -9,7 +9,8 @@ https://discord.gg/3qxNWFErAV
 A self-hosted document workstation that runs entirely on your PC: a Word-style editor, a PDF editor and
 form filler, a notepad, a code/config editor, spreadsheets, a layered image editor, offline OCR, a file
 compare tool, a multi-track video editor and a quick trimmer, a video grabber, Gmail, a YouTube/Spotify-to-MP3
-tool with a music player, encrypted Secure notes for passwords, folder workspaces and a disk-space explorer. Everything is served from `127.0.0.1`. Your files stay on
+tool with a music player, audio routing, a folder file-swapper, encrypted Secure notes for passwords, folder
+workspaces and a disk-space explorer. Everything is served from `127.0.0.1`. Your files stay on
 this machine. The only exceptions are the ones you switch on yourself (Ask Claude, Discord status, BoxMail,
 downloads, update checks).
 
@@ -75,8 +76,8 @@ The repo holds only the source (about 2 MB). The libraries and the Electron runt
 2. Double-click `Box-DocSpitter.exe`. On first run it does `npm install` (a few hundred MB), then opens the
    app. If Node.js 18+ isn't installed, it asks first and installs it with `winget install OpenJS.NodeJS.LTS`
    (or points you to nodejs.org if winget isn't there). Or install Node.js and run `npm install` yourself.
-3. Optional: `winget install yt-dlp` and `winget install Gyan.FFmpeg` for BoxKlep, BoxTape and faster video
-   exports.
+3. Optional: yt-dlp and ffmpeg, for BoxKlep, BoxTape and faster video exports. BoxTape's **Install them for
+   me** button does it with winget, or run `winget install yt-dlp` and `winget install Gyan.FFmpeg` yourself.
 
 Your personal data (`data/`) and the dumps are never part of the repo. They're listed in `.gitignore`.
 
@@ -159,7 +160,8 @@ automatically once it's installed. DRM-protected streams are skipped. Only downl
 right to keep.
 
 **BoxSpaces** Open a folder like an IDE. You get a file tree with git status colors, search across all
-files, Ctrl+E quick-open, and new, rename, duplicate and delete. Delete sends to the Recycle Bin.
+files, Ctrl+E quick-open, and new, rename, duplicate and delete. Delete sends to the Recycle Bin. Hover a
+recent space and click × to take it off the list (the folder itself isn't touched).
 
 **StoragePeek** Usage bars for every drive. Scan a drive or folder to get a clickable treemap of what's
 using the space, the biggest files, and a breakdown by type and extension. The scanner is a small native
@@ -181,16 +183,22 @@ is stored only in `data/secrets.json`. Mailboxes are opened read-only, so browsi
 Emails display with no scripts and remote images (tracking pixels) blocked until you load them. Saved
 `.eml` files open in BoxMail too, no account needed.
 
-**BoxTape** Paste a YouTube playlist (or an album, or a single video) and pick the tracks. They're saved as
-MP3s, with title, artist and cover art, into `audio-dump/` for the ♪ player, 1–6 at a time with per-track
-progress. A track that fails is skipped and listed. BoxKlep also has an **MP3** button on every video,
-and a bulk **→ MP3** button, for the same thing. Needs yt-dlp and ffmpeg. Only download music you have the
-right to keep.
+**BoxTape** Paste a YouTube playlist (or an album, or a single video), search for a song, or paste a list of
+songs, and pick the tracks. They're saved as MP3s, with title, artist and cover art, into `audio-dump/` for
+the ♪ player, 1–6 at a time with per-track progress. Songs already in your audio dump start unticked, and
+**Only new songs** ticks just the rest. BoxKlep also has an **MP3** button on every video, and a bulk
+**→ MP3** button, for the same thing. Only download music you have the right to keep.
+- **Retries:** YouTube sometimes turns a download down when several run at once. A song that fails is tried
+  again a few seconds later, up to the number of retries you pick next to *at a time* (none to 10, default 3).
+  Songs that can't work (a removed, private or age-locked video) fail straight away and are listed with why.
+- **Needs yt-dlp and ffmpeg.** If either is missing, BoxTape says so and **Install them for me** installs them
+  with winget (Windows' own package manager). They work straight away, no restart.
 - **Spotify links** (playlist, album or song) work too. Spotify's audio is copy-protected, so BoxTape reads
   the track list and finds each song on YouTube: the closest match by length (usually within a couple of
   seconds), title and channel, avoiding live versions, covers, remixes, sped-up/slowed and karaoke unless
-  the Spotify title says so. Songs with no close match are skipped rather than guessed. Files are named
-  `Artist - Title.mp3` with Spotify's tags. Songs already in your audio dump start unticked.
+  the Spotify title says so. Japanese, Korean and other non-English titles are matched too, and a song that
+  isn't found by artist and title is searched again by title alone. Songs with no close match are skipped
+  rather than guessed. Files are named `Artist - Title.mp3` with Spotify's tags.
 - Up to 100 songs per Spotify link need no setup. For longer playlists, BoxTape links to a free Spotify
   developer key (kept in `data/secrets.json`). Playlists made by Spotify itself stop at 100 either way.
 
@@ -220,6 +228,24 @@ Removed lines are red, added lines green, and the exact changed words are highli
 (F7 / Shift+F7), inline view, ignore spaces and wrap. Text and code compare as they are; Word, OpenDocument,
 RTF, PDF and spreadsheets compare by their text; two pictures compare pixel by pixel with the differences
 highlighted. Drop two files on it, one on each half, or pick an open tab or a dump file.
+
+**BoxSwap** Hot-swap sets of files in any folder: a game's mods folder, a config folder, anything. Add the
+folder, make profiles (sets of files laid out as they go in it), and switch which one is in. The folder's
+own files that a profile replaces are kept aside and put back when it's switched off.
+- **Never deletes anything:** a move never lands on an existing file, and only files BoxSwap put in are
+  ever taken out. Removing a profile or forgetting a folder moves it into `.removed`.
+- **Safe switching:** every move is written to a journal first. If a switch fails halfway (say a game holds a
+  file open), or the PC loses power, everything is put back where it was.
+- Profiles live in `data/boxswap` (or a master folder you pick). On the same drive a switch is instant.
+
+**BoxTunnel** Audio lines (BoxAudioLine1, 2, …). Each line mixes any number of inputs into one output:
+- **Inputs:** a mic or line-in, everything the PC is playing, or another line. Each input has its own
+  volume, mute and noise gate, and the line has an optional compressor.
+- **Output:** one output device, with a volume, live meters and a **listen** toggle to hear what's going
+  through it. Double-click a line to rename it.
+- **Keeps running:** lines can carry on with the tab closed, and start when the app opens.
+- **Other apps:** they can only pick a line up through a virtual audio cable. Set the line's output to the
+  cable.
 
 **Secure notes** (Tools → Secure notes) Passwords and private notes, encrypted on this PC. Each note can
 hold a username, a password, a website and free text. Passwords show only while you hold the eye button, and
@@ -328,15 +354,21 @@ the point of the encryption. Keep the sticky note somewhere other than next to t
   on it to put them inside, Mouse 4 to go back up.
 - **Discord status** (Settings → Discord): off by default. Choose automatic lines ("editing a .pdf",
   "changing a config") or write your own. File names are never sent.
-- Light and dark themes. Windows open/save dialogs, or the built-in file browser.
+- **Themes** (top-bar button or Settings → Appearance): Dark, Light, PB&J and **Custom**. Custom builds a whole
+  palette from a background, an accent and a highlight colour (or one of its presets), on a dark or light
+  base, with an optional gradient background. Menus, dropdowns, the code editor and tool titles all follow
+  the theme. Appearance also has an **Interface font** for the app itself and an **Animations** switch
+  (off: nothing slides, fades or eases).
+- Windows open/save dialogs, or the built-in file browser.
 - **Sounds** for hover, clicks, typing, opening and closing documents (`public/assets/sounds/`). Click the
   speaker button to mute them. Hover it for a volume slider. Typing and hover sounds can be switched off
   in Settings → Appearance.
 - **♪ Music player**: plays everything in the `audio-dump/` folder (mp3, m4a, wav, flac, ogg). It has
   play/pause, skip, shuffle, loop (all or one song), seek and volume, and music keeps playing while you
   work. Media keys work too. Drop songs onto the player or use **+** to add them. **Mixer** is a 10-band
-  equalizer (±18 dB) with low cut and high cut, a live response curve, and presets (Tinny/phone, AM radio,
-  Muffled, Underwater, Lo-fi, Bass boost, Vocal…). **Duplicates**: an amber button appears when a song is
+  equalizer (±18 dB) with low cut and high cut, a live response curve, and a preset dropdown (Tinny/phone,
+  AM radio, Muffled, Underwater, Lo-fi, Bass boost, Vocal…). **Save preset** keeps your own settings under a
+  name, listed under *Yours*; the trash button deletes one. **Duplicates**: an amber button appears when a song is
   in the dump twice, as the very same file under any name or as "Song (1)", "Song - Copy",
   "Song (Official Video)" and the like. You review the list, and the extra copies move to
   `audio-dump/.removed`.
@@ -347,6 +379,7 @@ the point of the encryption. Keep the sticky note somewhere other than next to t
 |---|---|
 | `data/settings.json` | your preferences, Discord lines, My info |
 | `data/secrets.json` | keys you add: Anthropic, Gmail app passwords, GitHub token, Spotify key |
+| `data/boxswap/` | BoxSwap's profiles, the originals they replaced, and anything removed (`.removed`) |
 | `data/backups/` | previous versions of files you saved |
 | `data/backups/app/` | the app's own files from before each update (kept for "Go back") |
 | `data/update/` | update downloads waiting to install, and how the last one went |
@@ -367,5 +400,5 @@ pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, tesseract.js
 The desktop window is Electron. `electron/main.js` is a tiny boot file that installs updates and rolls them
 back; `electron/shell.js` is the window itself, which runs `server.js` as a child process. Server modules:
 `mail-server.js` (BoxMail), `update-server.js` (updates), `spotify-server.js` (Spotify links),
-`file-assoc.js` (Windows file types), `render-server.js` (video editor export), `settings-transfer.js` (setup
-export/import and the app PIN lock). `electron/secure-notes.js` runs in the window process, not the server.
+`file-assoc.js` (Windows file types), `render-server.js` (video editor export), `swap-server.js` (BoxSwap),
+`settings-transfer.js` (setup export/import and the app PIN lock). `electron/secure-notes.js` runs in the window process, not the server.

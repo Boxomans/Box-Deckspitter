@@ -1939,7 +1939,35 @@ const routes = {
 
   'GET /api/tools': async () => {
     const t = tools();
-    return { ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: klepFolder() };
+    return { ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: klepFolder(), canInstall: IS_WIN };
+  },
+
+  // installs whichever of yt-dlp / ffmpeg is missing with winget (Windows' own package manager), one after the other.
+  // A job: the client polls /api/job for job.current (what's happening) and the end. winget puts both in its Links
+  // folder, which findExe already looks in, so they work straight away without a restart.
+  'POST /api/tools/install': async () => {
+    if (!IS_WIN) throw Object.assign(new Error('Installing these for you only works on Windows (use your package manager).'), { status: 400 });
+    const t = tools();
+    const want = [!t.ytdlp && ['yt-dlp', 'yt-dlp.yt-dlp'], !t.ffmpeg && ['ffmpeg', 'Gyan.FFmpeg']].filter(Boolean);
+    if (!want.length) return { id: null, already: true };
+    const winget = findExe('winget') || path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WindowsApps', 'winget.exe');
+    const job = newJob(`Installing ${want.map(([n]) => n).join(' + ')}`);
+    return startJob(job, async () => {
+      for (const [i, [name, id]] of want.entries()) {
+        job.current = `Installing ${name} (${i + 1} of ${want.length}) — this can take a minute or two…`;
+        job.progress = i / want.length;
+        try {
+          await runCapture(winget, ['install', '--id', id, '-e', '--source', 'winget', '--silent', '--disable-interactivity',
+            '--accept-package-agreements', '--accept-source-agreements'], 15 * 60 * 1000);
+        } catch (e) {
+          if (e.code === 'ENOENT') throw new Error('winget isn’t on this PC. Get “App Installer” from the Microsoft Store, then try again.');
+          // winget also exits non-zero for "already installed" / "no newer version": only a missing tool afterwards is a failure
+          if (!findExe(name)) throw new Error(`Couldn’t install ${name}: ${String(e.message || e).split('\n').filter(Boolean).pop()}`);
+        }
+        if (!findExe(name)) throw new Error(`winget finished, but ${name} still can’t be found. Restart Box-DocSpitter and look again.`);
+      }
+      job.current = null;
+    });
   },
 
   'POST /api/klep/scan': async (req) => {

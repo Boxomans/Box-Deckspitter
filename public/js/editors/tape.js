@@ -49,7 +49,7 @@ export class TapeEditor extends BaseEditor {
         h('div', { class: 'klep-sub mono' }, '> playlist in, mp3s out — straight into the audio dump'),
         h('div', { class: 'klep-bar' }, this.input, this.goBtn),
         need.length
-          ? h('div', { class: 'klep-note error' }, icon('info', 'sm'), `BoxTape needs ${need.join(' and ')}. Install, then restart Box-DocSpitter.`)
+          ? this.needNote(need)
           : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, 'Saves to Box-DocSpitter\\audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.')),
       this.progress,
       this.results)));
@@ -74,6 +74,36 @@ export class TapeEditor extends BaseEditor {
       clear(this.results).append(h('div', { class: 'klep-note error' }, e.message));
     } finally {
       this.goBtn.disabled = false;
+    }
+  }
+
+  /** The "BoxTape needs yt-dlp and ffmpeg" note, with a button that installs them with winget. */
+  needNote(need) {
+    const msg = h('span', {}, `BoxTape needs ${need.join(' and ')}.`);
+    const btn = this.tools.canInstall ? h('button', { class: 'btn sm primary', onclick: () => this.installTools(btn, msg) }, icon('download', 'sm'), 'Install them for me') : null;
+    return h('div', { class: 'klep-note error tape-need' }, icon('info', 'sm'), msg, btn);
+  }
+
+  async installTools(btn, msg) {
+    btn.disabled = true;
+    const spin = h('div', { class: 'spinner' });
+    btn.replaceWith(spin);
+    try {
+      const { id } = await post('/api/tools/install', {});
+      for (let j = null; id;) {
+        j = await get(`/api/job?id=${id}`);
+        if (j.current) msg.textContent = j.current;
+        if (j.status === 'error') throw new Error(j.error || 'Install failed');
+        if (j.status !== 'running') break;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      toast('yt-dlp and ffmpeg are installed — BoxTape is ready.', { type: 'ok' });
+      clear(this.pane);
+      await this.load(); // draws BoxTape again, now without the note
+    } catch (e) {
+      msg.textContent = `${e.message} (or install by hand: winget install yt-dlp and winget install Gyan.FFmpeg)`;
+      spin.replaceWith(btn);
+      btn.disabled = false;
     }
   }
 

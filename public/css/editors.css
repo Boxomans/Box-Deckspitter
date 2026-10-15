@@ -1033,3 +1033,6 @@ textarea.sn-input { resize: none; min-height: 140px; height: 100%; line-height: 
 .tn-comp button { text-transform: capitalize; padding: 3px 10px; }
 .tn-comp button.on { background: var(--accent-line); color: var(--text); }
 .tn-red { font-size: 11px; color: #f0c27a; min-width: 44px; }
+.tape-need { align-items: center; flex-wrap: wrap; gap: 8px; }
+.tape-need .btn { margin-left: auto; }
+.tape-need .spinner { margin-left: auto; width: 16px; height: 16px; }
