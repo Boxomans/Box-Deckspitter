@@ -110,6 +110,78 @@
   color-scheme: dark;
 }
 
+/* AWG-9 (hidden): the F-14's radar scope. Green phosphor on black, amber callouts, square corners, monospace type. */
+[data-theme="f14"] {
+  --bg-0: #070907;
+  --bg-1: #0b0e0b;
+  --bg-2: #0f130f;
+  --bg-3: #141a14;
+  --bg-4: #1a231a;
+  --bg-5: #213021;
+  --line: #1c2a1c;
+  --line-2: #2c4a2c;
+  --text: #cfe8cf;
+  --text-2: #8fbf90;
+  --text-3: #5c815d;
+  --accent: #54ff6b;
+  --accent-strong: #8afc96;
+  --accent-2: #ffb36b;
+  --accent-3: #8fd8ff;
+  --accent-soft: rgba(84, 255, 107, 0.09);
+  --accent-soft-2: rgba(84, 255, 107, 0.17);
+  --accent-line: rgba(84, 255, 107, 0.45);
+  --gloss: linear-gradient(135deg, #54ff6b 0%, #b9ffc0 55%, #ffd36b 100%);
+  --focus: 0 0 0 1px rgba(84, 255, 107, 0.6), 0 0 12px rgba(84, 255, 107, 0.22);
+  --danger: #ff4d4d;
+  --warn: #ffb36b;
+  --ok: #54ff6b;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --desk: #060806;
+  --desk-grid: rgba(84, 255, 107, 0.05);
+  --scroll: #1e2e1e;
+  --scroll-hover: #2c4a2c;
+  --titlebar-solid: #0b0e0b;
+  color-scheme: dark; /* the font and square corners are further down, after the :root block that sets everyone's */
+}
+
+/* Bloodflame Talons (hidden): black and ash, blood red and ember, the faintest gold. Its own home layout (below). */
+[data-theme="blood"] {
+  --bg-0: #070505;
+  --bg-1: #0c0808;
+  --bg-2: #110b0b;
+  --bg-3: #181010;
+  --bg-4: #221515;
+  --bg-5: #2c1a1a;
+  --line: #241616;
+  --line-2: #3d2121;
+  --text: #ddd5d3;
+  --text-2: #a59a98;
+  --text-3: #6f6463;
+  --accent: #c8161d;
+  --accent-strong: #e8363c;
+  --accent-2: #ff5a32;
+  --accent-3: #c9a24a;
+  --accent-soft: rgba(200, 22, 29, 0.13);
+  --accent-soft-2: rgba(200, 22, 29, 0.24);
+  --accent-line: rgba(220, 40, 46, 0.5);
+  --gloss: linear-gradient(135deg, #9a0c12 0%, #d0141c 50%, #ff4a35 100%);
+  --focus: 0 0 0 1px rgba(220, 30, 38, 0.65), 0 0 16px rgba(200, 22, 29, 0.3);
+  --danger: #ff3b47;
+  --warn: #d9a441;
+  --ok: #a3b59c;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.5);
+  --desk: #050303;
+  --desk-grid: rgba(200, 22, 29, 0.04);
+  --scroll: #3a1416;
+  --scroll-hover: #5a1a1e;
+  --titlebar-solid: #0c0808;
+  --serif: 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+  --sigil: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cfilter id='r'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='7'/%3E%3CfeDisplacementMap in='SourceGraphic' scale='3.2'/%3E%3C/filter%3E%3Cg filter='url(%23r)' fill='none' stroke='%23d0141c' stroke-linecap='round'%3E%3Cpath d='M43 9 C20 13 8 31 8 50 C8 69 20 87 43 91' stroke-width='4.5'/%3E%3Cpath d='M57 9 C80 13 92 31 92 50 C92 69 80 87 57 91' stroke-width='4.5'/%3E%3Cpath d='M43 9 l-3 -3 M57 9 l3 -3 M43 91 l-3 3 M57 91 l3 3' stroke-width='3'/%3E%3C/g%3E%3Cpath filter='url(%23r)' d='M50 24 L52.6 50 L50 78 L47.4 50 Z' fill='%23e01e26'/%3E%3C/svg%3E");
+  color-scheme: dark;
+}
+
 :root {
   --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
@@ -1285,6 +1357,92 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 [data-theme="pbj"] .btn.primary { color: #fff; }
 [data-theme="pbj"] a { color: #00a8fc; }
 [data-theme="pbj"] .home-hero img { filter: drop-shadow(0 0 18px rgba(240, 178, 50, 0.2)); }
+
+/* ---------------------------------------------------------------- Bloodflame Talons: chrome */
+:root[data-theme="blood"] { --radius: 2px; --radius-lg: 2px; }
+[data-theme="blood"] ::selection { background: rgba(200, 22, 29, 0.45); color: #fff; }
+[data-theme="blood"] body, [data-theme="blood"] #app { background: #070505; }
+[data-theme="blood"] #titlebar { background: #0a0606; }
+[data-theme="blood"] #titlebar::after { background: linear-gradient(90deg, transparent, #7a0c10 18%, #d81c24 45%, #c9a24a 50%, #d81c24 55%, #7a0c10 82%, transparent); opacity: 0.9; }
+[data-theme="blood"] .brand-name { font-family: var(--serif); letter-spacing: 0.22em; }
+[data-theme="blood"] .brand-icon, [data-theme="blood"] .home-hero img { filter: hue-rotate(80deg) saturate(1.6) brightness(0.9) drop-shadow(0 0 12px rgba(220, 20, 28, 0.55)); }
+/* tabs: square, the active one marked by a line of blood along the bottom instead of the top */
+[data-theme="blood"] .tab { border-radius: 0; }
+[data-theme="blood"] .tab.active { background: linear-gradient(to top, rgba(200, 22, 29, 0.14), transparent 70%), var(--bg-0); }
+[data-theme="blood"] .tab.active::before { top: auto; bottom: 0; left: 0; right: 0; height: 2px; border-radius: 0; background: linear-gradient(90deg, transparent, #c8161d 20%, #ff3d2e 50%, #c8161d 80%, transparent); box-shadow: 0 0 10px rgba(255, 40, 40, 0.6); opacity: 1; z-index: 1; }
+[data-theme="blood"] .rail-btn.active { color: #ff4a4f; background: radial-gradient(circle at 50% 50%, rgba(200, 22, 29, 0.28), transparent 70%); }
+[data-theme="blood"] .rail-btn.active::before { background: #e01e26; box-shadow: 0 0 8px #e01e26; }
+[data-theme="blood"] #statusbar { background: #0a0606; box-shadow: inset 0 1px 0 rgba(200, 22, 29, 0.35); }
+[data-theme="blood"] .sb-item.mode { color: #e8363c; font-family: var(--serif); letter-spacing: 0.18em; }
+[data-theme="blood"] .panel-head, [data-theme="blood"] .settings-group h4 { font-family: var(--serif); letter-spacing: 0.2em; color: #b3a7a5; }
+[data-theme="blood"] .btn.primary { color: #f6e9e6; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+[data-theme="blood"] a { color: #ff5a4f; }
+[data-theme="blood"] ::-webkit-scrollbar-thumb { border-radius: 0; }
+
+/* ---------------------------------------------------------------- Bloodflame Talons: its own home layout.
+   A ritual circle overhead, the rune behind a centred title, altar-like cards with centred icons in rings, and a
+   pool of ember light at the bottom in place of the grid floor. */
+[data-theme="blood"] .home {
+  background:
+    radial-gradient(1400px 320px at 50% 112%, rgba(255, 70, 30, 0.20), transparent 70%),
+    linear-gradient(#070505, #0b0606 60%, #120707);
+}
+[data-theme="blood"] .home-grid { display: none; }
+/* the ritual circle and its red sky belong to the top of the page, so they scroll away with the title */
+[data-theme="blood"] .home-inner::before {
+  content: ''; position: absolute; left: 50%; top: 0; width: 1100px; height: 460px; transform: translateX(-50%); pointer-events: none;
+  background:
+    radial-gradient(ellipse 340px 46px at 50% 64px, transparent 62%, rgba(230, 30, 36, 0.38) 66%, rgba(230, 30, 36, 0.08) 71%, transparent 74%),
+    radial-gradient(ellipse 550px 300px at 50% 0, rgba(190, 18, 26, 0.24), transparent 100%);
+}
+[data-theme="blood"] .home-inner { max-width: 980px; padding-top: 64px; }
+[data-theme="blood"] .home-hero { position: relative; flex-direction: column; justify-content: center; text-align: center; gap: 14px; margin-bottom: 44px; padding-top: 6px; }
+[data-theme="blood"] .home-hero::before { content: ''; position: absolute; left: 50%; top: -62px; width: 190px; height: 190px; transform: translateX(-50%); background: var(--sigil) center / contain no-repeat; opacity: 0.32; filter: drop-shadow(0 0 18px rgba(255, 20, 30, 0.7)); pointer-events: none; animation: bf-pulse 5s ease-in-out infinite; }
+@keyframes bf-pulse { 50% { opacity: 0.2; } }
+[data-theme="blood"] .home-hero > * { position: relative; }
+[data-theme="blood"] .home-hero img { width: 64px; height: 64px; }
+[data-theme="blood"] .home-title { font-family: var(--serif); font-weight: 400; font-size: 34px; letter-spacing: 0.32em; color: #e9dedb; text-shadow: 0 0 22px rgba(220, 20, 28, 0.6); }
+[data-theme="blood"] .home-title .g { filter: drop-shadow(0 2px 0 #2a0204) drop-shadow(0 0 10px rgba(255, 40, 40, 0.45)); }
+[data-theme="blood"] .home-title .g { background: linear-gradient(180deg, #ffb1a6, #ff3b33 55%, #b3121a); -webkit-background-clip: text; background-clip: text; }
+[data-theme="blood"] .home-title .cursor { display: none; }
+[data-theme="blood"] .home-sub { font-family: var(--serif); font-style: italic; font-size: 13px; color: #8a7d7b; letter-spacing: 0.04em; }
+[data-theme="blood"] .home-section-title { justify-content: center; font-family: var(--serif); font-size: 12px; letter-spacing: 0.34em; color: #9b8f8d; margin: 34px 0 16px; }
+[data-theme="blood"] .home-section-title::before,
+[data-theme="blood"] .home-section-title::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, #7a0c10); }
+[data-theme="blood"] .home-section-title::after { background: linear-gradient(90deg, #7a0c10, transparent); }
+[data-theme="blood"] .home-section-title > :first-child,
+[data-theme="blood"] .home-section-title { gap: 14px; }
+[data-theme="blood"] .new-cards { gap: 10px; }
+[data-theme="blood"] .new-card {
+  align-items: center; text-align: center; gap: 8px; padding: 18px 10px 14px;
+  border: 1px solid #1f1313; border-top: 2px solid #5a0a0e;
+  background: linear-gradient(180deg, #120b0b, #0b0707);
+}
+[data-theme="blood"] .new-card:hover { transform: translateY(-2px); border-color: #3d1a1a; border-top-color: #e01e26; box-shadow: 0 -6px 18px -8px rgba(255, 30, 30, 0.7), 0 12px 28px rgba(0, 0, 0, 0.6), inset 0 -30px 40px -30px rgba(255, 60, 30, 0.25); }
+[data-theme="blood"] .new-card .nc-icon { width: 42px; height: 42px; border-radius: 50%; color: #e8363c; background: radial-gradient(circle, rgba(200, 22, 29, 0.18), transparent 70%); box-shadow: inset 0 0 0 1px rgba(200, 22, 29, 0.55); }
+[data-theme="blood"] .new-card:nth-child(3n+2) .nc-icon { color: #ff6a3d; background: radial-gradient(circle, rgba(255, 90, 50, 0.15), transparent 70%); box-shadow: inset 0 0 0 1px rgba(255, 90, 50, 0.45); }
+[data-theme="blood"] .new-card:nth-child(3n+3) .nc-icon { color: #c2b8b6; background: radial-gradient(circle, rgba(200, 190, 188, 0.08), transparent 70%); box-shadow: inset 0 0 0 1px rgba(200, 190, 188, 0.3); }
+[data-theme="blood"] .new-card:hover .nc-icon { box-shadow: inset 0 0 0 1px #c9a24a, 0 0 14px rgba(255, 30, 30, 0.5); }
+[data-theme="blood"] .new-card .nc-title { font-family: var(--serif); font-weight: 400; font-size: 14px; letter-spacing: 0.06em; color: #e2d8d6; }
+[data-theme="blood"] .recent-list { border-color: #241616; }
+[data-theme="blood"] .recent-row .rr-icon { color: #e8363c; }
+
+/* ---------------------------------------------------------------- AWG-9: the radar scope over everything */
+:root[data-theme="f14"] { --font-ui: ui-monospace, 'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace; --radius: 0; --radius-lg: 0; }
+[data-theme="f14"] body, [data-theme="f14"] #app { background: #070907; }
+[data-theme="f14"] #titlebar::after { background: linear-gradient(90deg, transparent, rgba(84, 255, 107, 0.6) 30%, rgba(255, 179, 107, 0.45) 65%, transparent); opacity: 0.7; }
+[data-theme="f14"] .tab.active { box-shadow: inset 0 2px 0 var(--accent); }
+[data-theme="f14"] .btn.primary { color: #062b0c; }
+[data-theme="f14"] a { color: #8fd8ff; }
+[data-theme="f14"] .new-card .nc-icon { color: var(--accent); background: rgba(84, 255, 107, 0.08); }
+[data-theme="f14"] .new-card:nth-child(3n+2) .nc-icon { color: var(--accent-2); background: rgba(255, 179, 107, 0.08); }
+[data-theme="f14"] .new-card:nth-child(3n+3) .nc-icon { color: var(--accent-3); background: rgba(143, 216, 255, 0.08); }
+[data-theme="f14"] .home-hero img, [data-theme="f14"] .brand-icon { filter: hue-rotate(185deg) saturate(1.3) drop-shadow(0 0 14px rgba(84, 255, 107, 0.3)); }
+[data-theme="f14"] .home-title, [data-theme="f14"] .brand-name { text-shadow: 0 0 10px rgba(84, 255, 107, 0.35); }
+/* the scope's sweep: faint scanlines and a green glow from the bottom of the workspace, never in the way of clicks */
+[data-theme="f14"] #workspace { background: radial-gradient(1200px 500px at 50% 120%, rgba(84, 255, 107, 0.07), transparent 65%), var(--bg-0); }
+[data-theme="f14"] #app::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0.12) 3px); mix-blend-mode: multiply; }
 
 .music-q-row.shuffled .music-track-n { color: var(--text-3); opacity: 0.7; }
 .music-q-head + .music-q-row.shuffled, .music-q-row + .music-q-head { margin-top: 6px; }

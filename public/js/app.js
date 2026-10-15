@@ -170,9 +170,20 @@ function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
 }
 
 const DISCORD_INVITE = 'https://discord.gg/3qxNWFErAV';
-const THEME_NEXT = { dark: 'light', light: 'pbj', pbj: 'custom', custom: 'dark' };
-const THEME_NAME = { dark: 'Dark', light: 'Light', pbj: 'PB&J', custom: 'Custom' };
-const THEME_PREV = Object.fromEntries(Object.entries(THEME_NEXT).map(([a, b]) => [b, a]));
+// themes in the order the top-bar button cycles them: [id, short name, settings label, icon]
+const THEMES = [
+  ['dark', 'Dark', 'Dark — neon dusk', 'moon'],
+  ['light', 'Light', 'Light — lavender', 'sun'],
+  ['pbj', 'PB&J', 'PB&J — grape & peanut butter', 'star'],
+  ['custom', 'Custom', 'Custom — your own palette', 'palette'],
+];
+// Easter eggs → Hidden themes adds these to the Settings theme list only (never the top-bar button or the View
+// menu). Each needs its own [data-theme="id"] block in app.css, and a Monaco theme in code.js for the code editor.
+const HIDDEN_THEMES = [
+  ['f14', 'AWG-9', 'AWG-9 — F-14 radar scope', 'f14'],
+  ['blood', 'Bloodflame Talons', 'Bloodflame Talons — blood & ember', 'star'],
+];
+const THEME_NAME = Object.fromEntries([...THEMES, ...HIDDEN_THEMES].map(([id, name]) => [id, name]));
 // side panels that can move between the right sidebar and the top bar
 const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
 // top-bar buttons that can move to the right sidebar (in their top-bar order)
@@ -397,13 +408,28 @@ class App {
         draw();
       });
       const played = s.games || s.auto?.games;
+      const hid = h('input', { type: 'checkbox', checked: !!this.settings.hiddenThemes });
+      hid.addEventListener('change', async () => {
+        await this.saveSettings({ hiddenThemes: hid.checked });
+        this.applyTheme(this.settings.theme, false); // a hidden theme in use goes back to Dark when they're switched off
+        if (this.panel === 'settings') { // the theme list up top changes; stay where you were
+          const y = this.sidepanel.querySelector('.panel-body')?.scrollTop || 0;
+          this.renderSettings();
+          const body = this.sidepanel.querySelector('.panel-body');
+          if (body) body.scrollTop = y;
+        }
+      });
       clear(box).append(h('h4', {}, 'Easter eggs'),
         h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat')),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, played
           ? `High score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()} · ${(s.games || 0) + (s.auto?.games || 0)} sorties · ${(s.splashes || 0) + (s.auto?.splashes || 0)} splashes`
           : 'An AWG-9 radar intercept game, behind a button in the top bar.'),
         // wiping progress only shows while the game itself is on
-        on ? h('button', { class: 'btn sm danger', style: { alignSelf: 'flex-start' }, onclick: () => this.resetTomcat(draw) }, icon('trash', 'sm'), 'Reset game progress…') : null);
+        on ? h('button', { class: 'btn sm danger', style: { alignSelf: 'flex-start' }, onclick: () => this.resetTomcat(draw) }, icon('trash', 'sm'), 'Reset game progress…') : null,
+        h('label', { class: 'check' }, hid, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('palette', 'sm'), 'Hidden themes')),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, HIDDEN_THEMES.length
+          ? `Adds ${HIDDEN_THEMES.length} more theme${HIDDEN_THEMES.length === 1 ? '' : 's'} to the theme list in Appearance (not the top-bar button).`
+          : 'Adds secret themes to the theme list in Appearance. None have turned up yet…'));
     };
     draw();
     return box;
@@ -513,8 +539,8 @@ class App {
     $('#btn-new-tab').append(icon('plus'));
     $('#btn-new-tab').addEventListener('click', (e) => showMenu(this.newMenuItems(), { anchor: e.currentTarget }));
     // the top-bar button cycles Dark → Light → PB&J
-    $('#btn-theme').addEventListener('click', () => this.applyTheme(THEME_NEXT[this.settings.theme] || 'dark'));
-    $('#btn-theme').addEventListener('contextmenu', (e) => { e.preventDefault(); this.applyTheme(THEME_PREV[this.settings.theme] || 'dark'); });
+    $('#btn-theme').addEventListener('click', () => this.applyTheme(this.themeStep(1)));
+    $('#btn-theme').addEventListener('contextmenu', (e) => { e.preventDefault(); this.applyTheme(this.themeStep(-1)); });
     $('#btn-sound').addEventListener('click', () => { this.sounds.toggle(); this.syncSoundButton(); });
     this.syncSoundButton();
     this.wireSoundVolume();
@@ -1031,16 +1057,29 @@ class App {
     b.classList.toggle('muted', !on);
   }
 
+  /** The themes Settings offers: the built-in ones, plus the hidden ones when that easter egg is on. */
+  themeList() { return this.settings.hiddenThemes ? [...THEMES, ...HIDDEN_THEMES] : THEMES; }
+
+  /** The theme before (-1) or after (1) the current one on the top-bar button, which only goes round the built-in
+   *  ones (from a hidden theme it goes to the first or last of them). */
+  themeStep(dir, from = this.settings.theme) {
+    const ids = THEMES.map(([id]) => id);
+    const i = ids.indexOf(from);
+    if (i < 0) return dir > 0 ? ids[0] : ids[ids.length - 1];
+    return ids[(i + dir + ids.length) % ids.length];
+  }
+
   applyTheme(theme, persist = true) {
-    if (!THEME_NAME[theme]) theme = 'dark';
+    if (!this.themeList().some(([id]) => id === theme)) theme = 'dark';
     this.settings.theme = theme;
     // a custom theme sits on its base (dark or light): the base's own rules apply, the palette's colours win
     const shown = theme === 'custom' ? applyCustom(normalizeCustom(this.settings.customTheme)) : (applyCustom(null), theme);
     document.documentElement.dataset.theme = shown;
     try { localStorage.setItem('bds-theme', shown); } catch { /* ignore */ }
     const b = $('#btn-theme');
-    clear(b).append(icon(theme === 'dark' ? 'sun' : theme === 'light' ? 'star' : theme === 'pbj' ? 'palette' : 'moon'));
-    b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[THEME_NEXT[theme] || 'dark']}, right-click for ${THEME_NAME[THEME_PREV[theme] || 'dark']}`;
+    const next = this.themeStep(1, theme);
+    clear(b).append(icon(THEMES.find(([id]) => id === next)?.[3] || 'moon')); // shows where a click goes
+    b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[next]}, right-click for ${THEME_NAME[this.themeStep(-1, theme)]}`;
     if (persist) this.saveSettings({ theme });
     for (const t of this.tabs) t.editor?.onThemeChange?.(theme);
     if (window.bdsShell) {
@@ -1216,10 +1255,7 @@ class App {
       { label: 'Full screen', icon: 'maximize', shortcut: 'F11', checked: this.isFullScreen(), action: () => this.toggleFullScreen() },
       { label: 'Focus mode', icon: 'focus', shortcut: 'Shift+F11', checked: document.body.classList.contains('focus-mode'), action: () => this.toggleFocus() },
       { sep: true },
-      { label: 'Dark theme', icon: 'moon', checked: this.settings.theme === 'dark', action: () => this.applyTheme('dark') },
-      { label: 'Light theme', icon: 'sun', checked: this.settings.theme === 'light', action: () => this.applyTheme('light') },
-      { label: 'PB&J theme', icon: 'star', checked: this.settings.theme === 'pbj', action: () => this.applyTheme('pbj') },
-      { label: 'Custom theme', icon: 'palette', checked: this.settings.theme === 'custom', action: () => this.applyTheme('custom') },
+      ...THEMES.map(([id, name, , ic]) => ({ label: `${name} theme`, icon: ic, checked: this.settings.theme === id, action: () => this.applyTheme(id) })),
       { label: 'Edit custom theme…', action: () => this.showPanel('settings') },
       { label: 'Sounds', icon: 'volume', checked: this.settings.sounds !== false, action: () => { this.sounds.toggle(); this.syncSoundButton(); } },
       ...(extra.length ? [{ sep: true }, ...extra] : []),
@@ -2698,7 +2734,7 @@ class App {
       h('div', { class: 'panel-head' }, 'Settings', h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
       h('div', { class: 'panel-body' }, h('div', { class: 'settings-panel' },
         h('div', { class: 'settings-group' }, h('h4', {}, 'Appearance'),
-          sel('theme', [['dark', 'Dark — neon dusk'], ['light', 'Light — lavender'], ['pbj', 'PB&J — grape & peanut butter'], ['custom', 'Custom — your own palette']], (v) => { this.applyTheme(v); customBox.hidden = v !== 'custom'; }),
+          sel('theme', this.themeList().map(([id, , label]) => [id, label]), (v) => { this.applyTheme(v); customBox.hidden = v !== 'custom'; }),
           customBox,
           check('sounds', 'Sounds', () => this.syncSoundButton()),
           check('soundTyping', 'Typing sounds'),
