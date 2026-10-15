@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.38",
+    "date": "2026-10-14",
+    "notes": [
+      "StoragePeek: right-click a box → Hide from storage view. It stays greyed out in “Biggest here”; right-click it there to show it again.",
+      "BoxTape finds yt-dlp and ffmpeg after installing them from an admin terminal, or while the app was already open, so the install button no longer says they can’t be found."
+    ]
+  },
+  {
     "version": "1.0.37",
     "date": "2026-10-14",
     "notes": [

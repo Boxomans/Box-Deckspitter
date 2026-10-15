@@ -1036,3 +1036,6 @@ textarea.sn-input { resize: none; min-height: 140px; height: 100%; line-height: 
 .tape-need { align-items: center; flex-wrap: wrap; gap: 8px; }
 .tape-need .btn { margin-left: auto; }
 .tape-need .spinner { margin-left: auto; width: 16px; height: 16px; }
+.sp-row.sp-off { opacity: 0.45; }
+.sp-row.sp-off:hover { opacity: 0.75; }
+.sp-row.sp-off .sp-row-name .icon { vertical-align: -2px; margin-right: 5px; }

@@ -13,7 +13,7 @@ const fsp = fs.promises;
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const { pathToFileURL } = require('url');
 
@@ -684,11 +684,54 @@ function findExe(name) {
   const dirs = [
     path.join(DATA, 'bin'),
     ...(process.env.PATH || process.env.Path || '').split(path.delimiter),
-    ...(IS_WIN ? [path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links'), path.join(os.homedir(), 'scoop', 'shims'), 'C:\\ProgramData\\chocolatey\\bin', 'C:\\ffmpeg\\bin'] : ['/usr/local/bin', '/opt/homebrew/bin']),
+    ...(IS_WIN ? [
+      path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links'),
+      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'WinGet', 'Links'), // winget run from an admin terminal
+      path.join(os.homedir(), 'scoop', 'shims'), 'C:\\ProgramData\\chocolatey\\bin', 'C:\\ffmpeg\\bin',
+      ...savedPathDirs(),
+    ] : ['/usr/local/bin', '/opt/homebrew/bin']),
   ].filter(Boolean);
   for (const d of dirs) for (const e of exts) {
     const p = path.join(d, name + e);
     try { if (fs.statSync(p).isFile()) return p; } catch { /* next */ }
+  }
+  return IS_WIN ? wingetPackageExe(name) : null;
+}
+
+// The app's PATH is the one it started with, so a tool installed since (winget in a terminal, or BoxTape's button) may only
+// be on the PATH Windows has saved. Read that fresh from the registry (at most every 15 s).
+let savedPath = { at: 0, dirs: [] };
+function savedPathDirs() {
+  if (Date.now() - savedPath.at < 15000) return savedPath.dirs;
+  const dirs = [];
+  for (const key of ['HKCU\\Environment', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment']) {
+    try {
+      const out = execFileSync('reg', ['query', key, '/v', 'Path'], { encoding: 'utf8', windowsHide: true, timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+      const m = /\sPath\s+REG_(?:EXPAND_)?SZ\s+(.*)/i.exec(out);
+      if (m) dirs.push(...m[1].trim().split(';').map((d) => d.replace(/%([^%]+)%/g, (all, v) => process.env[v] ?? all)));
+    } catch { /* no saved Path there */ }
+  }
+  savedPath = { at: Date.now(), dirs };
+  return dirs;
+}
+/** Last resort: winget's own package folders (yt-dlp.yt-dlp_…, Gyan.FFmpeg_…), where the exe sits a few folders down
+ *  even when winget couldn't make a link to it. */
+function wingetPackageExe(name) {
+  const want = new RegExp(`(^|\\.)${name}[._]`, 'i');
+  const file = name.toLowerCase() + '.exe';
+  const look = (dir, depth) => {
+    let list = [];
+    try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+    const hit = list.find((d) => d.isFile() && d.name.toLowerCase() === file);
+    if (hit) return path.join(dir, hit.name);
+    if (depth <= 0) return null;
+    for (const d of list) if (d.isDirectory()) { const r = look(path.join(dir, d.name), depth - 1); if (r) return r; }
+    return null;
+  };
+  for (const root of [path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages'), path.join(process.env.ProgramFiles || 'C:\\Program Files', 'WinGet', 'Packages')]) {
+    let pkgs = [];
+    try { pkgs = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
+    for (const d of pkgs) if (d.isDirectory() && want.test(d.name)) { const r = look(path.join(root, d.name), 3); if (r) return r; }
   }
   return null;
 }

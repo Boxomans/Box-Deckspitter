@@ -127,6 +127,17 @@ export class StorageEditor extends BaseEditor {
     this.view = v;
     this.curPath = v.path;
     const S = clear(this.viewEl);
+    const items = [
+      ...v.kids.filter((k) => k.size > 0).map((k) => ({ ...k, cat: 'dir' })),
+      ...v.files.map((f) => ({ ...f })),
+      ...(v.looseFiles > 0 ? [{ name: 'smaller files here', size: v.looseFiles, cat: 'loose', isDir: false }] : []),
+      ...v.extra.map((x) => ({ ...x, isDir: false, virtual: true })),
+    ].sort((a, b) => b.size - a.size);
+    // boxes you've hidden stay out of the map (it lays out the rest) but are still listed, greyed, in "Biggest here"
+    for (const it of items) it.off = this.isHidden(it);
+    const shown = items.filter((it) => !it.off);
+    const nOff = items.length - shown.length;
+
     // breadcrumb
     const crumbs = h('div', { class: 'sp-crumbs mono' });
     const rel = v.path.slice(v.root.length).split('\\').filter(Boolean);
@@ -140,14 +151,9 @@ export class StorageEditor extends BaseEditor {
     const up = v.path !== v.root ? h('button', { class: 'icon-btn', 'data-tip': 'Up', onclick: () => this.show(dirname(v.path)) }, icon('arrow-up', 'sm')) : null;
     S.append(h('div', { class: 'sp-viewhead' }, up, crumbs, h('div', { class: 'grow' }),
       v.running ? h('span', { class: 'chip live' }, 'live') : null,
+      nOff ? h('button', { class: 'chip', 'data-tip': 'Hidden from the map. They’re greyed out in “Biggest here”: right-click one to show it again.', onclick: () => { this.sideTab = 'here'; this.show(v.path); } }, icon('eye-off', 'sm'), `${nOff} hidden`) : null,
       h('span', { class: 'mono' }, formatBytes(v.size)), h('span', { class: 'faint mono' }, ` · ${v.count.toLocaleString()} files`)));
 
-    const items = [
-      ...v.kids.filter((k) => k.size > 0).map((k) => ({ ...k, cat: 'dir' })),
-      ...v.files.map((f) => ({ ...f })),
-      ...(v.looseFiles > 0 ? [{ name: 'smaller files here', size: v.looseFiles, cat: 'loose', isDir: false }] : []),
-      ...v.extra.map((x) => ({ ...x, isDir: false, virtual: true })),
-    ].sort((a, b) => b.size - a.size);
 
     const map = h('div', { class: 'sp-treemap' });
     const list = h('div', { class: 'sp-list' });
@@ -159,17 +165,17 @@ export class StorageEditor extends BaseEditor {
         b.addEventListener('click', () => { this.sideTab = k; this.show(v.path); });
         return b;
       })), list);
-    this.mapItems = { el: map, items, total: v.size };
+    this.mapItems = { el: map, items: shown, total: v.size };
     this.resizeObs?.disconnect();
-    this.resizeObs = new ResizeObserver(() => this.drawTreemap(map, items, v.size));
+    this.resizeObs = new ResizeObserver(() => this.drawTreemap(map, shown, v.size));
     this.resizeObs.observe(map);
-    this.drawTreemap(map, items, v.size);
+    this.drawTreemap(map, shown, v.size);
 
     const tab = this.sideTab || 'here';
     if (tab === 'here') {
       for (const it of items.slice(0, 80)) list.append(this.row(it, v.size));
     } else if (tab === 'files') {
-      for (const f of v.bigFiles.slice(0, 100)) list.append(this.row({ name: basename(f.path), path: f.path, size: f.size, isDir: false, detail: dirname(f.path) }, v.bigFiles[0]?.size || 1));
+      for (const f of v.bigFiles.slice(0, 100)) { const it = { name: basename(f.path), path: f.path, size: f.size, isDir: false, detail: dirname(f.path) }; it.off = this.isHidden(it); list.append(this.row(it, v.bigFiles[0]?.size || 1)); }
     } else if (v.running) {
       list.append(h('div', { class: 'empty-note' }, 'The type breakdown appears when the scan finishes.'));
     } else {
@@ -197,9 +203,9 @@ export class StorageEditor extends BaseEditor {
   }
 
   row(it, max) {
-    const r = h('button', { class: 'sp-row', title: it.path || '' },
+    const r = h('button', { class: `sp-row${it.off ? ' sp-off' : ''}`, title: (it.path || '') + (it.off ? '\nHidden from the map: right-click to show it again' : '') },
       h('span', { class: 'sp-swatch', style: { background: CAT_COLOR[it.isDir ? 'dir' : it.cat || 'other'] } }),
-      h('span', { class: 'sp-row-name' }, it.name, it.detail ? h('span', { class: 'faint' }, '  ' + it.detail) : null),
+      h('span', { class: 'sp-row-name' }, it.off ? icon('eye-off', 'sm') : null, it.name, it.detail ? h('span', { class: 'faint' }, '  ' + it.detail) : null),
       h('span', { class: 'sp-row-size mono' }, formatBytes(it.size)),
       h('div', { class: 'sp-row-bar' }, h('div', { style: { width: Math.max(1, (it.size / max) * 100) + '%' } })));
     r.addEventListener('click', () => { if (it.isDir) this.show(it.path); else if (it.path) api.reveal(it.path); else if (it.cat === 'hidden') this.explainHidden(); });
@@ -219,7 +225,22 @@ export class StorageEditor extends BaseEditor {
       ...(it.isDir ? [{ label: 'Drill in', icon: 'arrow-down', action: () => this.show(it.path) }, { label: 'Open as BoxSpace', icon: 'spaces', action: () => this.app.openSpace(it.path) }] : [{ label: 'Open', icon: 'file', action: () => this.app.openPath(it.path) }]),
       { label: 'Show in Explorer', icon: 'external', action: () => api.reveal(it.path) },
       { label: 'Copy path', icon: 'copy', action: () => { navigator.clipboard.writeText(it.path); toast('Copied', { timeout: 1200 }); } },
+      { sep: true },
+      it.off
+        ? { label: 'Show in storage view', icon: 'eye', action: () => this.setHidden(it, false) }
+        : { label: 'Hide from storage view', icon: 'eye-off', action: () => this.setHidden(it, true) },
     ];
+  }
+
+  /** Paths hidden from the map, kept in settings so they stay hidden in later scans. */
+  hiddenPaths() { return new Set((this.app.settings.storageHidden || []).map((p) => p.toLowerCase())); }
+  isHidden(it) { return !!it.path && this.hiddenPaths().has(it.path.toLowerCase()); }
+  setHidden(it, on) {
+    const keep = (this.app.settings.storageHidden || []).filter((p) => p.toLowerCase() !== it.path.toLowerCase());
+    if (on) keep.push(it.path);
+    this.app.saveSettings({ storageHidden: keep });
+    if (on) toast(`Hid ${it.name}. It’s still in “Biggest here”, greyed out: right-click it there to show it again.`, { timeout: 4500 });
+    this.show(this.curPath, { quiet: true });
   }
 
   drawTreemap(el, items, total) {
