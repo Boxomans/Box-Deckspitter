@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.0.44",
+    "date": "2026-10-15",
+    "notes": [
+      "The Tools folder is now the Toolbox, and every tool is in it (the home page's tools in your order, BoxTicker, Quick trim and the pop-out music player), with a filter box.",
+      "BoxTicker: Compare lines all follow the same dates. Over long ranges they start together from the first day they all have (a later listing, say) instead of each from its own, and huge % changes shorten (+503K%).",
+      "Clicking Music player in the Toolbox again closes it.",
+      "In full screen, the full screen button now shows a clear \"leave full screen\" icon (arrows pointing in) instead of one that looked like a phone, and it always takes you back out."
+    ]
+  },
+  {
     "version": "1.0.43",
     "date": "2026-10-15",
     "notes": [

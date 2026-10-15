@@ -1099,4 +1099,11 @@ textarea.sn-input { resize: none; min-height: 140px; height: 100%; line-height: 
 .tk-x { width: 20px; height: 20px; margin: -4px -6px -4px 0; opacity: 0.6; }
 .tk-x:hover { opacity: 1; }
 .tk-cur { margin-left: 6px; font-size: 13px; font-weight: 500; color: var(--text-3); }
-.tools-row .fr-meta { font-size: 11px; }
+.tools-filter-box { padding: 8px 10px 4px; }
+.tools-filter { width: 100%; padding: 6px 8px; font: inherit; font-size: 12px; color: var(--text); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); outline: none; box-sizing: border-box; }
+.tools-filter:focus { border-color: var(--accent-line); }
+.tools-group { padding: 10px 10px 4px; font: 600 10px var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+.tools-group[hidden], .tools-row[hidden] { display: none; }
+.tools-row { height: auto; padding-top: 5px; padding-bottom: 5px; align-items: center; }
+.tools-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.tools-sub { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -19,6 +19,11 @@ const PALETTE = ['--accent', '--accent-3', '--accent-2', '#f0c27a', '#7aa8ff', '
 
 const num = (v, d = 2) => (v == null || !isFinite(v) ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
 const signed = (v, d = 2) => (v == null || !isFinite(v) ? '—' : `${v >= 0 ? '+' : '−'}${num(Math.abs(v), d)}`);
+const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+/** A % for the axis and its tags: +12.34%, or +503K% when it's huge. */
+const pctTxt = (v, d = 2) => `${v >= 0 ? '+' : '−'}${Math.abs(v) >= 10000 ? compact.format(Math.abs(v)) : num(Math.abs(v), d)}%`;
+/** A price for the axis and its tags, shortened past a million. */
+const priceTxt = (v) => (Math.abs(v) >= 1e6 ? compact.format(v) : num(v, Math.abs(v) >= 10000 ? 0 : Math.abs(v) < 1 ? 4 : 2));
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /** Round-number steps for an axis from lo to hi, about n of them. */
@@ -289,16 +294,21 @@ export class TickerEditor extends BaseEditor {
 
   /** The lines to draw: [{ix, n, d, pts: [[t, v]], base}] — in % from the start when comparing. */
   series() {
-    const out = [];
+    const raw = [];
     this.items().forEach((ix, n) => {
       if (this.view !== 'both' && this.view !== ix.sym) return;
       const d = this.data[ix.sym];
-      if (!d || d.error || !d.points?.length) return;
-      const base = d.base ?? d.points[0][1];
-      const pts = this.view === 'both' ? d.points.map(([t, v]) => [t, ((v - base) / base) * 100]) : d.points;
-      out.push({ ix, n, d, pts, base: this.view === 'both' ? 0 : base });
+      if (d && !d.error && d.points?.length) raw.push({ ix, n, d });
     });
-    return out;
+    if (this.view !== 'both') return raw.map((s) => ({ ...s, pts: s.d.points, base: s.d.base ?? s.d.points[0][1] }));
+    // comparing: everyone starts on the same day (the latest first day among them, say a later IPO), and counts % from there
+    const start = Math.max(...raw.map((s) => s.d.points[0][0]));
+    const same = raw.every((s) => start - s.d.points[0][0] < 7 * 864e5);
+    return raw.map((s) => {
+      const kept = same ? s.d.points : s.d.points.filter(([t]) => t >= start);
+      const base = (same || this.range === '1d') && s.d.base != null ? s.d.base : kept[0][1];
+      return { ...s, pts: kept.map(([t, v]) => [t, ((v - base) / base) * 100]), base: 0 };
+    }).filter((s) => s.pts.length);
   }
 
   draw() {
@@ -322,13 +332,18 @@ export class TickerEditor extends BaseEditor {
     }
     const L = 8, R = 72, T = 12, B = 26;
     const pw = W - L - R, ph = H - T - B;
-    // x: real time across the day for 1D (the line fills in as the session goes); otherwise one step per point, so nights and weekends don't leave gaps
+    // x: real time, the same clock for every line. 1D runs across the whole session (the line fills in as it goes);
+    // 5D and 1M step through the bars instead, shared by all the lines, so nights and weekends don't leave gaps.
     const intraday = this.range === '1d';
+    const stepped = this.range === '5d' || this.range === '1mo';
     const first = list[0];
-    const t0 = first.pts[0][0];
-    const t1 = intraday ? Math.max(t0 + (first.d.session || SESSION), ...list.map((s) => s.pts[s.pts.length - 1][0])) : 0;
-    const len = Math.max(...list.map((s) => s.pts.length));
-    const xOf = (s, i) => L + (intraday ? ((s.pts[i][0] - t0) / (t1 - t0)) * pw : (len > 1 ? (i / (len - 1)) * pw : pw / 2));
+    const t0 = Math.min(...list.map((s) => s.pts[0][0]));
+    const tEnd = Math.max(...list.map((s) => s.pts[s.pts.length - 1][0]));
+    const t1 = intraday ? Math.max(t0 + (first.d.session || SESSION), tEnd) : Math.max(tEnd, t0 + 1);
+    const axis = stepped ? [...new Set(list.flatMap((s) => s.pts.map((p) => p[0])))].sort((a, b) => a - b) : null;
+    const slot = axis && new Map(axis.map((t, i) => [t, i]));
+    const xT = (t) => L + (axis ? (axis.length > 1 ? (slot.get(t) / (axis.length - 1)) * pw : pw / 2) : ((t - t0) / (t1 - t0)) * pw);
+    const xOf = (s, i) => xT(s.pts[i][0]);
     let lo = Infinity, hi = -Infinity;
     for (const s of list) for (const [, v] of s.pts) { if (v < lo) lo = v; if (v > hi) hi = v; }
     for (const s of list) { lo = Math.min(lo, s.base); hi = Math.max(hi, s.base); }
@@ -345,7 +360,7 @@ export class TickerEditor extends BaseEditor {
       c.strokeStyle = css('--line'); c.lineWidth = 1;
       c.beginPath(); c.moveTo(L, y); c.lineTo(L + pw, y); c.stroke();
       c.fillStyle = css('--text-3');
-      c.fillText(pct ? `${v >= 0 ? '+' : ''}${num(v, Math.abs(hi - lo) < 4 ? 2 : 1)}%` : num(v, v >= 10000 ? 0 : 2), L + pw + 8, y);
+      c.fillText(pct ? pctTxt(v, Math.abs(hi - lo) < 4 ? 2 : 1) : priceTxt(v), L + pw + 8, y);
     }
     // time axis: about one label per 110px
     c.textAlign = 'center'; c.textBaseline = 'top';
@@ -358,8 +373,10 @@ export class TickerEditor extends BaseEditor {
       const tx = (t) => L + ((t - t0) / (t1 - t0)) * pw;
       label(t0, tx(t0));
       for (let t = Math.ceil((t0 + 1) / 3600e3) * 3600e3; t <= t1; t += step) if (tx(t) - tx(t0) > 90) label(t, tx(t));
+    } else if (axis) {
+      for (let k = 0; k <= nLab; k++) { const t = axis[Math.round(((axis.length - 1) * k) / nLab)]; label(t, xT(t)); }
     } else {
-      for (let k = 0; k <= nLab; k++) { const i = Math.round(((first.pts.length - 1) * k) / nLab); label(first.pts[i][0], xOf(first, i)); }
+      for (let k = 0; k <= nLab; k++) { const t = t0 + ((t1 - t0) * k) / nLab; label(t, xT(t)); }
     }
     // the baseline: previous close for one index, 0% when comparing
     const by = Math.round(Y(list[0].base)) + 0.5;
@@ -386,16 +403,17 @@ export class TickerEditor extends BaseEditor {
       c.fillStyle = col;
       c.fillRect(L + pw + 2, ly - 9, R - 4, 18);
       c.fillStyle = css('--bg-0') || '#000'; c.textAlign = 'left'; c.textBaseline = 'middle';
-      c.fillText(pct ? `${last >= 0 ? '+' : ''}${num(last)}%` : num(last, last >= 10000 ? 0 : 2), L + pw + 6, ly);
+      c.fillText(pct ? pctTxt(last) : priceTxt(last), L + pw + 6, ly);
       if (intraday && s.d.state === 'open') { c.fillStyle = col; c.beginPath(); c.arc(xOf(s, s.pts.length - 1), ly, 3.2, 0, Math.PI * 2); c.fill(); }
     }
 
     // hover: a crosshair and the values under it
     const hv = this.hover;
     if (!hv || hv.x < L || hv.x > L + pw) return;
+    const f = (hv.x - L) / pw;
+    const at = axis ? axis[Math.round(f * (axis.length - 1))] : t0 + f * (t1 - t0);
     const near = (s) => {
-      if (!intraday) return Math.max(0, Math.min(s.pts.length - 1, Math.round(((hv.x - L) / pw) * (len - 1))));
-      const t = t0 + ((hv.x - L) / pw) * (t1 - t0);
+      const t = at;
       let best = 0;
       for (let i = 1; i < s.pts.length; i++) if (Math.abs(s.pts[i][0] - t) < Math.abs(s.pts[best][0] - t)) best = i;
       return best;
@@ -411,7 +429,7 @@ export class TickerEditor extends BaseEditor {
       c.fillStyle = col; c.beginPath(); c.arc(xOf(s, idx[k]), Y(v), 3.5, 0, Math.PI * 2); c.fill();
       const ch = pct ? null : v - s.base;
       rows.push(h('div', { class: 'tk-tip-row' }, h('span', { class: 'tk-dot', style: { background: col } }), h('span', {}, s.ix.short),
-        h('b', { class: 'mono' }, pct ? `${v >= 0 ? '+' : ''}${num(v)}%` : `${num(v)}  ${signed(ch)} (${signed((ch / s.base) * 100)}%)`)));
+        h('b', { class: 'mono' }, pct ? pctTxt(v) : `${num(v)}  ${signed(ch)} (${signed((ch / s.base) * 100)}%)`)));
     });
     const t = list[0].pts[idx[0]][0];
     const when = this.range === '1d' || this.range === '5d' || this.range === '1mo' ? this.fmtTime(t, tz, this.range !== '1d')

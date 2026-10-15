@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('bdsShell', {
   isShell: true,
   setTitlebar: (color, symbolColor, theme) => ipcRenderer.invoke('bds:titlebar', { color, symbolColor, theme }),
   setFullScreen: (on) => ipcRenderer.invoke('bds:fullscreen', !!on),
+  isFullScreen: () => ipcRenderer.invoke('bds:is-fullscreen'),
+  onFullScreen: (cb) => { ipcRenderer.on('bds:fullscreen-changed', (_e, on) => cb(!!on)); },
   dialog: (opts) => ipcRenderer.invoke('bds:dialog', opts),
   startDrag: (file) => ipcRenderer.send('bds:drag', file),
   copyImage: (pngDataUrl) => ipcRenderer.invoke('bds:copyImage', pngDataUrl),

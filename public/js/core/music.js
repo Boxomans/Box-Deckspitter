@@ -820,7 +820,7 @@ export function createMusic(app) {
     el.append(...parts);
     document.body.append(el);
     ui = { el, title, sub, seek, cur, dur, playB, shuffleB, loopB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
-    document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && !wide && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music')) setOpen(false); }, true);
+    document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && !wide && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music, .music-opener')) setOpen(false); }, true);
     document.addEventListener('keydown', (e) => {
       if (full && e.key === 'Escape' && !document.querySelector('.modal-backdrop, .menu')) { e.preventDefault(); setFull(false); return; }
       if ((!state.open && !wide) || ((state.docked || wide) && !el.contains(e.target) && e.target !== document.body)) return;

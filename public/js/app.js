@@ -576,6 +576,14 @@ class App {
     // leaving full screen some other way (the window manager, focus mode) keeps the button right
     addEventListener('resize', () => this.syncFullScreen());
     document.addEventListener('fullscreenchange', () => this.syncFullScreen());
+    // the desktop app says when its window goes full screen; leaving isn't always announced (Windows), so the page
+    // also asks the window whenever it changes size
+    if (window.bdsShell?.isFullScreen) {
+      const ask = () => window.bdsShell.isFullScreen().then((on) => { this._shellFull = on; this.syncFullScreen(); }).catch(() => {});
+      window.bdsShell.onFullScreen?.((on) => { this._shellFull = on; this.syncFullScreen(); });
+      addEventListener('resize', ask);
+      ask();
+    }
     this.syncFullScreen();
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
@@ -2204,22 +2212,7 @@ class App {
     inner.append(grid);
     inner.append(h('div', { class: 'home-section-title' }, 'tools'));
     const toolGrid = h('div', { class: 'new-cards tool-cards' });
-    for (const [ic, title, sub, fn] of this.ordered('tools', [
-      ['form-fill', 'Fill a form', 'gov pdfs · autofill · sign', () => this.fillForm()],
-      ['video', 'Video editor', 'tracks · keyframes · chroma key', () => this.newDocument('cut')],
-      ['magnet', 'BoxKlep', 'grab videos from a link', () => this.newDocument('klep')],
-      ['spaces', 'BoxSpaces', 'open a folder, IDE-style', () => this.openSpace()],
-      ['layers', 'StoragePeek', 'what’s eating your drives', () => this.newDocument('storage')],
-      ['mail', 'BoxMail', 'gmail + the dumps + claude', () => this.newDocument('mail')],
-      ['music', 'BoxTape', 'youtube playlist → mp3s', () => this.newDocument('tape')],
-      ['play', 'Music', 'the audio dump · playlists · big player', () => this.newDocument('music')],
-      ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
-      ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
-      ['swap', 'BoxSwap', 'profiles of files · hot-swap a folder', () => this.newDocument('swap')],
-      ['tunnel', 'BoxTunnel', 'audio lines · any input to any output', () => this.newDocument('tunnel')],
-      ['lock', 'Secure notes', 'passwords & private notes · encrypted', () => this.newDocument('secure')],
-      ...(window.bdsShell?.browser ? [['globe', 'Browser', 'the web · send pages & media to the dumps', () => this.newDocument('browser')]] : []),
-    ], (c) => c[1])) {
+    for (const [ic, title, sub, fn] of this.ordered('tools', this.homeTools(), (c) => c[1])) {
       const card = this.homeCard(ic, title, sub);
       card.addEventListener('click', fn);
       toolGrid.append(card);
@@ -2734,19 +2727,76 @@ class App {
     return n + moved;
   }
 
-  /** The Tools folder at the foot of the left rail: tools that live here rather than on the home page. */
+  /** The home page's tool cards: [icon, name, what it does, open]. The Tools folder lists them too. */
+  homeTools() {
+    return [
+      ['form-fill', 'Fill a form', 'gov pdfs · autofill · sign', () => this.fillForm()],
+      ['video', 'Video editor', 'tracks · keyframes · chroma key', () => this.newDocument('cut')],
+      ['magnet', 'BoxKlep', 'grab videos from a link', () => this.newDocument('klep')],
+      ['spaces', 'BoxSpaces', 'open a folder, IDE-style', () => this.openSpace()],
+      ['layers', 'StoragePeek', 'what’s eating your drives', () => this.newDocument('storage')],
+      ['mail', 'BoxMail', 'gmail + the dumps + claude', () => this.newDocument('mail')],
+      ['music', 'BoxTape', 'youtube playlist → mp3s', () => this.newDocument('tape')],
+      ['play', 'Music', 'the audio dump · playlists · big player', () => this.newDocument('music')],
+      ['scan-text', 'BoxScribe', 'image → text · offline ocr', () => this.newDocument('scribe')],
+      ['diff', 'BoxDiff', 'compare two files side by side', () => this.newDocument('diff')],
+      ['swap', 'BoxSwap', 'profiles of files · hot-swap a folder', () => this.newDocument('swap')],
+      ['tunnel', 'BoxTunnel', 'audio lines · any input to any output', () => this.newDocument('tunnel')],
+      ['lock', 'Secure notes', 'passwords & private notes · encrypted', () => this.newDocument('secure')],
+      ...(window.bdsShell?.browser ? [['globe', 'Browser', 'the web · send pages & media to the dumps', () => this.newDocument('browser')]] : []),
+    ];
+  }
+
+  /** The game's line in the Toolbox: every splash so far, by hand and on automatic, the sortie in the air included. */
+  splashLine(live = 0) {
+    const t = this.settings.tomcat || {};
+    const n = (t.splashes || 0) + (t.auto?.splashes || 0) + live;
+    return `${n.toLocaleString()} ${n === 1 ? 'splash' : 'splashes'}`;
+  }
+
+  /** The Toolbox at the foot of the left rail: every tool in one list. */
   renderToolsPanel() {
     const p = clear(this.sidepanel);
-    const tool = (ic, key, sub, open) => {
-      const b = h('button', { class: 'file-row tools-row', title: sub }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
-        h('span', { class: 'fr-name' }, this.toolName(key)), h('span', { class: 'fr-meta' }, sub));
+    const row = ([ic, key, sub, open, cls = '']) => {
+      const b = h('button', { class: `file-row tools-row ${cls}`, title: sub }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
+        h('span', { class: 'tools-text' }, h('span', { class: 'fr-name' }, this.toolName(key)), h('span', { class: 'tools-sub' }, sub)));
       b.addEventListener('click', open);
+      b._find = `${this.toolName(key)} ${key} ${sub}`.toLowerCase();
       return b;
     };
-    p.append(h('div', { class: 'panel-head' }, 'Tools', h('div', { class: 'grow' }),
+    // the home page's tools in your order (Music, Browser and BoxSpaces fill the window), then the rest
+    const groups = [
+      ['Tools', [...this.ordered('tools', this.homeTools(), (c) => c[1]),
+        ['trending-up', 'BoxTicker', 'NASDAQ · S&P 500 · any ticker', () => this.newDocument('ticker')]]],
+      ['More', [
+        ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
+        ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
+        ...(this.settings.tomcatEnabled ? [['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.newDocument('tomcat')]] : []),
+      ]],
+    ];
+    const list = h('div', { class: 'file-list tools-list' });
+    for (const [title, items] of groups) list.append(h('div', { class: 'tools-group' }, title), ...items.map(row));
+    const filter = h('input', { type: 'search', class: 'tools-filter', placeholder: 'Filter tools…', spellcheck: false });
+    filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      for (const el of list.children) if (el._find !== undefined) el.hidden = !!q && !el._find.includes(q);
+      for (const g of list.querySelectorAll('.tools-group')) {
+        let n = g.nextElementSibling, any = false;
+        while (n && !n.classList.contains('tools-group')) { if (!n.hidden) any = true; n = n.nextElementSibling; }
+        g.hidden = !any;
+      }
+    });
+    filter.addEventListener('keydown', (e) => { if (e.key === 'Enter') [...list.children].find((el) => el._find !== undefined && !el.hidden)?.click(); });
+    // the sortie flying right now isn't in the totals until it ends
+    if (this.settings.tomcatEnabled && this._flight) this._flight.then((f) => {
+      const g = f.game;
+      const sub = list.querySelector('.tools-row:last-child .tools-sub');
+      if (g && !g.gameOver && sub && this.panel === 'tools') sub.textContent = this.splashLine(g.splashes);
+    }).catch(() => {});
+    p.append(h('div', { class: 'panel-head' }, 'Toolbox', h('div', { class: 'grow' }),
       h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
-    h('div', { class: 'panel-body' }, h('div', { class: 'file-list' },
-      tool('trending-up', 'BoxTicker', 'NASDAQ · S&P 500', () => this.newDocument('ticker')))));
+    h('div', { class: 'tools-filter-box' }, filter),
+    h('div', { class: 'panel-body' }, list));
   }
 
   async renderRecentPanel() {
@@ -3694,6 +3744,8 @@ class App {
   /** The whole app window full screen (bars and all). */
   isFullScreen() {
     if (document.fullscreenElement) return true;
+    if (this._shellFull != null) return this._shellFull;
+    // an older desktop shell can't say: guess from the size (page zoom or display scaling can fool this)
     return !!window.bdsShell && Math.abs(innerWidth - screen.width) < 2 && Math.abs(innerHeight - screen.height) < 2;
   }
   setFullScreen(on) {
@@ -3701,11 +3753,13 @@ class App {
     else if (on) document.documentElement.requestFullscreen?.().catch(() => {});
     else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     this._fullWant = on;
-    setTimeout(() => this.syncFullScreen(), 400);
+    setTimeout(() => (window.bdsShell?.isFullScreen ? window.bdsShell.isFullScreen().then((v) => { this._shellFull = v; this.syncFullScreen(); }, () => {}) : this.syncFullScreen()), 400);
   }
   toggleFullScreen() {
     if (document.body.classList.contains('focus-mode')) { this.toggleFocus(); return; } // F11 leaves focus mode too
-    this.setFullScreen(!this.isFullScreen());
+    // ask the window itself when it can, so the button always undoes what's really on screen
+    if (window.bdsShell?.isFullScreen) window.bdsShell.isFullScreen().then((on) => { this._shellFull = on; this.setFullScreen(!on); }, () => this.setFullScreen(!this.isFullScreen()));
+    else this.setFullScreen(!this.isFullScreen());
   }
   syncFullScreen() {
     const b = $('#btn-fullscreen');
@@ -3714,7 +3768,7 @@ class App {
     b.classList.toggle('on', on);
     document.documentElement.classList.toggle('app-full', on); // no window buttons to leave room for
     b.title = `${on ? 'Leave full screen' : 'Full screen'} (F11) · drag or flick it to the right sidebar`;
-    const want = on ? 'fit-page' : 'maximize';
+    const want = on ? 'full-exit' : 'maximize';
     if (b.dataset.ic !== want) { b.dataset.ic = want; const old = b.querySelector('svg'); const ni = icon(want); if (old) old.replaceWith(ni); else b.prepend(ni); }
   }
 

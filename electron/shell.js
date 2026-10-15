@@ -175,6 +175,8 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     if (mainWinId == null) mainWinId = win.id;
     const id = win.id;
     win.on('closed', () => { appWins.delete(win); if (mainWinId === id) nextMainWindow(); });
+    // the page asks the window itself whether it's full screen (guessing from sizes fails with zoom or display scaling)
+    for (const ev of ['enter-full-screen', 'leave-full-screen']) win.on(ev, () => { if (!win.isDestroyed()) win.webContents.send('bds:fullscreen-changed', win.isFullScreen()); });
     win.once('ready-to-show', () => win.show());
     win.loadURL(url);
 
@@ -352,6 +354,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     const win = winOf(e);
     if (win) win.setFullScreen(!!on);
   });
+  ipcMain.handle('bds:is-fullscreen', (e) => !!winOf(e)?.isFullScreen());
 
   ipcMain.handle('bds:dialog', async (e, opts) => {
     const win = winOf(e);
