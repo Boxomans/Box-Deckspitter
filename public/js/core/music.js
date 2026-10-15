@@ -1060,6 +1060,15 @@ export function createMusic(app) {
   }
 
   refresh();
+  // songs deleted (or added) in the folder outside the app show up here within a few seconds
+  let dumpRev = null;
+  setInterval(async () => { // a tiny ask, so it runs even with the window behind Explorer (where you'd delete them)
+    try {
+      const { rev } = await api.dumpRev('audio');
+      if (dumpRev !== null && rev !== dumpRev) refresh();
+      dumpRev = rev;
+    } catch { /* the server's busy or restarting */ }
+  }, 3000);
   /** Play a file from the audio dump by name (used by BoxKlep / BoxTape after a download). */
   async function playByName(name) {
     await refresh();

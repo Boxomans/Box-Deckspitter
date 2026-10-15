@@ -110,6 +110,22 @@ const DUMPS = {
 };
 function dumpOf(kind) { return DUMPS[kind === 'pdf' ? 'doc' : kind] || DUMPS.image; }
 
+/** A number that goes up whenever something in a dump changes on disk (Explorer included); watched from the first ask. */
+const dumpWatch = new Map();
+function dumpRev(kind) {
+  const d = dumpOf(kind);
+  let w = dumpWatch.get(d.dir);
+  if (!w) {
+    w = { rev: 1 };
+    dumpWatch.set(d.dir, w);
+    try {
+      fs.watch(d.dir, { recursive: true }, (ev, name) => { if (!name || !String(name).split(/[\\/]/).some((p) => p.startsWith('.'))) w.rev++; })
+        .on('error', () => { w.poll = true; });
+    } catch { w.poll = true; } // no watching here (some drives): the page just reloads the list each time
+  }
+  return w.poll ? Date.now() : w.rev;
+}
+
 // Dumps can have folders: names are paths inside the dump with forward slashes ("trips/beach.png").
 // Every part is checked: no "..", nothing hidden (.removed, .incoming), nothing Windows can't name, not too deep.
 const DUMP_MAX_DEPTH = 8;
@@ -1969,7 +1985,6 @@ const routes = {
     return { raw: pdf, type: 'application/pdf' };
   },
 
-  'GET /api/fonts': async () => Object.keys(FONT_FILES).filter((f) => fontPath(f, false, false)),
   'GET /api/font': async (req, q) => {
     const p = fontPath(q.get('family'), q.get('bold') === '1', q.get('italic') === '1');
     if (!p) throw Object.assign(new Error('Font not available'), { status: 404 });
@@ -2270,6 +2285,7 @@ const routes = {
   // ---- dumps: folders of reusable images / PDFs, shown in the document editor's bottom drawers
   // ?dir=<folder> (even empty): that folder's subfolders and files. Without dir: every file, folders included
   // (for pickers that just want everything). Item names are paths inside the dump ("trips/beach.png").
+  'GET /api/dump/rev': async (req, q) => ({ rev: dumpRev(q.get('kind') || 'image') }),
   'GET /api/dump': async (req, q) => {
     const kind = q.get('kind') || 'image';
     const d = dumpOf(kind);

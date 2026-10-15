@@ -80,7 +80,6 @@ export const api = {
   dialog: (opts) => request('POST', '/api/dialog', { json: opts }),
   printPdf: (html) => request('POST', '/api/print-pdf', { body: html }),
 
-  fonts: () => request('GET', '/api/fonts'),
   font: (family, bold, italic) => request('GET', `/api/font?family=${enc(family)}&bold=${bold ? 1 : 0}&italic=${italic ? 1 : 0}`),
 
   reveal: (path) => request('POST', '/api/reveal', { json: { path } }),
@@ -103,6 +102,7 @@ export const api = {
   get: (url) => request('GET', url),
   post: (url, json = {}) => request('POST', url, { json }),
   /** dir: a folder in the dump ('' = the top) → its folders and files; leave it out for every file. */
+  dumpRev: (kind = 'image') => request('GET', `/api/dump/rev?kind=${enc(kind)}`),
   dump: (kind = 'image', dir) => request('GET', `/api/dump?kind=${enc(kind)}${dir != null ? `&dir=${enc(dir)}` : ''}`),
   dumpFolder: (path, kind = 'media') => request('POST', '/api/dump/folder', { json: { path, kind } }),
   dumpMove: (names, to, kind = 'media') => request('POST', '/api/dump/move', { json: { names, to, kind } }),

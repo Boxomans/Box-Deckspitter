@@ -231,6 +231,7 @@ export class PaintEditor extends BaseEditor {
       tbButton('redo', 'Redo (Ctrl+Y)', () => this.redo()),
       tbSep(),
       ...tools,
+      (this.cropBtn = tbButton('crop', 'Crop to selection (Ctrl+Shift+X)', () => this.cropToSel())),
       tbSep(),
       this.swatchP, swap, this.swatchS,
       tbSep(),
@@ -279,6 +280,7 @@ export class PaintEditor extends BaseEditor {
     show(this.textBar, t === 'text');
     show(this.moveBar, t === 'move');
     this.xfDone.disabled = this.xfCancel.disabled = !this.xf;
+    this.cropBtn.disabled = !this.sel;
     this.syncText();
     const box = t === 'move' && (this.xf || this.moveBox());
     this.propLabel.textContent = t === 'fill' ? String(this.tolerance) : t === 'select' && this.sel ? `${Math.round(this.sel.w)}×${Math.round(this.sel.h)}`
@@ -346,7 +348,54 @@ export class PaintEditor extends BaseEditor {
     this.view.height = this.overlay.height = h2;
   }
 
-  makeLayer(name) { return { id: uid('L'), name, canvas: mkCanvas(this.W, this.H), visible: true, opacity: 1 }; }
+  makeLayer(name) { return { id: uid('L'), name, canvas: mkCanvas(this.W, this.H), visible: true, opacity: 1, extra: null }; }
+
+  /**
+   * Nothing is cut off: a layer that's bigger than the picture (after a crop, a smaller canvas, or moving it partly
+   * out) keeps the rest in L.extra = { canvas, x, y }, where (x, y) is the picture's top-left inside that canvas.
+   * The picture-sized L.canvas is what you see and paint on, so it's always the newer copy of that part.
+   * extra canvases are never changed in place (undo keeps references to them).
+   */
+  fullOf(L) {
+    if (!L.extra) return { canvas: L.canvas, x: 0, y: 0 };
+    const { canvas: big, x, y } = L.extra;
+    const c = mkCanvas(big.width, big.height);
+    const t = c.getContext('2d');
+    t.drawImage(big, 0, 0);
+    t.clearRect(x, y, this.W, this.H);
+    t.drawImage(L.canvas, x, y);
+    return { canvas: c, x, y };
+  }
+
+  /** A layer from its whole content, the picture's top-left at (x, y) in it: the picture-sized part shows, the rest waits. */
+  setFull(L, big, x, y) {
+    const c = mkCanvas(this.W, this.H);
+    c.getContext('2d').drawImage(big, -x, -y);
+    L.canvas = c;
+    const over = x > 0 || y > 0 || big.width - x > this.W || big.height - y > this.H;
+    L.extra = over && this.boundsIn(big, { x, y, w: this.W, h: this.H }) ? { canvas: big, x, y } : null;
+  }
+
+  /** The smallest rectangle round what isn't see-through in a canvas (outside: only count what's outside this rectangle). */
+  boundsIn(canvas, outside = null) {
+    const W = canvas.width, H = canvas.height;
+    if (!W || !H) return null;
+    const d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let y = 0; y < H; y++) {
+      const row = y * W * 4;
+      const inRows = outside && y >= outside.y && y < outside.y + outside.h;
+      for (let x = 0; x < W; x++) {
+        if (inRows && x >= outside.x && x < outside.x + outside.w) { x = outside.x + outside.w - 1; continue; }
+        if (!d[row + x * 4 + 3]) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        y1 = y;
+      }
+    }
+    return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  }
   get frame() { return this.frames?.[this.fi]; }
   get layers() { return this.frame?.layers || []; }
   set layers(v) { if (this.frame) this.frame.layers = v; }
@@ -395,8 +444,8 @@ export class PaintEditor extends BaseEditor {
   snapshot(kind = 'pixels') {
     const L = this.layer;
     const one = this.W * this.H * 4;
-    if (kind === 'pixels') return { kind, id: L.id, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H), bytes: one };
-    const frames = this.frames.map((f) => ({ id: f.id, delay: f.delay, active: f.active, layers: f.layers.map((x) => ({ id: x.id, name: x.name, visible: x.visible, opacity: x.opacity, data: this.ctxOf(x).getImageData(0, 0, this.W, this.H) })) }));
+    if (kind === 'pixels') return { kind, id: L.id, extra: L.extra || null, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H), bytes: one };
+    const frames = this.frames.map((f) => ({ id: f.id, delay: f.delay, active: f.active, layers: f.layers.map((x) => ({ id: x.id, name: x.name, visible: x.visible, opacity: x.opacity, extra: x.extra || null, data: this.ctxOf(x).getImageData(0, 0, this.W, this.H) })) }));
     return { kind: 'all', W: this.W, H: this.H, fi: this.fi, frames, bytes: one * this.allLayers().length };
   }
   restore(s) {
@@ -406,6 +455,7 @@ export class PaintEditor extends BaseEditor {
         const L = f.layers.find((x) => x.id === s.id);
         if (!L) return;
         this.ctxOf(L).putImageData(s.data, 0, 0);
+        if ('extra' in s) L.extra = s.extra;
         if (k !== this.fi) { this.fi = k; this.renderStrip(); } // undo shows you the frame it changed
       });
     } else {
@@ -414,7 +464,7 @@ export class PaintEditor extends BaseEditor {
       this.view.height = this.overlay.height = s.H;
       this.frames = s.frames.map((f) => ({
         id: f.id, delay: f.delay, active: clamp(f.active, 0, f.layers.length - 1),
-        layers: f.layers.map((x) => { const c = mkCanvas(s.W, s.H); c.getContext('2d').putImageData(x.data, 0, 0); return { id: x.id, name: x.name, visible: x.visible, opacity: x.opacity, canvas: c }; }),
+        layers: f.layers.map((x) => { const c = mkCanvas(s.W, s.H); c.getContext('2d').putImageData(x.data, 0, 0); return { id: x.id, name: x.name, visible: x.visible, opacity: x.opacity, extra: x.extra || null, canvas: c }; }),
       }));
       this.fi = clamp(s.fi, 0, this.frames.length - 1);
       this.fitStage();
@@ -422,7 +472,7 @@ export class PaintEditor extends BaseEditor {
     }
   }
   checkpoint(kind = 'pixels') {
-    this.xf = null; // any other change makes a transform final
+    this.settleXf(); // any other change makes a transform final
     // "Add frames": a change to the picture goes on a new frame, a copy of this one
     const adding = kind === 'pixels' && this.frameMode === 'add';
     this.undoStack.push(this.snapshot(adding ? 'all' : kind));
@@ -448,7 +498,7 @@ export class PaintEditor extends BaseEditor {
     this.restore(s);
     this.after();
   }
-  snapshotOf(id) { const L = this.allLayers().find((x) => x.id === id) || this.layer; return { kind: 'pixels', id: L.id, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H), bytes: this.W * this.H * 4 }; }
+  snapshotOf(id) { const L = this.allLayers().find((x) => x.id === id) || this.layer; return { kind: 'pixels', id: L.id, extra: L.extra || null, data: this.ctxOf(L).getImageData(0, 0, this.W, this.H), bytes: this.W * this.H * 4 }; }
   after() { this.rev = (this.rev || 0) + 1; this._onionKey = null; this.composite(); this.renderLayers(); this.drawOverlay(); this.syncProps(); this.refreshThumb(); this.refreshStatus(); }
 
   // ================================================================ pointer
@@ -804,7 +854,7 @@ export class PaintEditor extends BaseEditor {
     ta.addEventListener('input', () => this.layoutText());
     ta.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
-      if (e.key === 'Escape') { e.preventDefault(); this.cancelText(); } else if (e.key === 'Enter' && ctrl) { e.preventDefault(); this.commitText(); } else if (ctrl && ['b', 'i', 'u'].includes(k)) {
+      if (ctrl && !ta.value && (k === 'z' || k === 'y')) { e.preventDefault(); this.cancelText(); if (k === 'z' && !e.shiftKey) this.undo(); else this.redo(); } else if (e.key === 'Escape') { e.preventDefault(); this.cancelText(); } else if (e.key === 'Enter' && ctrl) { e.preventDefault(); this.commitText(); } else if (ctrl && ['b', 'i', 'u'].includes(k)) {
         e.preventDefault();
         const key = { b: 'bold', i: 'italic', u: 'underline' }[k];
         this.setText({ [key]: !this.textOpts[key] });
@@ -844,12 +894,17 @@ export class PaintEditor extends BaseEditor {
     this.textEdit = null;
     te.box.remove();
     if (!te.ta.value.trim()) { this.drawOverlay(); return; }
-    this.checkpoint();
+    this.checkpoint('all');
     const sheet = mkCanvas(this.W, this.H);
     this.drawText(sheet.getContext('2d'), te);
     if (this.accuracy > 0) harden(sheet, this.accuracy, null, this[te.which]);
-    const c = this.ctxOf();
-    c.save(); c.globalAlpha = this.opacity; c.drawImage(sheet, 0, 0); c.restore();
+    // its own layer, just above the one you're on, so it can be moved and sized on its own
+    const first = te.ta.value.trim().split('\n')[0];
+    const L = this.makeLayer(`Text: ${first.length > 24 ? first.slice(0, 23) + '…' : first}`);
+    const c = this.ctxOf(L);
+    c.globalAlpha = this.opacity; c.drawImage(sheet, 0, 0); c.globalAlpha = 1;
+    this.layers.splice(this.active + 1, 0, L);
+    this.active += 1;
     this.after();
   }
 
@@ -871,21 +926,12 @@ export class PaintEditor extends BaseEditor {
     return x1 > x0 && y1 > y0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
   }
 
-  /** The smallest rectangle round everything on a layer that isn't see-through. */
-  contentBounds(L = this.layer) {
-    const W = this.W, H = this.H, d = this.ctxOf(L).getImageData(0, 0, W, H).data;
-    let x0 = W, y0 = H, x1 = -1, y1 = -1;
-    for (let y = 0; y < H; y++) {
-      const row = y * W * 4;
-      for (let x = 0; x < W; x++) {
-        if (!d[row + x * 4 + 3]) continue;
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
-        if (y < y0) y0 = y;
-        y1 = y;
-      }
-    }
-    return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  /** The smallest rectangle round everything on a layer that isn't see-through (hidden: its part off the picture too),
+   *  in picture pixels. */
+  contentBounds(L = this.layer, hidden = false) {
+    const f = hidden ? this.fullOf(L) : { canvas: L.canvas, x: 0, y: 0 };
+    const r = this.boundsIn(f.canvas);
+    return r && { x: r.x - f.x, y: r.y - f.y, w: r.w, h: r.h };
   }
 
   /** What the move tool would pick up: the selection, or everything on the layer. */
@@ -895,7 +941,7 @@ export class PaintEditor extends BaseEditor {
     const key = `${L.id}:${this.rev || 0}:${this.sel ? [this.sel.x, this.sel.y, this.sel.w, this.sel.h].join() : ''}`;
     if (this._mvKey !== key) {
       this._mvKey = key;
-      const r = this.sel ? this.clipRect(this.sel) : this.contentBounds(L);
+      const r = this.sel ? this.clipRect(this.sel) : this.contentBounds(L, true);
       this._mvBox = r && selBox(r);
     }
     return this._mvBox;
@@ -905,18 +951,18 @@ export class PaintEditor extends BaseEditor {
    *  so sizing up and down again never blurs it. */
   startXf() {
     if (this.xf) return this.xf;
-    const r = this.sel ? this.clipRect(this.sel) : this.contentBounds();
+    const r = this.sel ? this.clipRect(this.sel) : this.contentBounds(this.layer, true);
     if (!r) { toast(this.sel ? 'Nothing selected on this layer.' : 'This layer is empty — nothing to move.', { type: 'warn' }); return null; }
     const sel0 = this.sel && { ...this.sel };
     this.checkpoint();
     const L = this.layer;
+    const whole = !sel0;
+    const f = whole ? this.fullOf(L) : { canvas: L.canvas, x: 0, y: 0 };
     const src = mkCanvas(r.w, r.h);
-    src.getContext('2d').drawImage(L.canvas, -r.x, -r.y);
+    src.getContext('2d').drawImage(f.canvas, -(r.x + f.x), -(r.y + f.y));
     const base = mkCanvas(this.W, this.H);
-    const b = base.getContext('2d');
-    b.drawImage(L.canvas, 0, 0);
-    b.clearRect(r.x, r.y, r.w, r.h);
-    this.xf = { L, src, base, ...selBox(r), fx: 1, fy: 1, sel0 };
+    if (!whole) { const b = base.getContext('2d'); b.drawImage(L.canvas, 0, 0); b.clearRect(r.x, r.y, r.w, r.h); }
+    this.xf = { L, src, base, ...selBox(r), fx: 1, fy: 1, sel0, whole };
     return this.xf;
   }
 
@@ -927,6 +973,17 @@ export class PaintEditor extends BaseEditor {
     c.save();
     c.clearRect(0, 0, this.W, this.H);
     c.drawImage(x.base, 0, 0);
+    this.drawXfOn(c, x);
+    c.restore();
+    if (x.sel0) this.sel = this.clipRect(this.boxRect(x)); // the selection follows what you moved
+    this.composite();
+    this.drawOverlay();
+    this.syncProps();
+    this.refreshStatus();
+  }
+
+  /** The lifted pixels where the box is now (c may be shifted to draw into a bigger canvas). */
+  drawXfOn(c, x) {
     c.imageSmoothingEnabled = this.accuracy < 100;
     c.imageSmoothingQuality = 'high';
     if (!x.rot) { // straight: whole pixels, so a plain move stays sharp
@@ -940,12 +997,37 @@ export class PaintEditor extends BaseEditor {
       c.scale(x.fx, x.fy);
       c.drawImage(x.src, -x.w / 2, -x.h / 2, x.w, x.h);
     }
-    c.restore();
-    if (x.sel0) this.sel = this.clipRect(this.boxRect(x)); // the selection follows what you moved
-    this.composite();
-    this.drawOverlay();
-    this.syncProps();
-    this.refreshStatus();
+  }
+
+  /** The transform is over: a whole layer keeps whatever ended up off the picture, hidden until it's moved back. */
+  settleXf() {
+    const x = this.xf;
+    if (!x) return;
+    this.xf = null;
+    const r = this.boxRect(x);
+    if (!x.whole) {
+      // part of a selection moved off the picture: it goes on the layer's hidden part
+      const x0 = Math.floor(r.x), y0 = Math.floor(r.y), x1 = Math.ceil(r.x + r.w), y1 = Math.ceil(r.y + r.h);
+      if (x0 >= 0 && y0 >= 0 && x1 <= this.W && y1 <= this.H) return;
+      const f = this.fullOf(x.L);
+      const bx0 = Math.min(-f.x, x0), by0 = Math.min(-f.y, y0);
+      const bx1 = Math.max(f.canvas.width - f.x, x1), by1 = Math.max(f.canvas.height - f.y, y1);
+      const big = mkCanvas(bx1 - bx0, by1 - by0);
+      const c = big.getContext('2d');
+      c.drawImage(f.canvas, -f.x - bx0, -f.y - by0);
+      c.translate(-bx0, -by0);
+      this.drawXfOn(c, x);
+      this.setFull(x.L, big, -bx0, -by0);
+      return;
+    }
+    const x0 = Math.min(0, Math.floor(r.x) - 1), y0 = Math.min(0, Math.floor(r.y) - 1);
+    const x1 = Math.max(this.W, Math.ceil(r.x + r.w) + 1), y1 = Math.max(this.H, Math.ceil(r.y + r.h) + 1);
+    if (x0 === 0 && y0 === 0 && x1 === this.W && y1 === this.H) { x.L.extra = null; return; }
+    const big = mkCanvas(x1 - x0, y1 - y0);
+    const c = big.getContext('2d');
+    c.translate(-x0, -y0);
+    this.drawXfOn(c, x);
+    this.setFull(x.L, big, -x0, -y0);
   }
 
   /** The upright rectangle round a (maybe turned) box. */
@@ -958,7 +1040,7 @@ export class PaintEditor extends BaseEditor {
   /** Done: the transform stays as it is. */
   endXf() {
     if (!this.xf) return;
-    this.xf = null;
+    this.settleXf();
     this.drawOverlay();
     this.syncProps();
   }
@@ -1193,6 +1275,7 @@ export class PaintEditor extends BaseEditor {
     const src = this.layer;
     const L = this.makeLayer(`${src.name} copy`);
     L.canvas.getContext('2d').drawImage(src.canvas, 0, 0);
+    L.extra = src.extra;
     L.opacity = src.opacity;
     this.layers.splice(this.active + 1, 0, L);
     this.active += 1;
@@ -1217,10 +1300,37 @@ export class PaintEditor extends BaseEditor {
     if (this.active === 0) return toast('The bottom layer has nothing below it.', { type: 'warn' });
     this.checkpoint('all');
     const top = this.layers[this.active], below = this.layers[this.active - 1];
-    const c = this.ctxOf(below);
-    if (top.visible) { c.globalAlpha = top.opacity; c.drawImage(top.canvas, 0, 0); c.globalAlpha = 1; }
+    if (top.extra || below.extra) { // one canvas round both, so nothing hidden is lost
+      const ft = this.fullOf(top), fb = this.fullOf(below);
+      const x0 = Math.min(-ft.x, -fb.x), y0 = Math.min(-ft.y, -fb.y);
+      const x1 = Math.max(ft.canvas.width - ft.x, fb.canvas.width - fb.x), y1 = Math.max(ft.canvas.height - ft.y, fb.canvas.height - fb.y);
+      const big = mkCanvas(x1 - x0, y1 - y0);
+      const t = big.getContext('2d');
+      t.drawImage(fb.canvas, -fb.x - x0, -fb.y - y0);
+      if (top.visible) { t.globalAlpha = top.opacity; t.drawImage(ft.canvas, -ft.x - x0, -ft.y - y0); }
+      this.setFull(below, big, -x0, -y0);
+    } else {
+      const c = this.ctxOf(below);
+      if (top.visible) { c.globalAlpha = top.opacity; c.drawImage(top.canvas, 0, 0); c.globalAlpha = 1; }
+    }
     this.layers.splice(this.active, 1);
     this.active -= 1;
+    this.after();
+  }
+
+  /** All the visible layers in one, the parts off the picture included. */
+  flattenLayers() {
+    this.checkpoint('all');
+    const full = this.layers.filter((L) => L.visible).map((L) => [L, this.fullOf(L)]);
+    const x0 = Math.min(0, ...full.map(([, f]) => -f.x)), y0 = Math.min(0, ...full.map(([, f]) => -f.y));
+    const x1 = Math.max(this.W, ...full.map(([, f]) => f.canvas.width - f.x)), y1 = Math.max(this.H, ...full.map(([, f]) => f.canvas.height - f.y));
+    const big = mkCanvas(x1 - x0, y1 - y0);
+    const c = big.getContext('2d');
+    for (const [L, f] of full) { c.globalAlpha = L.opacity; c.drawImage(f.canvas, -f.x - x0, -f.y - y0); }
+    const L = this.makeLayer('Background');
+    this.setFull(L, big, -x0, -y0);
+    this.layers = [L];
+    this.active = 0;
     this.after();
   }
 
@@ -1232,8 +1342,8 @@ export class PaintEditor extends BaseEditor {
       { label: 'Resize image…', icon: 'maximize', action: () => this.resizeImage(true) },
       { label: 'Canvas size…', icon: 'layers', action: () => this.resizeImage(false) },
       { sep: true },
-      { label: 'Flip horizontal', action: () => this.transformAll((c, W, H) => { c.translate(W, 0); c.scale(-1, 1); }) },
-      { label: 'Flip vertical', action: () => this.transformAll((c, W, H) => { c.translate(0, H); c.scale(1, -1); }) },
+      { label: 'Flip horizontal', action: () => this.flipAll('h') },
+      { label: 'Flip vertical', action: () => this.flipAll('v') },
       { label: 'Rotate 90° right', icon: 'rotate-cw', action: () => this.rotate(1) },
       { label: 'Rotate 90° left', icon: 'rotate-ccw', action: () => this.rotate(-1) },
       { sep: true },
@@ -1245,7 +1355,7 @@ export class PaintEditor extends BaseEditor {
       { label: 'Add image from file as layer…', icon: 'image-plus', action: () => this.layerFromFile() },
       { label: 'New layer from the media dump…', icon: 'image', action: () => this.layerFromDump() },
       { label: 'Media dump drawer', icon: 'image', checked: this.dumps?.image.open, action: () => this.dumps.image.toggle() },
-      { label: 'Flatten', action: () => { this.checkpoint('all'); const f = this.flatten(); const L = this.makeLayer('Background'); L.canvas.getContext('2d').drawImage(f, 0, 0); this.layers = [L]; this.active = 0; this.after(); } },
+      { label: 'Flatten', action: () => this.flattenLayers() },
     ];
   }
 
@@ -1336,10 +1446,12 @@ export class PaintEditor extends BaseEditor {
     toast(`Trimmed to ${x1 - x0 + 1} × ${y1 - y0 + 1}`, { timeout: 1600 });
   }
 
+  /** The picture becomes rectangle s (in today's pixels); what falls outside stays on the layers, hidden. */
   cropRect(s) {
     this.checkpoint('all');
-    for (const L of this.allLayers()) { const c = mkCanvas(s.w, s.h); c.getContext('2d').drawImage(L.canvas, -s.x, -s.y); L.canvas = c; }
+    const full = this.allLayers().map((L) => [L, this.fullOf(L)]);
     this.W = s.w; this.H = s.h;
+    for (const [L, f] of full) this.setFull(L, f.canvas, f.x + s.x, f.y + s.y);
     this.sel = null;
     this.fitStage();
     this.after();
@@ -1361,36 +1473,50 @@ export class PaintEditor extends BaseEditor {
     if (res !== 'ok') return;
     const W = clamp(Math.round(Number(w.value)), 1, 10000), H = clamp(Math.round(Number(hh.value)), 1, 10000);
     this.checkpoint('all');
-    for (const L of this.allLayers()) {
-      const c = mkCanvas(W, H);
+    const kx = W / this.W, ky = H / this.H, dx = Math.round((W - this.W) / 2), dy = Math.round((H - this.H) / 2);
+    const full = this.allLayers().map((L) => [L, this.fullOf(L)]);
+    this.W = W; this.H = H;
+    for (const [L, f] of full) {
+      if (!scale) { this.setFull(L, f.canvas, f.x - dx, f.y - dy); continue; } // canvas size: the picture stays put, centred
+      const c = mkCanvas(Math.max(1, Math.round(f.canvas.width * kx)), Math.max(1, Math.round(f.canvas.height * ky)));
       const x = c.getContext('2d');
       x.imageSmoothingQuality = 'high';
-      if (scale) x.drawImage(L.canvas, 0, 0, W, H); else x.drawImage(L.canvas, Math.round((W - this.W) / 2), Math.round((H - this.H) / 2));
-      L.canvas = c;
+      x.drawImage(f.canvas, 0, 0, c.width, c.height);
+      this.setFull(L, c, Math.round(f.x * kx), Math.round(f.y * ky));
     }
-    this.W = W; this.H = H;
     this.sel = null;
     this.fitStage();
     this.after();
     this.zoom('fit');
   }
 
-  transformAll(fn) {
+  /** Flip the whole picture (axis 'h' or 'v'), every layer's hidden part with it. */
+  flipAll(axis) {
     this.checkpoint('all');
-    for (const L of this.allLayers()) { const c = mkCanvas(this.W, this.H); const x = c.getContext('2d'); fn(x, this.W, this.H); x.drawImage(L.canvas, 0, 0); L.canvas = c; }
+    for (const L of this.allLayers()) {
+      const f = this.fullOf(L), cw = f.canvas.width, ch = f.canvas.height;
+      const c = mkCanvas(cw, ch);
+      const x = c.getContext('2d');
+      if (axis === 'h') { x.translate(cw, 0); x.scale(-1, 1); } else { x.translate(0, ch); x.scale(1, -1); }
+      x.drawImage(f.canvas, 0, 0);
+      this.setFull(L, c, axis === 'h' ? cw - f.x - this.W : f.x, axis === 'h' ? f.y : ch - f.y - this.H);
+    }
     this.after();
   }
 
   rotate(dir) {
     this.checkpoint('all');
-    const W = this.H, H = this.W;
-    for (const L of this.allLayers()) {
-      const c = mkCanvas(W, H);
+    const oldW = this.W, oldH = this.H;
+    const full = this.allLayers().map((L) => [L, this.fullOf(L)]);
+    this.W = oldH; this.H = oldW;
+    for (const [L, f] of full) {
+      const cw = f.canvas.width, ch = f.canvas.height;
+      const c = mkCanvas(ch, cw);
       const x = c.getContext('2d');
-      x.translate(W / 2, H / 2); x.rotate((dir * Math.PI) / 2); x.drawImage(L.canvas, -this.W / 2, -this.H / 2);
-      L.canvas = c;
+      x.translate(ch / 2, cw / 2); x.rotate((dir * Math.PI) / 2); x.drawImage(f.canvas, -cw / 2, -ch / 2);
+      // right: (px, py) → (ch − py, px) · left: (px, py) → (py, cw − px)
+      this.setFull(L, c, dir > 0 ? ch - f.y - oldH : f.y, dir > 0 ? f.x : cw - f.x - oldW);
     }
-    this.W = W; this.H = H;
     this.sel = null;
     this.fitStage();
     this.after();
@@ -1464,8 +1590,11 @@ export class PaintEditor extends BaseEditor {
   onKey(e) {
     if (this.app.active !== this.tab) return;
     const t = e.target;
-    if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || document.querySelector('.modal-backdrop')) return;
     const ctrl = e.ctrlKey || e.metaKey;
+    // typing somewhere: leave the keys to it. A slider or dropdown you just used: shortcuts (Ctrl+Z…) still work
+    const control = t.tagName === 'SELECT' || (t.tagName === 'INPUT' && /^(range|checkbox|radio|button|color)$/.test(t.type));
+    if (t.isContentEditable || (/^(INPUT|TEXTAREA)$/.test(t.tagName) && !control) || document.querySelector('.modal-backdrop')) return;
+    if (control && !ctrl) return;
     const k = e.key.toLowerCase();
     if (ctrl && !e.shiftKey && k === 'z') { e.preventDefault(); return this.undo(); }
     if (ctrl && (k === 'y' || (e.shiftKey && k === 'z'))) { e.preventDefault(); return this.redo(); }
@@ -1621,7 +1750,7 @@ export class PaintEditor extends BaseEditor {
 
   selectFrame(i) {
     if (!this.frames[i]) return;
-    this.xf = null;
+    this.settleXf();
     this.commitText();
     this.fi = i;
     this._onionKey = null;
@@ -1720,8 +1849,8 @@ export class PaintEditor extends BaseEditor {
       edit: [
         { label: 'Copy selection', icon: 'copy', shortcut: 'Ctrl+C', action: () => this.copySelection(false) },
         { label: 'Cut selection', shortcut: 'Ctrl+X', action: () => this.copySelection(true) },
-        { label: 'Select all', shortcut: 'Ctrl+A', action: () => { this.sel = { x: 0, y: 0, w: this.W, h: this.H }; this.drawOverlay(); } },
-        { label: 'Deselect', shortcut: 'Ctrl+D', action: () => { this.sel = null; this.drawOverlay(); } },
+        { label: 'Select all', shortcut: 'Ctrl+A', action: () => { this.endXf(); this.sel = { x: 0, y: 0, w: this.W, h: this.H }; this.drawOverlay(); this.syncProps(); } },
+        { label: 'Deselect', shortcut: 'Ctrl+D', action: () => { this.endXf(); this.sel = null; this.drawOverlay(); this.syncProps(); } },
         { label: 'Select what’s on this layer', action: () => { const r = this.contentBounds(); if (!r) return toast('This layer is empty.', { type: 'warn' }); this.sel = r; this.setTool('select'); } },
         { label: 'Erase selection', shortcut: 'Del', action: () => this.clearSelection() },
       ],

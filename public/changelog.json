@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.0.42",
+    "date": "2026-10-14",
+    "notes": [
+      "Image editor: a Crop to selection button in the toolbar.",
+      "Image editor: cropping (or making the canvas smaller) no longer throws anything away. What falls outside stays on its layer, hidden, and comes back when you drag the layer with the move tool or make the canvas bigger again. Flipping, rotating and resizing the image keep it too.",
+      "Image editor: Ctrl+Z and Ctrl+Y work right after using a slider or dropdown, and with the text tool's empty typing box open.",
+      "Image editor: text goes on a layer of its own (named after what you typed), so you can move, size or hide it separately.",
+      "Image editor: moving a selection partly off the picture keeps the part that went off, and Flatten keeps the layers' hidden parts.",
+      "Music: songs you add to or delete from the music folder outside the app show up (or disappear) in the player within a few seconds."
+    ]
+  },
+  {
     "version": "1.0.41",
     "date": "2026-10-14",
     "notes": [
