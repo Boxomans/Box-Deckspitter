@@ -27,4 +27,6 @@ contextBridge.exposeInMainWorld('bdsShell', {
   tearOff: (req) => ipcRenderer.invoke('bds:tear-off', req),
   adopt: (token) => ipcRenderer.invoke('bds:adopt', token),
   onMainWindow: (cb) => { ipcRenderer.on('bds:main-window', () => cb()); },
+  // a Win+Shift+Q screenshot was saved into the media dump ({ path, name, width, height })
+  onSnip: (cb) => { ipcRenderer.on('bds:snip-saved', (_e, info) => cb(info)); },
 });

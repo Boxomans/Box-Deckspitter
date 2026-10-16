@@ -1,6 +1,7 @@
 // Box-DocSpitter — application shell. App is spread over app/*.js, a part per file.
 
 import { $, h, uid } from './core/dom.js';
+import { toast } from './core/ui.js';
 import { api } from './core/api.js';
 import { configureFiles } from './core/files.js';
 import { createPresence } from './core/presence.js';
@@ -81,6 +82,8 @@ class App {
     this.clock = createClock(this);
     this.weather = createWeather(this);
     this.translate = createTranslate(this);
+    // Win+Shift+Q screenshots (electron/snip.js) land in the media dump
+    window.bdsShell?.onSnip?.((s) => toast(`Screenshot saved to the media dump: ${s.name}`, { type: 'ok', timeout: 5000, action: { label: 'Open', fn: () => this.openPath(s.path) } }));
     this.calendar = createCalendar(this);
 
     this.decorateChrome();

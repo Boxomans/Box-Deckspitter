@@ -1,18 +1,31 @@
 name: Notify Discord
+# Posts each release (a pushed vX.Y.Z tag) with its notes from public/changelog.json.
 on:
   push:
-    branches: [ main ]
+    tags: [ 'v*' ]
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: public/changelog.json
+          sparse-checkout-cone-mode: false
       - name: Post to Discord
-        uses: Ilshidur/action-discord@0.4.0
         env:
           DISCORD_WEBHOOK: ${{ secrets.REPO_TRACKER }}
-        with:
-          args: |
-            **${{ github.actor }}** pushed to **${{ github.repository }}**
-            Branch: `${{ github.ref_name }}`
-            Compare: ${{ github.event.compare }}
+          TAG: ${{ github.ref_name }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          node -e '
+            const version = process.env.TAG.replace(/^v/, "");
+            const log = JSON.parse(require("fs").readFileSync("public/changelog.json", "utf8"));
+            const entry = log.find((e) => e.version === version);
+            const notes = (entry?.notes || []).map((n) => "• " + n);
+            let body = `**Box-DocSpitter v${version} is out**\n${notes.join("\n")}`;
+            const link = `\n${process.env.REPO_URL}`;
+            if (body.length + link.length > 2000) body = body.slice(0, 1990 - link.length) + "…";
+            require("fs").writeFileSync("payload.json", JSON.stringify({ content: body + link, allowed_mentions: { parse: [] } }));
+          '
+          curl -sSf -H "Content-Type: application/json" -d @payload.json "$DISCORD_WEBHOOK"

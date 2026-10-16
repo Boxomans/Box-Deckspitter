@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.48",
+    "date": "2026-10-16",
+    "notes": [
+      "Screenshots: press Win+Shift+Q anywhere in Windows while Box-DocSpitter is running. Drag to grab an area or click a window, and it's saved straight into the media dump (never the clipboard). When a fullscreen app such as a game is in front, its whole screen is saved at once, without an overlay."
+    ]
+  },
+  {
     "version": "1.0.47",
     "date": "2026-10-16",
     "notes": [

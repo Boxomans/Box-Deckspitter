@@ -340,6 +340,14 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
 
   // ---- the built-in web browser (electron/browser.js)
   const browser = require('./browser.js')({ root: ROOT, isAppSender: fromApp });
+  // ---- screenshots with Win+Shift+Q (electron/snip.js), straight into the media dump
+  const snip = require('./snip.js')({
+    dumpDir: path.join(ROOT, 'media-dump'),
+    notify: (info) => { const w = mainWinId != null ? BrowserWindow.fromId(mainWinId) : null; if (w && !w.isDestroyed()) w.webContents.send('bds:snip-saved', info); },
+    log: (msg) => console.log(`[snip] ${msg}`),
+  });
+  app.whenReady().then(() => { if (!snip.register()) console.log('[snip] Win+Shift+Q is taken by another program'); });
+
   // Windows locked, the PC going to sleep: lock the notes (and tell the page, for the app's PIN lock)
   app.whenReady().then(() => {
     for (const ev of ['lock-screen', 'suspend']) {
@@ -392,6 +400,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   app.on('will-quit', () => {
     quitting = true;
     notes.lock({ hard: true, reason: 'quit' });
+    snip.dispose();
     if (server) { try { server.disconnect(); } catch { /* gone */ } try { server.kill(); } catch { /* gone */ } }
   });
 }

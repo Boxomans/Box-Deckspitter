@@ -184,7 +184,7 @@ export class WindowPart {
     const rows = [
       ['New document', 'Alt+N'], ['Open file', 'Ctrl+O'], ['Save', 'Ctrl+S'], ['Save as', 'Ctrl+Shift+S'], ['Close tab', 'Alt+W'],
       ['Next / previous tab', 'Ctrl+Alt+→ / ←'], ['Jump to tab 1–9', 'Alt+1…9'], ['Print', 'Ctrl+P'], ['Find', 'Ctrl+F'], ['Find & replace', 'Ctrl+H'],
-      ['Zoom in / out / reset', 'Ctrl+= / - / 0'], ['Full screen', 'F11'], ['Focus mode (full screen, no bars)', 'Shift+F11'], ['Shortcuts', 'F1'], ['Lock the app (with a PIN set)', 'Ctrl+Alt+L'],
+      ['Zoom in / out / reset', 'Ctrl+= / - / 0'], ['Full screen', 'F11'], ['Focus mode (full screen, no bars)', 'Shift+F11'], ['Shortcuts', 'F1'], ['Lock the app (with a PIN set)', 'Ctrl+Alt+L'], ['Screenshot to the media dump (anywhere in Windows)', 'Win+Shift+Q'],
     ];
     const hoverRows = [
       ['Rename what’s under the mouse', 'F2'], ['Put the original name back', 'Ctrl+F2'], ['Remove what’s under the mouse', 'Del'],
