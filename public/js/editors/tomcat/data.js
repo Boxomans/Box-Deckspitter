@@ -65,7 +65,7 @@ export const UPGRADES = [
   { id: 'ecm', name: 'ECM pod', what: '+6% enemy missile duds per level, on top of their own dud rate', base: 150, max: 5 },
   { id: 'contracts', name: 'Defense contracts', what: '+10% $ from every kill per level. No limit.', base: 200, max: Infinity, growth: 1.35 },
   { id: 'armor', name: 'Armor plating', what: 'Shrug off one missile hit per sortie per level', base: 2500, max: 3, rebirth: 1 },
-  { id: 'wingman', name: 'Loyal Wingman', what: 'FQ-50A ‘Goose’ drones on your wing: 3 AIM-9X each, every missile reloads in 20 s. Level 2 adds one on the other side.', base: 300000, growth: 2, max: 2 },
+  { id: 'wingman', name: 'Loyal Wingman', what: 'FQ-50A ‘Goose’ drones on your wing: 3 AIM-9X each, reloaded one at a time, 20 s a missile. Level 2 adds one on the other side.', base: 300000, growth: 2, max: 2 },
 ];
 export const upgradeCost = (u, level) => Math.round(u.base * (u.growth || 1.6) ** level);
 /**

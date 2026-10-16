@@ -55,6 +55,7 @@ export class PanelsPart {
       ['More', [
         ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
         ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
+        ...(this.weather ? [['cloud-sun', 'Weather widget', 'a small floating forecast · click again to close', () => this.weather.toggleMini()]] : []),
         ...(this.settings.tomcatEnabled ? [['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.newDocument('tomcat')]] : []),
       ]],
     ];

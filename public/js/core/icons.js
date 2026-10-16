@@ -182,6 +182,16 @@ const P = {
   'x-square': '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m9 9 6 6M15 9l-6 6"/>',
   'row-add': '<rect x="3" y="4" width="18" height="10" rx="1.5"/><path d="M3 9h18M12 17v4M10 19h4"/>',
   'col-add': '<rect x="4" y="3" width="10" height="18" rx="1.5"/><path d="M9 3v18M17 12h4M19 10v4"/>',
+  cloud: '<path d="M7 19a4.5 4.5 0 0 1-.6-9A6.5 6.5 0 0 1 18.8 11 4 4 0 0 1 18 19z"/>',
+  'cloud-sun': '<path d="M8 2.5V4M3 4.6l1 1M1.8 9.5h1.5"/><path d="M4.8 12.6A4 4 0 1 1 11.9 7"/><path d="M9 20a3.6 3.6 0 0 1-.5-7.2A5.2 5.2 0 0 1 18.4 13 3.5 3.5 0 0 1 18 20z"/>',
+  'cloud-moon': '<path d="M10.5 3.2A4.2 4.2 0 0 0 4 8.6a4.2 4.2 0 0 0 1.4 2.6"/><path d="M10.5 3.2A3.4 3.4 0 0 0 13 8.4"/><path d="M9 20a3.6 3.6 0 0 1-.5-7.2A5.2 5.2 0 0 1 18.4 13 3.5 3.5 0 0 1 18 20z"/>',
+  'cloud-rain': '<path d="M7 15a4.5 4.5 0 0 1-.6-9A6.5 6.5 0 0 1 18.8 7 4 4 0 0 1 18 15z"/><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"/>',
+  'cloud-snow': '<path d="M7 15a4.5 4.5 0 0 1-.6-9A6.5 6.5 0 0 1 18.8 7 4 4 0 0 1 18 15z"/><path d="M8 18.5h0M12 18.5h0M16 18.5h0M10 21.5h0M14 21.5h0"/>',
+  'cloud-lightning': '<path d="M7 15a4.5 4.5 0 0 1-.6-9A6.5 6.5 0 0 1 18.8 7 4 4 0 0 1 18 15h-1"/><path d="M13 12l-3 4.5h4L11 21"/>',
+  'cloud-fog': '<path d="M7 14a4.5 4.5 0 0 1-.6-9A6.5 6.5 0 0 1 18.8 6 4 4 0 0 1 18 14z"/><path d="M4 17.5h16M7 21h10"/>',
+  droplet: '<path d="M12 3s6 6.4 6 11a6 6 0 0 1-12 0c0-4.6 6-11 6-11z"/>',
+  wind: '<path d="M3 8h10a3 3 0 1 0-3-3"/><path d="M3 12h15a3 3 0 1 1-3 3"/><path d="M3 16h7"/>',
+  translate: '<path d="M3 5h10M8 3v2M5 5c1 4 4 7 7 8M11 5c-1 4-4 7-7 8"/><path d="m12 21 4.5-10 4.5 10M13.6 17.5h5.8"/>',
   // F-14 from above (filled, unlike the rest); same shape as F14_PATH in editors/tomcat.js
   f14: '<path transform="scale(.24)" fill="currentColor" stroke="none" d="M50 1L52.6 18L53 30L57 30L57 36L65 56L97 65.5L99 70.5L64 72L64 78L74 92L67 96L62 91.5L58 96L54 92L51 96.5L50 99L49 96.5L46 92L42 96L38 91.5L33 96L26 92L36 78L36 72L1 70.5L3 65.5L35 56L43 36L43 30L47 30L47.4 18Z"/>',
 };

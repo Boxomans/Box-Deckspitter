@@ -95,6 +95,7 @@ export class BrowserEditor extends BaseEditor {
     p.globe = h('span', { class: 'bw-globe' }, icon('globe', 'sm'));
     p.tab = h('div', { class: 'bw-tab', title: p.url }, p.fav, p.globe, p.label, close);
     p.tab.addEventListener('mousedown', (e) => { if (e.button === 1) { e.preventDefault(); this.closePage(p); } });
+    p.tab.addEventListener('pointerdown', (e) => { if (e.button === 0 && !e.target.closest('.bw-close')) this.dragTab(e, p); });
     p.tab.addEventListener('click', () => this.activate(p));
     p.tab.addEventListener('contextmenu', (e) => contextMenu(e, [
       { label: p.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => this.pinPage(p, !p.pinned) },
@@ -181,6 +182,51 @@ export class BrowserEditor extends BaseEditor {
     this.pages.splice(at, 0, p);
     this.strip.insertBefore(p.tab, this.pages[at + 1]?.tab || null);
     this.saveTabs();
+  }
+
+  /** Drag a tab along the strip to reorder it; pinned tabs stay among the pinned ones, the rest after them. */
+  dragTab(e, p) {
+    const el = p.tab, sx = e.clientX;
+    let moving = false, target = null;
+    try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const clearMarks = () => { for (const x of this.pages) x.tab.classList.remove('drag-over', 'drag-over-end'); };
+    const move = (ev) => {
+      if (!moving) {
+        if (Math.abs(ev.clientX - sx) < 6) return;
+        moving = true;
+        el.classList.add('tab-dragging');
+        document.body.classList.add('tab-drag');
+      }
+      clearMarks();
+      // the dragged tab goes before the one under the pointer (or after the last one)
+      const tabs = this.pages.map((x) => x.tab);
+      const over = tabs.find((x) => { const r = x.getBoundingClientRect(); return ev.clientX < r.left + r.width / 2; });
+      target = over ? this.pages.find((x) => x.tab === over) : null;
+      if (over && over !== el) over.classList.add('drag-over');
+      else if (!over && tabs.at(-1) !== el) tabs.at(-1)?.classList.add('drag-over-end');
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.classList.remove('tab-dragging');
+      document.body.classList.remove('tab-drag');
+      clearMarks();
+      if (!moving) return;
+      const from = this.pages.indexOf(p);
+      if (from < 0) return;
+      this.pages.splice(from, 1);
+      let to = target ? this.pages.indexOf(target) : this.pages.length;
+      if (to < 0) to = from;
+      const pins = this.pages.filter((x) => x.pinned).length;
+      to = p.pinned ? Math.min(to, pins) : Math.max(to, pins);
+      this.pages.splice(to, 0, p);
+      this.strip.insertBefore(el, this.pages[to + 1]?.tab || null);
+      this.saveTabs();
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
   }
 
   syncBar() {
@@ -278,6 +324,15 @@ export class BrowserEditor extends BaseEditor {
     else if (ev.type === 'search') this.newPage(toUrl(ev.text, this.engine()));
     else if (ev.type === 'klep') this.app.newDocument('klep').then((t) => t?.editor?.grab?.(ev.url, { all: !!ev.all }));
     else if (ev.type === 'key') this.combo(ev.combo);
+    else if (ev.type === 'translate' && this.app.translate) {
+      const g = { text: ev.text, replace: ev.editable ? (out) => {
+        p.view.focus();
+        bridge?.browser?.({ op: 'insertText', id: p.wcId, text: out }).then((r) => { if (!r?.ok) toast('Couldn’t put it in the page: click the field and try again.', { type: 'warn' }); }, () => {});
+        return true;
+      } : null };
+      if (ev.replace) this.app.translate.replaceNow(g);
+      else { const r = p.view.getBoundingClientRect(); this.app.translate.open(g, r.left + (ev.x || 0), r.top + (ev.y || 0)); }
+    }
     else if (ev.type === 'saved') this.saved(ev.where, ev.file);
     else if (ev.type === 'error') toast(ev.message, { type: 'error', timeout: 5000 });
     else if (ev.type === 'adblock') { p.blocked = ev.count; if (p === this.active) this.paintAd(); }
@@ -355,6 +410,7 @@ export class BrowserEditor extends BaseEditor {
       { label: 'New tab', shortcut: 'Ctrl+T', action: () => this.newPage() },
       { label: 'Find in page', shortcut: 'Ctrl+F', action: () => this.find() },
       { label: 'Save page to doc dump (PDF)', icon: 'file-pdf', action: () => this.savePage() },
+      { label: 'Get videos from this page with BoxKlep', icon: 'magnet', disabled: !/^https?:/i.test(this.active?.url || ''), action: () => { const url = this.active.url; this.app.newDocument('klep').then((t) => t?.editor?.grab?.(url)); } },
       { sep: true },
       { label: 'Search with', submenu: Object.entries(SEARCH).map(([id, s]) => ({ label: s.name, checked: id === eng, action: () => { this.app.saveSettings({ browserSearch: id }); this.addr.placeholder = `Search ${s.name} or type an address`; } })) },
       { label: 'Extensions', submenu: () => this.extensionItems() },

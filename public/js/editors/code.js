@@ -437,6 +437,29 @@ export class CodeEditor extends BaseEditor {
     });
     this.ed.onDidChangeCursorSelection(() => this.statusSoon());
     this.statusSoon = debounce(() => this.refreshStatus(), 100);
+    // right-click a selection → translate it (shown where you clicked), or translate it in place
+    let menuAt = { x: 200, y: 200 };
+    this.ed.onContextMenu((e) => { menuAt = { x: e.event.posx, y: e.event.posy }; });
+    const grab = (ed) => {
+      const sel = ed.getSelection();
+      const text = sel && !sel.isEmpty() ? this.model.getValueInRange(sel) : '';
+      if (!text.trim() || !this.app.translate) return null;
+      const range = sel, version = this.model.getAlternativeVersionId();
+      return {
+        text,
+        restore: () => { ed.focus(); ed.setSelection(range); },
+        replace: ed.getOption(monaco.editor.EditorOption.readOnly) ? null : (out) => {
+          if (this.model.getAlternativeVersionId() !== version) return false; // changed since
+          ed.executeEdits('translate', [{ range, text: out, forceMoveMarkers: true }]);
+          ed.pushUndoStop();
+          return true;
+        },
+      };
+    };
+    this.ed.addAction({ id: 'bds-translate', label: 'Translate selection', contextMenuGroupId: '9_cutcopypaste', contextMenuOrder: 9,
+      precondition: 'editorHasSelection', run: (ed) => { const g = grab(ed); if (g) this.app.translate.open(g, menuAt.x, menuAt.y); } });
+    this.ed.addAction({ id: 'bds-translate-replace', label: 'Translate and replace', contextMenuGroupId: '9_cutcopypaste', contextMenuOrder: 10,
+      precondition: 'editorHasSelection && !editorReadonly', run: (ed) => { const g = grab(ed); if (g?.replace) this.app.translate.replaceNow(g); } });
     this.markerSub = monaco.editor.onDidChangeMarkers((uris) => {
       if (uris.some((u) => u.toString() === this.model.uri.toString())) this.statusSoon();
     });

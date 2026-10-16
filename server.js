@@ -565,6 +565,8 @@ function openAppWindow(paths = []) {
 
 // The parts that live in their own files (each gets what it uses from here and gives back what others use).
 const { routes: marketRoutes } = require('./market-server')({ BROWSER_UA });
+const { routes: weatherRoutes } = require('./weather-server')({ BROWSER_UA });
+const { routes: translateRoutes } = require('./translate-server')({ BROWSER_UA, readJSONBody });
 const { routes: dumpsRoutes, dumpRel, dumpName, dumpAbs, dumpRelOf } = require('./dumps-server')({
   DUMP_AUDIO_EXT, DUMP_EXT, DUMP_VIDEO_EXT, IS_WIN, dumpOf, ok, readBody, readJSONBody, requirePath, revealInExplorer,
   runProcess,
@@ -877,7 +879,7 @@ const routes = {
 };
 
 // their routes
-Object.assign(routes, marketRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, storageRoutes, aiRoutes);
+Object.assign(routes, marketRoutes, weatherRoutes, translateRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, storageRoutes, aiRoutes);
 
 // Windows file associations ("open .pdf with Box-DocSpitter").
 Object.assign(routes, require('./file-assoc')({ root: ROOT, isWin: IS_WIN, readJSONBody }));

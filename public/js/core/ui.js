@@ -168,10 +168,17 @@ document.addEventListener('click', (e) => {
 window.addEventListener('blur', () => { mouseHeld = false; dragPick = null; closeMenus(); });
 window.addEventListener('resize', () => closeMenus());
 
+let contextExtras = null;
+/** Items put on top of every contextMenu() (Translate, when text is selected there): fn(event) → items. */
+export function setContextExtras(fn) { contextExtras = fn; }
+
 export function contextMenu(e, items) {
   e.preventDefault();
   e.stopPropagation();
-  showMenu(items, { x: e.clientX, y: e.clientY });
+  let extra = [];
+  try { extra = contextExtras?.(e) || []; } catch { /* never lose the menu over these */ }
+  const all = extra.length ? async () => [...extra, { sep: true }, ...((await (typeof items === 'function' ? items() : items)) || [])] : items;
+  showMenu(all, { x: e.clientX, y: e.clientY });
 }
 
 // ===================================================================== modals

@@ -57,6 +57,8 @@ export const TOOLS = [
     editor: () => import('../editors/browser.js').then((m) => m.BrowserEditor), home: { icon: 'globe', sub: 'the web · send pages & media to the dumps' } },
   { mode: 'ticker', name: 'BoxTicker', icon: 'trending-up', rename: true, tab: true, kind: true, single: true,
     editor: () => import('../editors/ticker.js').then((m) => m.TickerEditor), toolbox: 'NASDAQ · S&P 500 · any ticker' },
+  { mode: 'weather', name: 'Weather', icon: 'cloud-sun', tab: true, kind: true, single: true,
+    editor: () => import('../editors/weather.js').then((m) => m.WeatherEditor), toolbox: 'now · next 24 hours · 7 days' },
   { mode: 'tomcat', name: 'F-14F Super Tomcat', icon: 'f14', tab: true, single: true,
     editor: () => import('../editors/tomcat.js').then((m) => m.TomcatEditor) },
 ];

@@ -680,9 +680,9 @@ kbd {
 .tab.dirty .tab-close::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 6px rgba(255, 122, 198, 0.5); }
 .tab.dirty .tab-close:hover::before { display: none; }
 .tab.dirty .tab-close:hover .i { display: block; }
-.tab.drag-over { box-shadow: inset 2px 0 0 var(--accent); }
-.tab.drag-over-end { box-shadow: inset -2px 0 0 var(--accent); }
-.tab.tab-dragging { opacity: 0.55; }
+.tab.drag-over, .bw-tab.drag-over { box-shadow: inset 2px 0 0 var(--accent); }
+.tab.drag-over-end, .bw-tab.drag-over-end { box-shadow: inset -2px 0 0 var(--accent); }
+.tab.tab-dragging, .bw-tab.tab-dragging { opacity: 0.55; }
 .tab.tab-leaving { opacity: 0.3; }
 body.tab-drag, body.tab-drag * { cursor: grabbing !important; }
 .tab-ghost { position: fixed; z-index: 9999; display: flex; align-items: center; gap: 7px; max-width: 260px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-2); color: var(--text); font-family: var(--font-mono); font-size: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); pointer-events: none; white-space: nowrap; }
@@ -1787,6 +1787,82 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .clock-sug-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; cursor: pointer; white-space: nowrap; }
 .clock-sug-row .faint { overflow: hidden; text-overflow: ellipsis; }
 .clock-sug-row:hover, .clock-sug-row.on { background: var(--accent-soft-2); color: var(--text); }
+
+/* Translate: the popup from right-clicking selected text */
+.tr-pop { position: fixed; z-index: 3100; width: 380px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-1); box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5); font-size: 12.5px; -webkit-app-region: no-drag; }
+.tr-head { display: flex; align-items: center; gap: 6px; }
+.tr-head .i { color: var(--accent); }
+.tr-lang { max-width: 150px; }
+.tr-src { max-height: 72px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; padding-left: 8px; border-left: 2px solid var(--line-2); }
+.tr-out { max-height: 240px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; padding: 8px 10px; border-radius: 8px; background: var(--bg-2); color: var(--text); font-size: 13.5px; user-select: text; }
+.tr-out.err { color: var(--danger, #ff6b6b); }
+.tr-foot { display: flex; align-items: center; gap: 6px; }
+.tr-credit { font-size: 10.5px; }
+
+/* Weather: the top-bar / sidebar button, its panel, the pop-out widget and the full view */
+#btn-weather:not(.in-rail).has-temp { width: auto; padding: 0 8px; gap: 5px; }
+#btn-weather .wx-glyph { display: inline-flex; }
+#btn-weather .wx-now { font-size: 11.5px; color: var(--text-2); white-space: nowrap; }
+#btn-weather.in-rail .wx-now { display: none; }
+#btn-weather.in-rail::after { text-transform: none; letter-spacing: 0.08em; }
+#btn-weather.on { background: var(--bg-4); color: var(--text); }
+.wx-search { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.wx-search input { width: 100%; }
+.wx-head-main { display: flex; align-items: center; gap: 10px; }
+.wx-big-icon .i { width: 34px; height: 34px; color: var(--accent); }
+.wx-head-text { display: flex; flex-direction: column; }
+.wx-place { margin-top: 4px; color: var(--text-2); }
+.wx-hours { display: flex; gap: 2px; overflow-x: auto; padding-bottom: 4px; }
+.wx-hour { flex: 0 0 44px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; }
+.wx-hour .i { width: 18px; height: 18px; }
+.wx-pop { min-height: 1em; font-size: 10px; color: var(--accent-3, var(--accent)); }
+.wx-days { display: flex; flex-direction: column; gap: 2px; }
+.wx-day { display: grid; grid-template-columns: 48px 20px 30px 34px 1fr 34px; align-items: center; gap: 6px; padding: 2px 0; }
+.wx-day .i { width: 16px; height: 16px; }
+.wx-lo { text-align: right; color: var(--text-3); }
+.wx-range { position: relative; height: 4px; border-radius: 2px; background: var(--bg-3); }
+.wx-range i { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: linear-gradient(90deg, var(--accent-3, var(--accent)), var(--accent-2, var(--accent))); }
+.wx-units { display: flex; gap: 2px; flex: none; }
+.wx-actions { align-items: center; }
+.wx-credit { font-size: 10.5px; margin-top: 4px; }
+.wx-mini { position: fixed; z-index: 880; display: flex; align-items: flex-start; gap: 4px; min-width: 130px; max-width: 220px; padding: 8px 8px 8px 10px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg-1); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); cursor: grab; user-select: none; touch-action: none; outline: none; -webkit-app-region: no-drag; }
+.wx-mini.dragging { cursor: grabbing; opacity: 0.85; }
+.wx-mini:focus-visible { border-color: var(--accent); }
+.wx-mini-body { flex: 1; min-width: 0; }
+.wx-mini-top { display: flex; align-items: center; gap: 6px; }
+.wx-mini-top .i { width: 22px; height: 22px; color: var(--accent); }
+.wx-mini-temp { font-size: 22px; font-weight: 600; color: var(--text); }
+.wx-mini-label { font-size: 12px; color: var(--text-2); }
+.wx-mini-sub { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-mini-none { font-size: 12px; padding: 4px 0; }
+.wx-mini-x { flex: none; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-3); cursor: pointer; opacity: 0; }
+.wx-mini:hover .wx-mini-x, .wx-mini:focus-within .wx-mini-x { opacity: 1; }
+.wx-mini-x:hover { background: var(--bg-3); color: var(--text); }
+.wx-root { height: 100%; overflow-y: auto; }
+.wx-full { max-width: 1100px; margin: 0 auto; padding: 18px 22px 30px; display: flex; flex-direction: column; gap: 16px; }
+.wx-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wx-bar-place { font-size: 18px; font-weight: 600; color: var(--text); }
+.wx-bar .wx-search { flex: 0 1 260px; }
+.wx-bar .wx-sug { position: absolute; top: 100%; left: 0; right: 0; z-index: 5; margin-top: 2px; }
+.wx-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 70px 0; color: var(--text-3); }
+.wx-empty .i { width: 48px; height: 48px; }
+.wx-hero { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-1); }
+.wx-hero-icon .i { width: 72px; height: 72px; color: var(--accent); }
+.wx-hero-temp { font-size: 64px; font-weight: 600; line-height: 1; color: var(--text); }
+.wx-hero-text { display: flex; flex-direction: column; gap: 3px; }
+.wx-hero-label { font-size: 20px; color: var(--text); }
+.wx-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-1); }
+.wx-chart { position: relative; overflow-x: auto; }
+.wx-line { position: absolute; left: 0; top: 18px; width: 100%; min-width: 960px; height: 90px; pointer-events: none; }
+.wx-line-stroke { fill: none; stroke: var(--accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.wx-line-fill { fill: var(--accent-soft); stroke: none; }
+.wx-chart-cols { position: relative; display: grid; grid-template-columns: repeat(24, minmax(40px, 1fr)); min-width: 960px; font-size: 11.5px; }
+.wx-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.wx-col-gap { height: 86px; }
+.wx-col .i { width: 18px; height: 18px; }
+.wx-week { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.wx-dcard { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); font-size: 12.5px; }
+.wx-dcard .i { width: 28px; height: 28px; color: var(--accent); margin: 4px 0; }
 .clock-add input[type="time"] { flex: 1; height: 26px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-2); color: var(--text); color-scheme: dark; font: inherit; }
 [data-theme="light"] .clock-add input[type="time"] { color-scheme: light; }
 .clock-timer-set input[type="number"] { width: 58px; }

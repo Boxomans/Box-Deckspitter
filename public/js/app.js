@@ -8,6 +8,8 @@ import { createSounds } from './core/sounds.js';
 import { createClips } from './core/clips.js';
 import { createMusic } from './core/music.js';
 import { createClock } from './core/clock.js';
+import { createWeather } from './core/weather.js';
+import { createTranslate } from './core/translate.js';
 import { createCalendar } from './core/calendar.js';
 import { LockPart } from './app/lock.js';
 import { EasterEggsPart } from './app/easter-eggs.js';
@@ -77,6 +79,8 @@ class App {
     this.clips = createClips(this);
     this.music = createMusic(this);
     this.clock = createClock(this);
+    this.weather = createWeather(this);
+    this.translate = createTranslate(this);
     this.calendar = createCalendar(this);
 
     this.decorateChrome();

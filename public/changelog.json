@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.0.47",
+    "date": "2026-10-16",
+    "notes": [
+      "Weather: a button in the top bar (drag it to the right sidebar if you like) shows the conditions and temperature for a place you pick; click it for the next hours and 7 days. Pop it out as a small widget you can drag anywhere, or open the full view from the Toolbox.",
+      "Translate: right-click selected text anywhere in the app, the code editor and Browser pages included, to translate it with Google Translate. Read it and close, copy it, or put it in place of the selection.",
+      "Browser: drag tabs along the tab strip to reorder them. Pinned tabs stay at the front. The ⋯ menu can send the page to BoxKlep to grab its videos.",
+      "Video editor: clips on audio tracks show their waveform. Right-click one to save just the part it plays, at its volume, as an MP3 in the media dump or the audio dump."
+    ]
+  },
+  {
     "version": "1.0.46",
     "date": "2026-10-15",
     "notes": [

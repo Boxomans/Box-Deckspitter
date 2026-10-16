@@ -227,7 +227,7 @@ export class TomcatGame {
     this.shots++;
     this.onFire?.();
     inv.count--;
-    if (inv.count <= 0 && !inv.regenActive) { inv.regenActive = true; inv.regenT = card.regen; }
+    if (inv.count < card.max && !inv.regenActive) { inv.regenActive = true; inv.regenT = card.regen; }
     // in range if the missile meets it head-on before running out: it only has to fly d·vm/(vm+vt)
     const vm = card.speedMach * MACH1_KMPS;
     const vt = sel.kind === 'bandit' ? Math.max(0, sel.obj.closure || 0) : sel.obj.speed;
@@ -252,17 +252,17 @@ export class TomcatGame {
   covered(kind, id) { return this.missiles.some((m) => m.targetId === id && m.targetKind === kind && !m.lost); }
 
   /** Loyal Wingman: drone i (0 on the left, 1 on the right), full of AIM-9Xs. */
-  newDrone(i) { return { side: i ? 1 : -1, ammo: DRONE_AMMO, reload: [], cd: 0 }; }
+  newDrone(i) { return { side: i ? 1 : -1, ammo: DRONE_AMMO, reloadT: 0, cd: 0 }; }
 
   /** The drones fly their own fight: each takes the nearest bandit or inbound missile in AIM-9X reach that nothing is
-   *  already chasing. A shot missile comes back 20 s later. They hold fire through a notch, like you. */
+   *  already chasing. Missiles come back one at a time, 20 s each, whenever one is missing. They hold fire through a notch, like you. */
   updateDrones(dt) {
     if (!this.drones?.length) return;
     const card = this.spec('FOX-2');
     const vm = card.speedMach * MACH1_KMPS;
     this.drones.forEach((d, i) => {
       d.cd = Math.max(0, d.cd - dt);
-      for (let k = d.reload.length - 1; k >= 0; k--) if ((d.reload[k] -= dt) <= 0) { d.reload.splice(k, 1); d.ammo = Math.min(DRONE_AMMO, d.ammo + 1); }
+      if (d.ammo < DRONE_AMMO && (d.reloadT -= dt) <= 0) { d.ammo++; d.reloadT = d.ammo < DRONE_AMMO ? d.reloadT + DRONE_RELOAD : 0; }
       if (d.ammo <= 0 || d.cd > 0 || this.notchHold > 0) return;
       const t = this.tracksSorted().find(({ kind, obj }) => {
         if (this.covered(kind, obj.id)) return false;
@@ -273,7 +273,8 @@ export class TomcatGame {
       });
       if (!t) return;
       this.launch(card, t, { byDrone: i + 1 });
-      d.ammo--; d.reload.push(DRONE_RELOAD); d.cd = DRONE_GAP;
+      if (d.ammo-- === DRONE_AMMO) d.reloadT = DRONE_RELOAD; // the reload starts with the first missing missile
+      d.cd = DRONE_GAP;
       this.toast(`GOOSE ${i + 1} FOX-2 (${t.obj.id})`, 1.4, '#9fc2d9');
     });
   }
@@ -558,7 +559,7 @@ export class TomcatGame {
 
     for (const [code, inv] of Object.entries(this.inv)) {
       const card = this.spec(code);
-      if (inv.count === 0 && !inv.regenActive) { inv.regenActive = true; inv.regenT = card.regen; }
+      if (inv.count < card.max && !inv.regenActive) { inv.regenActive = true; inv.regenT = card.regen; }
       if (!inv.regenActive) continue;
       inv.regenT -= dt;
       if (inv.regenT <= 0) {
@@ -814,8 +815,7 @@ export class TomcatGame {
       ctx.textAlign = 'center';
       ctx.font = `12px ${MONO}`;
       ctx.fillStyle = '#cfe8cf';
-      const timers = [...d.reload].sort((a, b) => a - b).map((t) => `${Math.ceil(t)}s`).join(' ');
-      ctx.fillText(`AIM-9X ${'●'.repeat(d.ammo)}${'○'.repeat(DRONE_AMMO - d.ammo)}  ${timers || `${DRONE_RELOAD}s`}`, x, y + S / 2 + 18);
+      ctx.fillText(`AIM-9X ${'●'.repeat(d.ammo)}${'○'.repeat(DRONE_AMMO - d.ammo)}  ${Math.ceil(d.ammo < DRONE_AMMO ? d.reloadT : DRONE_RELOAD)}s`, x, y + S / 2 + 18);
       ctx.fillStyle = '#6f7f6f'; ctx.font = `10px ${MONO}`;
       ctx.fillText('FQ-50A GOOSE', x, y + S / 2 + 33);
       ctx.restore();
@@ -1051,7 +1051,7 @@ export class TomcatGame {
       `Speed: Mach ${m.speedMach.toFixed(1)} (~${(m.speedMach * MACH1_KMPS).toFixed(2)} km/s)`,
       `Range: ${m.rMaxKm} km (${(m.rMaxKm / KM_PER_NM).toFixed(0)} nm)`,
       `Turn: ${Math.round(m.turnRateDps)}°/s · fuse ${Math.round(m.killRadiusKm * 1000)} m · dud ${Math.round(m.dud * 100)}%`,
-      `Reload: ${m.regen}s per round once empty`,
+      `Reload: ${m.regen}s per round, one at a time`,
     ];
     const notes = this.wrap(m.notes, w - 2 * padX, `12px ${MONO}`);
     const contentH = padTop + 18 + (lines.length + notes.length) * lh + padBottom;

@@ -11,6 +11,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 
+const PEAK_RATE = 100; // waveform values per second
 const err = (status, message) => Object.assign(new Error(message), { status });
 
 module.exports = function createRender({ tools, readBody, readJSONBody, requirePath, newJob, startJob, runFfmpegJob, cacheDir, log }) {
@@ -92,6 +93,60 @@ module.exports = function createRender({ tools, readBody, readJSONBody, requireP
         await fsp.rename(tmp, out);
       }
       return { path: out };
+    },
+    // The loudness outline of a file's sound for the timeline: one byte (0–255, the loudest sample) per 1/100 s; cached.
+    'POST /api/render/peaks': async (req) => {
+      const { path: src } = await readJSONBody(req);
+      needFfmpeg();
+      const file = requirePath(src);
+      const out = await cacheFor(file, '.peaks');
+      if (!fs.existsSync(out)) {
+        const RATE = 8000, PER = RATE / PEAK_RATE;
+        const chunks = [];
+        let cur = 0, n = 0, odd = null;
+        const code = await new Promise((resolve) => {
+          const p = spawn(tools().ffmpeg, ['-hide_banner', '-v', 'error', '-i', file, '-vn', '-ac', '1', '-ar', String(RATE), '-f', 's16le', 'pipe:1'], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+          const bytes = [];
+          p.stdout.on('data', (d) => {
+            if (odd) { d = Buffer.concat([odd, d]); odd = null; }
+            if (d.length % 2) { odd = d.subarray(d.length - 1); d = d.subarray(0, d.length - 1); }
+            for (let i = 0; i < d.length; i += 2) {
+              const v = Math.abs(d.readInt16LE(i));
+              if (v > cur) cur = v;
+              if (++n === PER) { bytes.push(Math.min(255, cur >> 7)); cur = 0; n = 0; }
+            }
+            if (bytes.length >= 65536) chunks.push(Buffer.from(bytes.splice(0)));
+          });
+          p.on('close', (c) => { if (n) bytes.push(Math.min(255, cur >> 7)); chunks.push(Buffer.from(bytes)); resolve(c); });
+          p.on('error', () => resolve(1));
+        });
+        const buf = Buffer.concat(chunks);
+        if (code !== 0 && !buf.length) return { rate: PEAK_RATE, peaks: null }; // no sound in it
+        await fsp.writeFile(out, buf);
+      }
+      return { rate: PEAK_RATE, peaks: (await fsp.readFile(out)).toString('base64') };
+    },
+    // The part of a file's sound a clip uses, as an MP3 (for saving a clip's sound into a dump).
+    'POST /api/render/clip-audio': async (req) => {
+      const { path: src, start, len, volume, output } = await readJSONBody(req);
+      needFfmpeg();
+      const file = requirePath(src);
+      const out = requirePath(output);
+      if (path.resolve(out).toLowerCase() === path.resolve(file).toLowerCase()) throw err(400, 'That’s the clip’s own file.');
+      const ss = Math.max(0, Number(start) || 0), t = Math.max(0.05, Number(len) || 0);
+      const vol = Math.max(0, Math.min(4, Number(volume ?? 1)));
+      const args = ['-hide_banner', '-v', 'error', '-y', '-ss', ss.toFixed(3), '-t', t.toFixed(3), '-i', file, '-vn'];
+      if (Math.abs(vol - 1) > 0.001) args.push('-af', `volume=${vol.toFixed(3)}`);
+      args.push('-c:a', 'libmp3lame', '-q:a', '2', out);
+      let msg = '';
+      const code = await new Promise((resolve) => {
+        const p = spawn(tools().ffmpeg, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        p.stderr.on('data', (d) => { msg = (msg + d).slice(-1000); });
+        p.on('close', resolve);
+        p.on('error', () => resolve(1));
+      });
+      if (code !== 0) { await fsp.rm(out, { force: true }).catch(() => {}); throw err(500, /does not contain any stream|matches no streams/i.test(msg) ? 'That clip has no sound.' : 'ffmpeg couldn’t save the sound: ' + msg.split('\n').filter(Boolean).slice(-1)[0]); }
+      return { ok: true, path: out };
     },
     'POST /api/render/start': async (req) => {
       const { width, height, fps, duration, output, quality, inputs } = await readJSONBody(req);

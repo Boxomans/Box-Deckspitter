@@ -309,6 +309,14 @@ ${again}`;
       items.push({ label: `Open ${media} in new tab`, click: () => send(wc, { type: 'open', url: p.srcURL }) });
       sep();
     }
+    // Translate (the app shows it; in a field it can go in place of the selection)
+    const sel = (p.selectionText || '').trim();
+    if (sel) {
+      const shortSel = sel.replace(/\s+/g, ' ');
+      items.push({ label: `Translate “${shortSel.length > 24 ? shortSel.slice(0, 24) + '…' : shortSel}”`, click: () => send(wc, { type: 'translate', text: p.selectionText, editable: !!p.isEditable, x: p.x, y: p.y }) });
+      if (p.isEditable) items.push({ label: 'Translate and replace', click: () => send(wc, { type: 'translate', text: p.selectionText, editable: true, replace: true }) });
+      sep();
+    }
     if (p.isEditable) {
       items.push({ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' });
       sep();
@@ -422,6 +430,14 @@ ${again}`;
           else if (req.set === 'unallow') adblock.removeAllowed(String(req.value || ''));
           else if (req.set === 'update') await adblock.update();
           return { ok: true, ...adblock.status(wc?.getURL() || '', wc?.id), allowList: adblock.allowList() };
+        }
+        case 'insertText': {
+          // a translation going in place of what's selected in the page's field
+          const wc = guestOf(e, req.id);
+          if (!wc) return { ok: false, error: 'That page is gone.' };
+          // typed into the focused field from inside the page, so the page's own undo takes it back
+          const done = await wc.executeJavaScript(`document.execCommand('insertText', false, ${JSON.stringify(String(req.text ?? ''))})`, true);
+          return { ok: !!done };
         }
         case 'savePage':
           return { ok: true, file: await toDocDump(guestOf(e, req.id)) };

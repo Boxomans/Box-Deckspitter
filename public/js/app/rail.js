@@ -97,9 +97,9 @@ function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
   });
 }
 
-const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
+const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-weather', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
 
-const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
+const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-weather': 'weather', 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
 
 export class RailPart {
   decorateChrome() {

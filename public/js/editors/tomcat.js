@@ -343,6 +343,7 @@ export class TomcatEditor extends BaseEditor {
     for (const [k, inv] of Object.entries(g.inv)) inv.count = Math.min(inv.count, g.spec(k).max);
     g.flares = Math.min(g.flares, g.flareMax());
     g.armor = 0;
+    g.drones = g.drones.slice(0, g.upgrades().wingman || 0); // the wingmen were an upgrade too
     this.app.sounds?.play?.('click');
     this.renderHangar();
     this.refreshStatus();

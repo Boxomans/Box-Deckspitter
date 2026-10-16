@@ -485,6 +485,20 @@ export class CutEditor extends BaseEditor {
     return n + moved;
   }
 
+  /** The part of the sound a clip on an audio track plays (at its volume) as an MP3 in the media or audio dump. */
+  async saveSound(c, m, kind) {
+    const where = kind === 'audio' ? 'the audio dump' : `the media dump${this.dumpDir ? ` (${this.dumpDir})` : ''}`;
+    const name = `${stripExt(m.name)} ${fmtTime(c.in, false).replace(/:/g, '.')}-${fmtTime(c.in + c.len, false).replace(/:/g, '.')}.mp3`;
+    const t = toast(`Saving the sound to ${where}…`, { timeout: 0 });
+    try {
+      const r = await api.dumpReserve(kind === 'media' && this.dumpDir ? `${this.dumpDir}/${name}` : name, kind);
+      await postJSON('/api/render/clip-audio', { path: m.path, start: c.in, len: c.len, volume: (c.props?.volume ?? PROPS.volume.def) / 100, output: r.path });
+      t?.();
+      toast(`Saved ${basename(r.path)} to ${where}.`, { type: 'ok', timeout: 2200 });
+      if (kind === 'media' && this.binView === 'dump') this.refreshDump(true);
+    } catch (e) { t?.(); errorToast(e, 'Saving the sound'); }
+  }
+
   async addToDumpDialog() {
     const paths = await pickOpen({ multi: true, title: 'Add to the media dump', filters: [{ name: 'Video, audio & images', extensions: ['mp4', 'm4v', 'webm', 'mov', 'mkv', 'avi', 'wmv', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'flac', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] }] });
     if (paths?.length) await this.toDump(paths);
@@ -912,6 +926,8 @@ export class CutEditor extends BaseEditor {
     const el = h('div', { class: `cut-clip ${m ? (tr.kind === 'audio' ? 'audio' : m.kind) : 'missing'} ${on ? 'on' : ''} ${linkedOn ? 'linked-on' : ''} ${c.key?.on ? 'keyed' : ''}`, dataset: { clip: c.id }, style: { left: `${this.tToX(c.start)}px`, width: `${Math.max(4, this.tToX(c.len))}px` }, title: `${m?.name || 'missing media'} · ${fmtTime(c.len)}${p ? ` · its ${tr.kind === 'audio' ? 'picture' : 'sound'} is on ${p.tr.name}` : ''}` },
       h('span', { class: 'cut-clip-name' }, p ? icon('link', 'sm') : null, m?.name || 'missing'),
       h('span', { class: 'cut-trim l' }), h('span', { class: 'cut-trim r' }));
+    // a sound's loudness drawn along it
+    if (tr.kind === 'audio' && m && m.kind !== 'image' && !m.missing) { const cv = h('canvas', { class: 'cut-wave' }); cv.wave = { c, m }; el.prepend(cv); this.drawWave(cv); }
     if (m?.kind === 'image' && !m.missing) el.style.backgroundImage = `linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.25)), url("${srcOf(m)}")`;
     // keyframe diamonds of the selected clip
     if (c.id === this.sel) {
@@ -930,6 +946,10 @@ export class CutEditor extends BaseEditor {
       contextMenu(e, [
         { label: 'Split at the playhead', shortcut: 'S', action: () => this.split() },
         { label: 'Copy its file to the media dump', icon: 'download', disabled: !m || m.missing, action: () => this.toDump([m.path]) },
+        ...(tr.kind === 'audio' ? [
+          { label: 'Save this sound to the media dump', icon: 'music', disabled: !m || m.missing, action: () => this.saveSound(c, m, 'media') },
+          { label: 'Save this sound to the audio dump', icon: 'music', disabled: !m || m.missing, action: () => this.saveSound(c, m, 'audio') },
+        ] : []),
         { label: 'Duplicate', action: () => {
           this.remember();
           const link = p ? uid('l') : null;
@@ -949,6 +969,66 @@ export class CutEditor extends BaseEditor {
       ]);
     });
     return el;
+  }
+
+  /** A file's waveform (loudest sample per 1/100 s, 0–255): from ffmpeg on the server, or decoded here without it. */
+  loadPeaks(m) {
+    this.peaks ||= new Map();
+    const key = m.proxy || m.path;
+    if (this.peaks.has(key)) return;
+    this.peaks.set(key, null); // loading
+    const done = (pk) => {
+      this.peaks.set(key, pk);
+      if (pk) for (const cv of this.lanes.querySelectorAll('canvas.cut-wave')) if (cv.wave.m === m) this.drawWave(cv);
+    };
+    postJSON('/api/render/peaks', { path: m.path })
+      .then((r) => done(r.peaks ? { rate: r.rate, data: Uint8Array.from(atob(r.peaks), (ch) => ch.charCodeAt(0)) } : false))
+      .catch(async () => {
+        // no ffmpeg: let the browser decode it, if it isn't huge
+        try {
+          const res = await fetch(srcOf(m));
+          if (Number(res.headers.get('content-length')) > 250 * 1024 * 1024) { res.body?.cancel(); return done(false); }
+          const ctx = new OfflineAudioContext(1, 1, 8000);
+          const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+          const per = Math.max(1, Math.round(buf.sampleRate / 100));
+          const data = new Uint8Array(Math.ceil(buf.length / per));
+          const chans = Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i));
+          for (let i = 0; i < data.length; i++) {
+            let mx = 0;
+            for (const ch of chans) for (let j = i * per, e = Math.min(ch.length, j + per); j < e; j++) { const v = Math.abs(ch[j]); if (v > mx) mx = v; }
+            data[i] = Math.min(255, Math.round(mx * 255));
+          }
+          done({ rate: buf.sampleRate / per, data });
+        } catch { done(false); }
+      });
+  }
+
+  /** Draw the part of the waveform a clip on an audio track uses (its volume makes it taller or shorter). */
+  drawWave(cv) {
+    const { c, m } = cv.wave;
+    const pk = this.peaks?.get(m.proxy || m.path);
+    if (pk === undefined) this.loadPeaks(m);
+    if (!pk) return;
+    const dpr = devicePixelRatio || 1;
+    const W = Math.max(1, Math.min(8192, Math.round(Math.max(4, this.tToX(c.len)) * dpr)));
+    const H = Math.round(34 * dpr);
+    if (cv.width !== W) cv.width = W;
+    if (cv.height !== H) cv.height = H;
+    const g = cv.getContext('2d');
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = 'rgba(255, 255, 255, 0.38)';
+    const gain = Math.min(2, (c.props?.volume ?? PROPS.volume.def) / 100);
+    const mid = H / 2;
+    for (let x = 0; x < W; x++) {
+      const i0 = Math.floor((c.in + (x / W) * c.len) * pk.rate);
+      const i1 = Math.max(i0 + 1, Math.ceil((c.in + ((x + 1) / W) * c.len) * pk.rate));
+      let v = 0;
+      for (let i = i0; i < i1 && i < pk.data.length; i++) if (pk.data[i] > v) v = pk.data[i];
+      // in decibels (−48 dB … 0), so quiet sound still shows
+      const db = v && gain ? 20 * Math.log10((v / 255) * gain) : -Infinity;
+      const a = Math.min(mid, Math.max(v ? 0.5 : 0, ((db + 48) / 48) * mid));
+      if (a) g.fillRect(x, mid - a, 1, a * 2);
+    }
   }
 
   /** The clip edge / playhead / 0 that time t is within a few pixels of, or null. */
@@ -1045,6 +1125,8 @@ export class CutEditor extends BaseEditor {
       this.showSnap(guide);
       el.style.left = `${this.tToX(c.start)}px`;
       el.style.width = `${Math.max(4, this.tToX(c.len))}px`;
+      const wave = el.querySelector('canvas.cut-wave');
+      if (wave && mode !== 'move') this.drawWave(wave);
       if (group.size) {
         // nothing in the group goes before 0
         if (gmin + (c.start - orig.start) < 0) c.start = orig.start - gmin;
@@ -1062,7 +1144,11 @@ export class CutEditor extends BaseEditor {
         pc.in = Math.max(0, porig.in + (c.in - orig.in));
         if (mode === 'left') for (const keys of Object.values(pc.keys || {})) for (const k of keys) k.t = (k._t0 ?? (k._t0 = k.t)) - d;
         const pel = this.lanes.querySelector(`.cut-clip[data-clip="${pc.id}"]`);
-        if (pel) { pel.style.left = `${this.tToX(pc.start)}px`; pel.style.width = `${Math.max(4, this.tToX(pc.len))}px`; }
+        if (pel) {
+          pel.style.left = `${this.tToX(pc.start)}px`; pel.style.width = `${Math.max(4, this.tToX(pc.len))}px`;
+          const pw = pel.querySelector('canvas.cut-wave');
+          if (pw && mode !== 'move') this.drawWave(pw);
+        }
       }
       this.requestUpdate();
     };
