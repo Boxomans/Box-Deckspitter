@@ -7,6 +7,8 @@ export const DOC_EXT = ['docx', 'docm', 'dotx', 'odt', 'rtf'];
 export const TEXT_EXT = ['txt', 'text', 'log', 'nfo', 'diz', 'asc', 'me', '1st', 'readme', 'out', 'srt', 'vtt', 'lrc'];
 export const SHEET_EXT = ['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'tsv', 'fods'];
 export const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'bmp', 'ico', 'avif', 'svg', 'apng'];
+/** Pictures BoxPaint (the image editor) can open and save back (not SVG drawings or icons). */
+export const PAINT_EXT = ['png', 'jpg', 'jpeg', 'jfif', 'gif', 'webp', 'bmp', 'avif', 'apng'];
 export const PDF_EXT = ['pdf'];
 export const VIDEO_EXT = ['mp4', 'm4v', 'webm', 'mov', 'mkv', 'ogv', 'avi', 'wmv', '3gp', 'mts', 'm2ts', 'flv', 'mp3', 'wav', 'm4a', 'aac', 'oga', 'opus', 'flac', 'weba'];
 
@@ -97,12 +99,12 @@ export function extForLang(lang) {
 
 export const MODE_ICON = {
   doc: 'file-doc', pdf: 'file-pdf', text: 'file-text', code: 'file-code', sheet: 'sheet', image: 'image', hex: 'binary',
-  video: 'video', cut: 'video', form: 'form-fill', paint: 'brush', ai: 'bot', ...TOOL_ICON,
+  video: 'video', player: 'play', cut: 'video', form: 'form-fill', paint: 'brush', ai: 'bot', ...TOOL_ICON,
 };
 
 export const MODE_LABEL = {
   doc: 'Document', pdf: 'PDF', text: 'Text', code: 'Code', sheet: 'Sheet', image: 'Image', hex: 'Binary',
-  video: 'Video', form: 'Form', paint: 'BoxPaint', ...TOOL_LABEL,
+  video: 'Video', player: 'Player', form: 'Form', paint: 'BoxPaint', ...TOOL_LABEL,
 };
 
 export function iconForName(name, isDir) {

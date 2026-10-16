@@ -53,6 +53,7 @@ export class PanelsPart {
       ['Tools', [...this.ordered('tools', this.homeTools(), (c) => c[1]),
         ...TOOLS.filter((t) => t.toolbox && offered(t)).map((t) => [t.icon, t.name, t.toolbox, () => this.newDocument(t.mode)])]],
       ['More', [
+        ['play', 'Video player', 'just watch something', () => this.openVideoPlayer()],
         ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
         ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
         ...(this.weather ? [['cloud-sun', 'Weather widget', 'a small floating forecast · click again to close', () => this.weather.toggleMini()]] : []),
@@ -92,6 +93,7 @@ export class PanelsPart {
       h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
     h('div', { class: 'panel-body' }, list));
     rubberSelect(list, { scroller: () => list.parentElement, menu: (items) => this.recentManyMenu(items, () => this.renderRecentPanel()), onDelete: (items) => this.forgetRecents(items, () => this.renderRecentPanel()), onOpen: (items) => this.openMany(items) });
+    if (this.settings.showRecent === false) return list.append(h('div', { class: 'empty-note' }, 'Recent files are hidden. Turn them back on in Settings › Files.'));
     try {
       const recent = await api.recent();
       if (!recent.length) list.append(h('div', { class: 'empty-note' }, 'Nothing yet.'));

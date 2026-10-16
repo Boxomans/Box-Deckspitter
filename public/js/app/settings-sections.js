@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, Settings sections: sound, updates, Windows, file types, mail, Claude, Discord.
+// Box-DocSpitter app shell, Settings sections: sound, updates, Windows, file types, mail, AI assistant, Discord.
 // Methods of App (app.js mixes this class into it).
 
 import { $, h, clear, extOf, formatBytes, debounce } from '../core/dom.js';
@@ -6,6 +6,7 @@ import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { modal, confirmDialog, promptDialog, toast, errorToast } from '../core/ui.js';
 import { pickOpen } from '../core/files.js';
+import { PROVIDERS } from '../core/ai-providers.js';
 
 export class SettingsSectionsPart {
   /** Settings → Sounds: preview, swap or reset each UI sound. */
@@ -259,27 +260,32 @@ export class SettingsSectionsPart {
       h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Uses Google app passwords, stored only on this PC. Browsing never marks mail as read.'));
   }
 
-  // ======================================================================= ask claude settings
+  // ======================================================================= AI assistant settings
 
   aiSettings() {
-    const status = h('span', { class: 'dim mono', style: { fontSize: '11px' } }, 'checking…');
-    const setKey = async (key) => {
-      const r = await fetch('/api/ai/key', { method: 'POST', headers: { 'X-BDS-Token': api.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+    const setKey = async (provider, key) => {
+      const r = await fetch('/api/ai/key', { method: 'POST', headers: { 'X-BDS-Token': api.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, key }) });
       if (!r.ok) throw new Error((await r.json()).error);
     };
+    const rows = h('div', { class: 'col', style: { gap: '6px' } }, h('span', { class: 'dim mono', style: { fontSize: '11px' } }, 'checking…'));
     const refresh = async () => {
       const s = await fetch('/api/ai/status', { headers: { 'X-BDS-Token': api.token } }).then((r) => r.json()).catch(() => ({}));
-      status.textContent = s.configured ? `● key saved (${s.keyHint})${s.fromEnv ? ' from ANTHROPIC_API_KEY' : ''}` : '○ no API key yet';
+      clear(rows).append(...Object.entries(PROVIDERS).map(([id, P]) => {
+        const st = s.providers?.[id] || {};
+        return h('div', { class: 'row', style: { gap: '6px' } },
+          h('b', { style: { width: '84px', fontSize: '12px' } }, P.name),
+          h('span', { class: 'dim mono grow', style: { fontSize: '11px' } }, st.configured ? `● key saved (${st.keyHint})${st.fromEnv ? ` from ${st.fromEnv}` : ''}` : '○ no key'),
+          h('button', { class: 'btn sm', onclick: async () => { const k = await promptDialog(`${P.company} API key`, `Paste a key from ${P.keyUrl}`, '', { type: 'password', placeholder: P.placeholder }); if (!k) return; try { await setKey(id, k); toast('Key saved', { type: 'ok' }); refresh(); } catch (e) { errorToast(e); } } }, st.configured ? 'Change…' : 'Set key…'),
+          st.configured && !st.fromEnv ? h('button', { class: 'btn sm ghost', onclick: async () => { if (await confirmDialog(`Remove the ${P.company} key?`, `${P.name} will stop working in the AI assistant until you add a key again.`, { okLabel: 'Remove', danger: true })) { await setKey(id, ''); refresh(); } } }, 'Remove') : null);
+      }));
       this.rightPanels?.ai?.panel?.refreshStatus();
     };
     refresh();
-    return h('div', { class: 'settings-group' }, h('h4', {}, 'Ask Claude'),
-      status,
+    return h('div', { class: 'settings-group' }, h('h4', {}, 'AI assistant'),
+      rows,
       h('div', { class: 'row' },
-        h('button', { class: 'btn sm', onclick: async () => { const k = await promptDialog('Anthropic API key', 'Paste a key from console.anthropic.com', '', { type: 'password', placeholder: 'sk-ant-…' }); if (!k) return; try { await setKey(k); toast('Key saved', { type: 'ok' }); refresh(); } catch (e) { errorToast(e); } } }, 'Set key…'),
-        h('button', { class: 'btn sm ghost', onclick: async () => { if (await confirmDialog('Remove API key?', 'Ask Claude will stop working until you add a key again.', { okLabel: 'Remove', danger: true })) { await setKey(''); refresh(); } } }, 'Remove'),
         h('button', { class: 'btn sm ghost', onclick: () => this.toggleRightPanel(this.rightPanel === 'ai' && !this.panelOnTop('ai') ? null : 'ai') }, 'Open panel')),
-      h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Optional. Text goes to Anthropic only when you press send. Billed to your Anthropic account.'));
+      h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Optional. Add a key for any of these and pick which one to use at the top of the panel. Text goes to that company only when you press send, billed to your account with them. Keys are sealed to your Windows account.'));
   }
 
   // ======================================================================= discord settings

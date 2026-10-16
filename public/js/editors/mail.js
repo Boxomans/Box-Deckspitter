@@ -13,6 +13,7 @@ import { toast, errorToast, modal, confirmDialog, promptDialog, contextMenu, sho
 import { api } from '../core/api.js';
 import { pickOpen, pickSave } from '../core/files.js';
 import { streamClaude } from '../core/ai-stream.js';
+import { aiChoice } from '../core/ai-providers.js';
 
 const H = () => ({ 'X-BDS-Token': api.token });
 async function call(method, url, body, { raw = false } = {}) {
@@ -130,7 +131,7 @@ export class MailEditor extends BaseEditor {
     this.root.append(h('div', { class: 'mail-hero' },
       h('div', { class: 'klep-title' }, h('span', { class: 'g mail-g' }, this.app.toolLabel('BoxMail')), h('span', { class: 'klep-cursor' })),
       h('div', { class: 'klep-sub mono' }, '> your gmail, with the dumps one click away'),
-      h('div', { class: 'mail-hero-text' }, 'Read your inbox split into Primary, Updates, Promotions and more, and write emails with attachments straight from the media dump, the doc dump or any open document. Claude can draft, polish and summarize.'),
+      h('div', { class: 'mail-hero-text' }, 'Read your inbox split into Primary, Updates, Promotions and more, and write emails with attachments straight from the media dump, the doc dump or any open document. The AI assistant can draft, polish and summarize.'),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: async () => { const list = await addMailAccountDialog(); if (list) { this.accounts = list; this.acct = list[list.length - 1].id; this.render(); } } }, icon('plus', 'sm'), 'Add a Gmail account'),
         h('button', { class: 'btn', onclick: () => this.openEmlFile() }, icon('file', 'sm'), 'Open an .eml file…')),
@@ -341,12 +342,16 @@ export class MailEditor extends BaseEditor {
     window.open(url, '_blank', 'noopener');
   }
 
-  // ================================================================ Claude (reading)
+  // ================================================================ the AI assistant (reading)
+
+  /** The name of the AI picked in the assistant (Claude, ChatGPT, …). */
+  get aiName() { return aiChoice(this.app.settings).name; }
 
   async ensureClaude() {
+    const ai = aiChoice(this.app.settings);
     const s = await fetch('/api/ai/status', { headers: H() }).then((r) => r.json()).catch(() => ({}));
-    if (s.configured) return true;
-    toast('Add your Anthropic API key first (Settings → Ask Claude).', { type: 'warn', action: { label: 'Settings', fn: () => this.app.showPanel('settings') } });
+    if (s.providers?.[ai.provider]?.configured) return true;
+    toast(`Add your ${ai.company} API key first (Settings → AI assistant).`, { type: 'warn', action: { label: 'Settings', fn: () => this.app.showPanel('settings') } });
     return false;
   }
 
@@ -365,7 +370,7 @@ export class MailEditor extends BaseEditor {
     }[kind];
     const box = this.aiBox;
     box.hidden = false;
-    clear(box).append(h('div', { class: 'mail-ai-head' }, '✦ Claude', h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => { box.hidden = true; } }, icon('x', 'sm'))));
+    clear(box).append(h('div', { class: 'mail-ai-head' }, '✦ ' + this.aiName, h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => { box.hidden = true; } }, icon('x', 'sm'))));
     const out = h('div', { class: 'mail-ai-text' }, '…');
     box.append(out);
     try {
@@ -375,7 +380,7 @@ export class MailEditor extends BaseEditor {
 
   async aiReply(msg) {
     if (!(await this.ensureClaude())) return;
-    const idea = await promptDialog('Draft a reply with Claude', 'What do you want to say? (leave blank to let Claude suggest a reply)', '', { placeholder: 'e.g. yes I can do Thursday, ask if 3pm works' });
+    const idea = await promptDialog(`Draft a reply with ${this.aiName}`, `What do you want to say? (leave blank to let ${this.aiName} suggest a reply)`, '', { placeholder: 'e.g. yes I can do Thursday, ask if 3pm works' });
     if (idea === null) return;
     const c = this.compose({ replyTo: msg });
     c.runClaude('reply', idea);
@@ -499,8 +504,8 @@ export class MailEditor extends BaseEditor {
       for (const f of e.dataTransfer.files) addAtt({ name: f.name, size: f.size, load: async () => new Uint8Array(await f.arrayBuffer()) });
     });
 
-    // ---- Claude
-    const aiInput = h('input', { type: 'text', class: 'mail-ai-input', placeholder: '✦ Tell Claude what to write — e.g. “ask Sam to resend the signed lease by Friday”' });
+    // ---- the AI assistant
+    const aiInput = h('input', { type: 'text', class: 'mail-ai-input', placeholder: `✦ Tell ${this.aiName} what to write — e.g. “ask Sam to resend the signed lease by Friday”` });
     const aiStatus = h('span', { class: 'faint mono mail-ai-status' });
     let aiCtl = null;
     const runClaude = async (kind, idea = '') => {
@@ -517,11 +522,11 @@ export class MailEditor extends BaseEditor {
         formal: `Make this draft more professional and formal, same meaning.\n<draft>\n${draft}\n</draft>`,
         grammar: `Fix spelling, grammar and punctuation only. Keep my wording otherwise.\n<draft>\n${draft}\n</draft>`,
       };
-      if (kind !== 'draft' && kind !== 'reply' && !draft) return toast('Write something first (or tell Claude what to write).', { type: 'warn' });
+      if (kind !== 'draft' && kind !== 'reply' && !draft) return toast(`Write something first (or tell ${this.aiName} what to write).`, { type: 'warn' });
       const before = body.innerHTML;
       aiCtl?.abort();
       aiCtl = new AbortController();
-      aiStatus.textContent = 'Claude is writing…';
+      aiStatus.textContent = `${this.aiName} is writing…`;
       body.classList.add('ai-writing');
       try {
         await streamClaude({
@@ -534,15 +539,15 @@ export class MailEditor extends BaseEditor {
             body.innerHTML = textToHtml(text);
           },
         });
-        aiStatus.textContent = 'Done — edit anything before sending. Ctrl+Z won’t undo this; use “Undo Claude”.';
+        aiStatus.textContent = 'Done — edit anything before sending. Ctrl+Z won’t undo this; use “Undo”.';
         undoBtn.hidden = false;
         undoBtn.onclick = () => { body.innerHTML = before; undoBtn.hidden = true; aiStatus.textContent = ''; };
       } catch (e) {
-        if (e.name !== 'AbortError') { aiStatus.textContent = ''; errorToast(e, 'Claude'); body.innerHTML = before; }
+        if (e.name !== 'AbortError') { aiStatus.textContent = ''; errorToast(e, this.aiName); body.innerHTML = before; }
       } finally { body.classList.remove('ai-writing'); }
     };
     aiInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && aiInput.value.trim()) { runClaude(replyTo ? 'reply' : 'draft', aiInput.value.trim()); aiInput.value = ''; } });
-    const undoBtn = h('button', { class: 'btn sm ghost', hidden: true }, 'Undo Claude');
+    const undoBtn = h('button', { class: 'btn sm ghost', hidden: true }, 'Undo');
 
     const fmt = (cmd, val) => { body.focus(); document.execCommand(cmd, false, val); };
     const send = async (btn) => {

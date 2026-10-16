@@ -2,6 +2,7 @@
 
 import { BaseEditor } from './base.js';
 import { h, clear, clamp, vendor, stripExt, extOf, blobToDataURL } from '../core/dom.js';
+import { PAINT_EXT } from '../core/filetypes.js';
 import { icon } from '../core/icons.js';
 import { tbButton, tbSep, tbSelect, showMenu, modal, toast, errorToast } from '../core/ui.js';
 import { api } from '../core/api.js';
@@ -60,7 +61,7 @@ export class ImageEditor extends BaseEditor {
     }
     this.canvas.style.width = W * this.scale + 'px';
     this.canvas.style.height = H * this.scale + 'px';
-    this.info.textContent = `${W} × ${H}px  ·  ${Math.round(this.scale * 100)}%${this.animated ? '  ·  animated GIF: edits keep the first frame (Frames opens it in Paint)' : ''}`;
+    this.info.textContent = `${W} × ${H}px  ·  ${Math.round(this.scale * 100)}%${this.animated ? '  ·  animated GIF: edits keep the first frame (Frames opens every frame in BoxPaint)' : ''}`;
     if (!this.cropBox.hidden) this.drawCrop();
     this.refreshStatus();
   }
@@ -247,7 +248,11 @@ export class ImageEditor extends BaseEditor {
       tbSep(),
       (this.fmtSel = formatSelect(this)),
       tbButton('settings', 'Image settings — file type, quality, hidden info', () => this.openSettings()),
-      this.animated && this.tab.path ? tbButton('pages', 'Edit every frame in Paint', () => this.app.reopenAs(this.tab, 'paint'), { text: 'Frames' }) : null,
+      tbSep(),
+      // the full editor: layers, brushes, text, selections (and every frame of an animated GIF)
+      this.tab.path && PAINT_EXT.includes(extOf(this.tab.path))
+        ? tbButton('brush', this.animated ? 'Edit every frame in the image editor (BoxPaint)' : 'Open in the image editor (BoxPaint): layers, brushes, text', () => this.app.reopenAs(this.tab, 'paint'), { text: this.animated ? 'Frames' : 'Edit in BoxPaint' })
+        : null,
       tbSep(),
       tbButton('image', 'Send to media dump', () => this.toDump(), { text: 'To dump' }),
       this.tab.path && this.app.backgroundMenu([this.tab.path]).length

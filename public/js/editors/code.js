@@ -165,7 +165,51 @@ function defineThemes(monaco) {
       'editorOverviewRuler.border': '#00000000',
     },
   };
-  monaco.editor.defineTheme('bds-dark', darkDef);
+  // Neon dusk (the default) has its own colours: sunset keywords, gold strings, cyan numbers on blue-hour navy.
+  // The purple set above stays the base the other dark themes build on.
+  const duskDef = {
+    base: 'vs-dark', inherit: true,
+    rules: [
+      ...shared,
+      { token: 'comment', foreground: '5f6883', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'ff9e6b' },
+      { token: 'keyword.json', foreground: 'ff9e6b' },
+      { token: 'string', foreground: 'f2c47e' },
+      { token: 'string.key.json', foreground: 'ffb184' },
+      { token: 'string.value.json', foreground: 'f2c47e' },
+      { token: 'number', foreground: '4fd8eb' },
+      { token: 'regexp', foreground: '4fd8eb' },
+      { token: 'type', foreground: '8fb4ff' },
+      { token: 'type.identifier', foreground: '8fb4ff' },
+      { token: 'tag', foreground: 'ff9e6b' },
+      { token: 'metatag', foreground: 'a7aec4' },
+      { token: 'attribute.name', foreground: '4fd8eb' },
+      { token: 'attribute.value', foreground: 'f2c47e' },
+      { token: 'delimiter', foreground: '8c93a8' },
+      { token: 'key', foreground: 'ffb184' },
+      { token: 'variable', foreground: 'eceef5' },
+      { token: 'variable.predefined', foreground: 'e36bd0' },
+      { token: 'constant', foreground: '4fd8eb' },
+    ],
+    colors: {
+      ...darkDef.colors,
+      'editor.background': '#0c0f17', 'editorGutter.background': '#0c0f17', 'minimap.background': '#0c0f17',
+      'editor.foreground': '#eceef5',
+      'editorLineNumber.foreground': '#343b52', 'editorLineNumber.activeForeground': '#ff9663',
+      'editorCursor.foreground': '#4fd8eb',
+      'editor.selectionBackground': '#ff966333', 'editor.inactiveSelectionBackground': '#ff96631c', 'editor.selectionHighlightBackground': '#ff966318',
+      'editor.findMatchBackground': '#4fd8eb44', 'editor.findMatchHighlightBackground': '#ff966330',
+      'editorIndentGuide.activeBackground1': '#ff96633d',
+      'editorBracketMatch.background': '#ff966320', 'editorBracketMatch.border': '#ff966366',
+      'editorWidget.background': '#181d2c', 'editorWidget.border': '#2b3248',
+      'editorSuggestWidget.background': '#181d2c', 'editorSuggestWidget.selectedBackground': '#ff96632b',
+      'editorHoverWidget.background': '#181d2c',
+      'input.background': '#121622', 'input.border': '#2b3248',
+      'focusBorder': '#ff966388',
+      'scrollbarSlider.background': '#262d4288', 'scrollbarSlider.hoverBackground': '#353e5aaa',
+    },
+  };
+  monaco.editor.defineTheme('bds-dark', duskDef);
   themeDefs = { dark: darkDef };
   // PB&J: the dark syntax colours on a plum background
   monaco.editor.defineTheme('bds-pbj', {
@@ -846,24 +890,28 @@ export function formatXml(xml) {
 
 export function markdownCss(theme = 'dark') {
   const dark = theme !== 'light';
+  // neon dusk (the default) gets its own navy & sunset; the other dark themes keep the purple set
+  const P = theme === 'dark'
+    ? { bg: '#0d1019', text: '#eceef5', rule: '#232a3d', a: '#ffb184', code: '#181d2c', pre: '#090b12', quote: '#a7aec4', bar: '#ff9663', cell: '#2b3248', th: '#181d2c' }
+    : { bg: '#100d16', text: '#e7e1f3', rule: '#2a2238', a: '#c7a6ff', code: '#1e1929', pre: '#0b0910', quote: '#b0a6c4', bar: '#b48cff', cell: '#352c49', th: '#1c1726' };
   return `
   :root { color-scheme: ${dark ? 'dark' : 'light'}; }
-  html, body { margin: 0; background: ${dark ? '#100d16' : '#ffffff'}; }
-  .md { max-width: 820px; margin: 0 auto; padding: 32px 36px 60px; font: 15px/1.7 Inter, 'Segoe UI', system-ui, sans-serif; color: ${dark ? '#e7e1f3' : '#221c2e'}; }
+  html, body { margin: 0; background: ${dark ? P.bg : '#ffffff'}; }
+  .md { max-width: 820px; margin: 0 auto; padding: 32px 36px 60px; font: 15px/1.7 Inter, 'Segoe UI', system-ui, sans-serif; color: ${dark ? P.text : '#221c2e'}; }
   .md h1, .md h2, .md h3, .md h4 { line-height: 1.25; margin: 1.6em 0 0.6em; font-weight: 600; }
-  .md h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid ${dark ? '#2a2238' : '#e7e1f0'}; }
-  .md h2 { font-size: 1.45em; padding-bottom: .25em; border-bottom: 1px solid ${dark ? '#2a2238' : '#eee8f5'}; }
+  .md h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid ${dark ? P.rule : '#e7e1f0'}; }
+  .md h2 { font-size: 1.45em; padding-bottom: .25em; border-bottom: 1px solid ${dark ? P.rule : '#eee8f5'}; }
   .md h1:first-child, .md h2:first-child { margin-top: 0; }
-  .md a { color: ${dark ? '#c7a6ff' : '#6a3fc6'}; }
-  .md code { font: 0.88em 'IBM Plex Mono', Consolas, monospace; background: ${dark ? '#1e1929' : '#f3eff9'}; padding: .15em .4em; border-radius: 4px; }
-  .md pre { background: ${dark ? '#0b0910' : '#f6f3fa'}; border: 1px solid ${dark ? '#2a2238' : '#e7e1f0'}; padding: 14px 16px; border-radius: 8px; overflow: auto; }
+  .md a { color: ${dark ? P.a : '#6a3fc6'}; }
+  .md code { font: 0.88em 'IBM Plex Mono', Consolas, monospace; background: ${dark ? P.code : '#f3eff9'}; padding: .15em .4em; border-radius: 4px; }
+  .md pre { background: ${dark ? P.pre : '#f6f3fa'}; border: 1px solid ${dark ? P.rule : '#e7e1f0'}; padding: 14px 16px; border-radius: 8px; overflow: auto; }
   .md pre code { background: none; padding: 0; }
-  .md blockquote { margin: 1em 0; padding: .2em 1em; color: ${dark ? '#b0a6c4' : '#5a5070'}; border-left: 3px solid ${dark ? '#b48cff' : '#7a4fd6'}; }
+  .md blockquote { margin: 1em 0; padding: .2em 1em; color: ${dark ? P.quote : '#5a5070'}; border-left: 3px solid ${dark ? P.bar : '#7a4fd6'}; }
   .md table { border-collapse: collapse; margin: 1em 0; }
-  .md th, .md td { border: 1px solid ${dark ? '#352c49' : '#ddd5ea'}; padding: 6px 12px; }
-  .md th { background: ${dark ? '#1c1726' : '#f6f3fa'}; }
+  .md th, .md td { border: 1px solid ${dark ? P.cell : '#ddd5ea'}; padding: 6px 12px; }
+  .md th { background: ${dark ? P.th : '#f6f3fa'}; }
   .md img { max-width: 100%; }
-  .md hr { border: 0; height: 1px; background: ${dark ? '#352c49' : '#e2dcec'}; margin: 2em 0; }
+  .md hr { border: 0; height: 1px; background: ${dark ? P.cell : '#e2dcec'}; margin: 2em 0; }
   .md li input[type=checkbox] { margin-right: .5em; }
   .md ul:has(> li > input[type=checkbox]) { list-style: none; padding-left: 1.2em; }
   @media print { html, body { background: #fff; } .md { color: #000; padding: 0; } }

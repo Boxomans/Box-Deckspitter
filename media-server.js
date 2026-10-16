@@ -328,6 +328,18 @@ module.exports = function createMedia({
     });
   }
 
+  /** A downloaded .ts stream → .mp4 next to it (same video and sound, just a different container). */
+  async function remuxToMp4(job) {
+    const src = job.path;
+    const out = await uniquePath(path.dirname(src), path.basename(src).replace(/\.ts$/i, '.mp4'));
+    const code = await new Promise((resolve) => {
+      const child = spawn(tools().ffmpeg, ['-hide_banner', '-v', 'error', '-y', '-i', src, '-c', 'copy', '-movflags', '+faststart', out], { windowsHide: true, stdio: 'ignore' });
+      child.on('close', resolve);
+      child.on('error', () => resolve(1));
+    });
+    if (code === 0) { await fsp.rm(src, { force: true }).catch(() => {}); job.path = out; } else await fsp.rm(out, { force: true }).catch(() => {});
+  }
+
   /** A direct video/audio file or an HLS stream → MP3 with ffmpeg. */
   function ffmpegToMp3(url, dest, referer, onProgress, onChild) {
     return new Promise((resolve, reject) => {
@@ -498,7 +510,7 @@ module.exports = function createMedia({
   const routes = {
     'GET /api/tools': async () => {
       const t = tools();
-      return { ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: klepFolder(), canInstall: IS_WIN };
+      return { ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: klepFolder(), mediaDump: dumpAbs('media', ''), canInstall: IS_WIN };
     },
 
     // installs whichever of yt-dlp / ffmpeg is missing with winget (Windows' own package manager), one after the other.
@@ -600,9 +612,10 @@ module.exports = function createMedia({
     },
 
     'POST /api/klep/download': async (req) => {
-      const { url, type, selector, dir, name, referer } = await readJSONBody(req);
+      const { url, type, selector, dir, name, referer, dump } = await readJSONBody(req);
       checkUrl(url);
-      const target = requirePath(dir || klepFolder());
+      // dump: into the media dump instead of the chosen folder
+      const target = dump ? dumpAbs('media', '') : requirePath(dir || klepFolder());
       await fsp.mkdir(target, { recursive: true });
       const job = newJob(name || url);
       if (type === 'ytdlp') return startJob(job, () => downloadYtdlp(job, url, target, selector));
@@ -613,7 +626,11 @@ module.exports = function createMedia({
       else if (!path.extname(fname)) fname += '.mp4';
       const dest = await uniquePath(target, fname);
       job.path = dest;
-      return startJob(job, () => (type === 'hls' ? downloadHls(job, url, dest, referer) : downloadDirect(job, url, dest, referer)));
+      return startJob(job, async () => {
+        await (type === 'hls' ? downloadHls(job, url, dest, referer) : downloadDirect(job, url, dest, referer));
+        // the media dump doesn't list .ts: rewrap a stream as MP4 there (no re-encoding) when ffmpeg is around
+        if (dump && /\.ts$/i.test(job.path || '') && tools().ffmpeg) await remuxToMp4(job);
+      });
     },
 
     'GET /api/job': async (req, q) => {

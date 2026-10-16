@@ -279,8 +279,8 @@ export class ImageDump {
     return [
       { label: 'Insert at cursor', icon: 'image-plus', action: () => this.insert(it) },
       { label: 'Copy image', icon: 'copy', action: () => this.copy(it) },
-      { label: 'Open in image editor', icon: 'image', action: () => this.openInEditor(it) },
-      { label: 'Edit in BoxPaint', icon: 'brush', action: async () => this.app.openBytes(it.name, new Uint8Array(await (await fetch(it.url)).arrayBuffer()), { mode: 'paint' }) },
+      { label: 'Open in the image viewer', icon: 'image', action: () => this.openInEditor(it) },
+      { label: 'Open in the image editor', icon: 'brush', action: async () => this.app.openBytes(it.name, new Uint8Array(await (await fetch(it.url)).arrayBuffer()), { mode: 'paint' }) },
       { label: 'Read text (BoxScribe)', icon: 'scan-text', action: async () => { const { scribeBytes } = await import('../scribe.js'); scribeBytes(this.app, it.name, new Uint8Array(await (await fetch(it.url)).arrayBuffer())); } },
       { sep: true },
       ...common,

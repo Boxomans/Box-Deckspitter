@@ -5,7 +5,7 @@ import { $, $$, h, clear, basename, dirname, extOf, formatBytes, formatDate, joi
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { contextMenu, confirmDialog, promptDialog, toast, errorToast, hoverKeys, rubberSelect } from '../core/ui.js';
-import { MODE_ICON, MODE_LABEL, iconForName } from '../core/filetypes.js';
+import { MODE_ICON, MODE_LABEL, iconForName, detectMode, PAINT_EXT } from '../core/filetypes.js';
 import { TOOL_OF_MODE } from '../core/tools.js';
 
 // files the video editor can use
@@ -91,7 +91,7 @@ export class ExplorerPart {
     }
     return [
       { label: 'Open', icon: 'file', action: () => this.openPath(e.path) },
-      { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['paint', 'Paint (layers, GIF frames)'], ['video', 'Video trimmer'], ['hex', 'Hex viewer']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.openPath(e.path, { mode: m }) })) },
+      { label: 'Open with', icon: 'layers', submenu: [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['paint', 'Image editor (BoxPaint)'], ['player', 'Video player'], ['video', 'Video trimmer'], ['hex', 'Hex viewer']].map(([m, l]) => ({ label: l, icon: MODE_ICON[m], action: () => this.openPath(e.path, { mode: m }) })) },
       ...this.videoEditorMenu([e.path]),
       ...this.backgroundMenu([e.path]),
       { sep: true },
@@ -103,12 +103,26 @@ export class ExplorerPart {
     ];
   }
 
-  /** "Add to the video editor" for menus of files: only when there's a video, sound or picture among them. */
+  /**
+   * For menus of files with a video, sound or picture among them: "Add to the video editor", and for one video
+   * or sound, the trimmer or player too (whichever "Open" doesn't already go to); for one picture, the image
+   * editor (BoxPaint) or the image viewer, the same way.
+   */
   videoEditorMenu(paths) {
     const media = paths.filter((p) => MEDIA_FILE_RE.test(p));
     if (!media.length) return [];
     const label = `Add ${media.length > 1 ? `${media.length} files ` : ''}to the ${this.toolName('Video editor').toLowerCase() === 'video editor' ? 'video editor' : this.toolName('Video editor')}`;
-    return [{ label, icon: 'video', action: () => this.sendToVideoEditor(media) }];
+    const one = paths.length === 1 && detectMode(paths[0]).mode === 'video' ? paths[0] : null;
+    const trimFirst = this.settings.videoOpen === 'trim';
+    const pic = paths.length === 1 && PAINT_EXT.includes(extOf(paths[0])) ? paths[0] : null;
+    const paintFirst = pic && (detectMode(pic).mode === 'paint' || this.settings.imageOpen === 'paint');
+    return [
+      ...(pic && !paintFirst ? [{ label: 'Open in the image editor', icon: 'brush', action: () => this.openPath(pic, { mode: 'paint' }) }] : []),
+      ...(pic && paintFirst ? [{ label: 'Open in the image viewer', icon: 'image', action: () => this.openPath(pic, { mode: 'image' }) }] : []),
+      ...(one && !trimFirst ? [{ label: 'Open in the video trimmer', icon: 'crop', action: () => this.openPath(one, { mode: 'video' }) }] : []),
+      ...(one && trimFirst ? [{ label: 'Play in the video player', icon: 'play', action: () => this.openPath(one, { mode: 'player' }) }] : []),
+      { label, icon: 'video', action: () => this.sendToVideoEditor(media) },
+    ];
   }
 
   /** Into the media list of the open video editor (the one showing, else the last one used), or a new one. */

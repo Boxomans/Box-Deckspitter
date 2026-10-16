@@ -89,7 +89,7 @@ export class MenusPart {
     return [
       { label: 'New', icon: 'file-plus', submenu: () => this.newMenuItems() },
       { label: 'Open…', icon: 'folder-open', shortcut: 'Ctrl+O', action: () => this.openDialog() },
-      { label: 'Open recent', icon: 'clock', submenu: () => this.recentSubmenu() },
+      this.settings.showRecent === false ? null : { label: 'Open recent', icon: 'clock', submenu: () => this.recentSubmenu() },
       { sep: true },
       { label: 'Save', icon: 'save', shortcut: 'Ctrl+S', disabled: !ed || !t.editor.saveFormats().length, action: () => this.save(t) },
       { label: 'Save as…', shortcut: 'Ctrl+Shift+S', disabled: !ed || !t.editor.saveFormats().length, action: () => this.saveAs(t) },
@@ -205,7 +205,7 @@ export class MenusPart {
   }
 
   reopenAsItems(t) {
-    const modes = [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['paint', 'Paint (layers, GIF frames)'], ['video', 'Video trimmer'], ['hex', 'Binary (hex) viewer']];
+    const modes = [['doc', 'Document editor'], ['text', 'Text editor'], ['code', 'Code editor'], ['pdf', 'PDF editor'], ['form', 'Form filler'], ['sheet', 'Spreadsheet'], ['image', 'Image viewer'], ['paint', 'Image editor (BoxPaint)'], ['player', 'Video player'], ['video', 'Video trimmer'], ['hex', 'Binary (hex) viewer']];
     return modes.map(([m, label]) => ({ label, icon: MODE_ICON[m], checked: t.mode === m, action: () => this.reopenAs(t, m) }));
   }
 

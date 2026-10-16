@@ -18,6 +18,7 @@ const LINES = {
   hex: { plain: ['Viewing a binary file'], silly: ['staring at raw bytes', 'reading hex like the matrix', 'poking at a binary'] },
   mail: { plain: ['Doing email'], silly: ['doing email', 'inbox zero speedrun', 'replying "per my last email"', 'attaching the wrong file', 'sorting promotions into oblivion'] },
   cut: { plain: ['Editing a video'], silly: ['editing a video', 'cutting a montage', 'keyframing things', 'chroma keying something'] },
+  player: { plain: ['Watching a video'], silly: ['watching a video', 'rewatching the good part', 'pausing on a funny frame'] },
   video: { plain: ['Trimming a video'], silly: ['trimming a video', 'cutting a clip', 'making a gif', 'finding the perfect frame'] },
   form: { plain: ['Filling out a form'], silly: ['filling out a form', 'doing paperwork', 'fighting a government pdf', 'checking boxes'] },
   klep: { plain: ['Grabbing a video'], silly: ['klepping a video', 'grepping videos off a page', 'saving a clip for later'] },
@@ -56,7 +57,7 @@ function category(tab) {
   return LINES[tab.mode] ? tab.mode : 'doc';
 }
 
-const KIND = { secure: 'file', mail: 'email', video: 'video', form: 'form', klep: 'video', storage: 'drive', doc: 'document', pdf: 'pdf', text: 'text file', config: 'config', html: 'webpage', markdown: 'markdown note', code: 'code file', sheet: 'spreadsheet', image: 'image', hex: 'binary file', home: 'nothing yet' };
+const KIND = { secure: 'file', mail: 'email', video: 'video', player: 'video', form: 'form', klep: 'video', storage: 'drive', doc: 'document', pdf: 'pdf', text: 'text file', config: 'config', html: 'webpage', markdown: 'markdown note', code: 'code file', sheet: 'spreadsheet', image: 'image', hex: 'binary file', home: 'nothing yet' };
 
 /** Fill {ext} {kind} {tabs} — the only things custom lines can reveal. */
 function fill(text, tab, cat, tabCount) {

@@ -267,9 +267,10 @@ export class VideoEditor extends BaseEditor {
     this.strip.height = hgt * dpr;
     const ctx = this.strip.getContext('2d');
     ctx.scale(dpr, dpr);
-    ctx.fillStyle = '#16121f';
+    const css = getComputedStyle(document.documentElement);
+    ctx.fillStyle = css.getPropertyValue('--bg-2').trim() || '#16121f';
     ctx.fillRect(0, 0, w, hgt);
-    ctx.fillStyle = '#b48cff';
+    ctx.fillStyle = css.getPropertyValue('--accent').trim() || '#b48cff';
     for (let x = 0; x < w; x++) {
       const p = this.peaks[Math.floor((x / w) * this.peaks.length)] || 0;
       const bh = Math.max(1, p * (hgt - 6));
@@ -462,6 +463,7 @@ export class VideoEditor extends BaseEditor {
       tbButton('download', 'Export the selected clip', () => this.exportClip(), { text: 'Export clip' }),
       tbSep(),
       tbButton('external', 'Show in folder', () => this.tab.path && api.reveal(this.tab.path)),
+      this.tab.path ? tbButton('play', 'Watch this in the video player', () => this.app.openPath(this.tab.path, { mode: 'player' }), { text: 'Play' }) : null,
       this.tab.path ? tbButton('video', 'Open this in the video editor (tracks, keyframes, chroma key)', () => this.app.newDocument('cut', { media: [this.tab.path] }), { text: 'Open in video editor' }) : null,
       h('span', { class: 'tb-label' }, this.isAudio ? 'audio trimmer' : 'video trimmer'));
   }

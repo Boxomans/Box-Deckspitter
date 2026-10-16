@@ -39,7 +39,10 @@ export class KlepEditor extends BaseEditor {
     const syncPl = () => { this.playlistSeg.hidden = !/[?&]list=/.test(this.input.value); };
     this.input.addEventListener('input', syncPl);
     this.input.addEventListener('change', syncPl);
-    this.dirChip = h('button', { class: 'chip', title: 'Change download folder', onclick: () => this.changeDir() }, icon('folder', 'sm'), h('span', {}, this.dir || 'Downloads'));
+    // where downloads go: the chosen folder or the media dump (click the folder when it's already on to change it)
+    this.toDump = this.app.settings.klepTarget === 'dump';
+    this.dirChip = h('button', { class: 'chip', onclick: () => (this.toDump ? this.setTarget(false) : this.changeDir()) }, icon('folder', 'sm'), h('span', {}, this.dir || 'Downloads'));
+    this.dumpChip = h('button', { class: 'chip', title: 'Save downloads into the media dump', onclick: () => this.setTarget(true) }, icon('image', 'sm'), h('span', {}, 'Media dump'));
     this.toolsEl = h('div', { class: 'klep-tools' });
     this.history = h('div', { class: 'klep-history' });
     this.results = h('div', { class: 'klep-results' });
@@ -48,8 +51,8 @@ export class KlepEditor extends BaseEditor {
       h('div', { class: 'klep-title' }, h('span', { class: 'g' }, this.app.toolLabel('BoxKlep')), h('span', { class: 'klep-cursor' })),
       h('div', { class: 'klep-sub mono' }, '> paste a link · it greps the videos out · you pick what to keep'),
       h('div', { class: 'klep-bar' }, this.input, this.playlistSeg, this.modeSel, this.goBtn),
-      h('div', { class: 'klep-meta' }, h('span', { class: 'faint mono' }, 'save to'), this.dirChip,
-        h('button', { class: 'icon-btn', 'data-tip': 'Open download folder', onclick: () => this.dir && api.reveal(this.dir + '\\.') }, icon('external', 'sm')),
+      h('div', { class: 'klep-meta' }, h('span', { class: 'faint mono' }, 'save to'), this.dirChip, this.dumpChip,
+        h('button', { class: 'icon-btn', 'data-tip': 'Open where downloads go', onclick: () => { const d = this.toDump ? this.tools.mediaDump : this.dir; if (d) api.reveal(d + '\\.'); } }, icon('external', 'sm')),
         h('div', { class: 'grow' }), this.toolsEl),
       this.history);
     this.root = h('div', { class: 'klep-root' }, h('div', { class: 'klep-inner' }, hero, this.results, this.downloads,
@@ -57,6 +60,16 @@ export class KlepEditor extends BaseEditor {
     this.pane.append(this.root);
     this.renderTools();
     this.renderHistory();
+    this.setTarget(this.toDump, { quiet: true });
+  }
+
+  /** Downloads into the media dump (true) or the chosen folder (false). */
+  setTarget(dump, { quiet = false } = {}) {
+    this.toDump = !!dump;
+    this.dirChip.classList.toggle('on', !this.toDump);
+    this.dumpChip.classList.toggle('on', this.toDump);
+    this.dirChip.title = this.toDump ? 'Save downloads into this folder' : 'Change download folder';
+    if (!quiet) { this.app.saveSettings({ klepTarget: this.toDump ? 'dump' : 'folder' }); this.refreshStatus(); }
   }
 
   renderTools() {
@@ -257,7 +270,7 @@ export class KlepEditor extends BaseEditor {
     const row = this.addJobRow(name || it.title);
     try {
       const { id } = await post('/api/klep/download', {
-        url: it.url, type: it.type, selector: opt?.selector, dir: this.dir, name: it.type === 'ytdlp' ? undefined : name, referer: it.referer || this.lastPage?.page,
+        url: it.url, type: it.type, selector: opt?.selector, dir: this.dir, dump: this.toDump, name: it.type === 'ytdlp' ? undefined : name, referer: it.referer || this.lastPage?.page,
       });
       row.id = id;
       for (;;) {
@@ -266,7 +279,7 @@ export class KlepEditor extends BaseEditor {
         row.update(j);
         if (j.status !== 'running') {
           if (j.status === 'done') {
-            toast(`Downloaded ${basename(j.path)}`, { type: 'ok', action: { label: 'Trim', fn: () => this.app.openPath(j.path, { mode: 'video' }) } });
+            toast(`Downloaded ${basename(j.path)}${this.toDump ? ' into the media dump' : ''}`, { type: 'ok', action: { label: 'Trim', fn: () => this.app.openPath(j.path, { mode: 'video' }) } });
             if (trim) this.app.openPath(j.path, { mode: 'video' });
           } else if (j.status === 'error') errorToast(new Error(j.error), 'Download failed');
           break;
@@ -326,7 +339,7 @@ export class KlepEditor extends BaseEditor {
     return row;
   }
 
-  status() { return { left: [{ text: this.app.toolName('BoxKlep'), icon: 'magnet' }, { text: this.dir || '' }], right: [{ text: this.tools?.ytdlp ? 'yt-dlp ready' : 'direct links only' }] }; }
+  status() { return { left: [{ text: this.app.toolName('BoxKlep'), icon: 'magnet' }, { text: this.toDump ? 'media dump' : this.dir || '' }], right: [{ text: this.tools?.ytdlp ? 'yt-dlp ready' : 'direct links only' }] }; }
   saveFormats() { return []; }
   focus() { this.input?.focus(); }
   insertText(t) { this.input.focus(); document.execCommand('insertText', false, t); return true; }

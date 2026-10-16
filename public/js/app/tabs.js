@@ -28,9 +28,22 @@ export class TabsPart {
       // the strip has no scrollbar: the mouse wheel (or a trackpad's sideways swipe) scrolls it when tabs overflow
       host._wheel = true;
       host.addEventListener('wheel', (e) => {
-        if (e.ctrlKey || host.scrollWidth <= host.clientWidth) return;
+        if (e.ctrlKey) return;
         const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         if (!d) return;
+        // Shift+wheel over a cut-off tab name scrolls the name itself (back to the start when the mouse leaves)
+        const title = e.shiftKey && e.target.closest?.('.tab-title');
+        if (title && title.scrollWidth > title.clientWidth) {
+          e.preventDefault();
+          title.scrollLeft += e.deltaMode === 1 ? d * 20 : d / 2;
+          title.classList.toggle('scrolled', title.scrollLeft > 0);
+          if (!title._reset) {
+            title._reset = true;
+            title.closest('.tab').addEventListener('pointerleave', () => { title._reset = false; title.scrollLeft = 0; title.classList.remove('scrolled'); }, { once: true });
+          }
+          return;
+        }
+        if (host.scrollWidth <= host.clientWidth) return;
         e.preventDefault();
         host.scrollLeft += e.deltaMode === 1 ? d * 40 : d;
       }, { passive: false });

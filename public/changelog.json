@@ -1,5 +1,24 @@
 [
   {
+    "version": "1.0.49",
+    "date": "2026-10-16",
+    "notes": [
+      "Video player: opening a video or sound file now plays it in a plain player. The controls hide while it plays, and PgUp/PgDn step through the rest of the folder. It has keyboard shortcuts, speed, loop, picture-in-picture and full screen, and saves frame snapshots to the media dump. Trim and Video editor buttons sit on top. To have files open in the video trimmer as before, change it in Settings › Files.",
+      "Right-click a video in the media dump, Files or BoxSpaces and pick Open in the video trimmer.",
+      "Pictures: the image viewer (quick crop, rotate, resize) has an Edit in BoxPaint button, and right-clicking a picture in the media dump, Files or BoxSpaces gives Open in the image editor. Settings › Files picks which one opens pictures.",
+      "BoxPaint: New image has a 2560×1440 size.",
+      "Ask Claude is now the AI assistant, and works with ChatGPT, Gemini, OpenRouter or Perplexity too. Add a key for any of them in Settings › AI assistant and pick which one to use at the top of the panel, along with its model. Perplexity answers list their sources. BoxMail drafts with whichever one is picked.",
+      "BoxKlep: next to the download folder, pick Media dump to save downloads straight into the media dump. Stream downloads are turned into MP4 there.",
+      "The default theme, neon dusk, has new colours: a blue-hour navy background with sunset coral, orchid and cyan. The code editor and Markdown preview match it, and tool titles and glows follow whichever theme is on.",
+      "Win+Shift+Q screenshots over a fullscreen game now let you drag an area or click a window too, instead of saving the whole screen. The game goes back in front afterwards.",
+      "Win+Shift+Q screenshots: if one doesn't work, a notice now says why instead of nothing happening, and a screenshot that gets stuck no longer leaves the key dead until a restart.",
+      "Win+Shift+Q screenshots of a screen with Windows HDR on come out with the right colours, instead of washed out with blown-out highlights.",
+      "Shift+drag works again to carry files out of the media and doc dumps, Files and BoxSpaces (a plain drag still selects several).",
+      "Shift+scroll over a tab whose name is cut off scrolls the name, so you can read all of it.",
+      "Settings › Files: turn off Show recent files to hide them from the home page, the Recent panel, File › Open recent and quick open."
+    ]
+  },
+  {
     "version": "1.0.48",
     "date": "2026-10-16",
     "notes": [

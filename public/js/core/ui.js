@@ -640,6 +640,22 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
   let justDragged = false;
   const setPicked = (list) => { const s = new Set(list); for (const r of all()) r.classList.toggle('picked', s.has(r)); };
 
+  // Chromium starts no drag from a Shift+press (it means "extend the text selection") unless the press lands on a
+  // link or picture. So while Shift is held over a file, a see-through link lies over it for Shift+drag to grab.
+  let hoverRow = null;
+  const grip = h('a', { class: 'shift-grip', href: '#', draggable: 'false', tabindex: '-1', 'aria-hidden': 'true', onclick: (e) => e.preventDefault() });
+  const placeGrip = (shift) => {
+    if (shift && hoverRow?.isConnected && container.contains(hoverRow) && draggableItem(hoverRow._item)) { if (grip.parentNode !== hoverRow) hoverRow.append(grip); } else grip.remove();
+  };
+  container.addEventListener('pointermove', (e) => { hoverRow = e.target.closest?.(rows) || null; placeGrip(e.shiftKey); });
+  container.addEventListener('pointerleave', () => { hoverRow = null; placeGrip(false); });
+  const onShift = (e) => {
+    if (!container.isConnected) { removeEventListener('keydown', onShift, true); removeEventListener('keyup', onShift, true); return; }
+    if (e.key === 'Shift') placeGrip(e.type === 'keydown');
+  };
+  addEventListener('keydown', onShift, true);
+  addEventListener('keyup', onShift, true);
+
   container.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('input, textarea, select, [contenteditable]')) return;
     // Shift + drag on a file: carry it (and the other picked files) to another part of the app, e.g. the

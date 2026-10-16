@@ -344,9 +344,18 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   const snip = require('./snip.js')({
     dumpDir: path.join(ROOT, 'media-dump'),
     notify: (info) => { const w = mainWinId != null ? BrowserWindow.fromId(mainWinId) : null; if (w && !w.isDestroyed()) w.webContents.send('bds:snip-saved', info); },
-    log: (msg) => console.log(`[snip] ${msg}`),
+    // also kept in data\logs\snip.log (small, newest at the end), so a key that does nothing can be looked into
+    log: (msg) => {
+      console.log(`[snip] ${msg}`);
+      try {
+        const file = path.join(ROOT, 'data', 'logs', 'snip.log');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        if ((fs.statSync(file, { throwIfNoEntry: false })?.size || 0) > 200000) fs.renameSync(file, file + '.old');
+        fs.appendFileSync(file, `${new Date().toISOString()} ${msg}\n`);
+      } catch { /* logging never gets in the way */ }
+    },
   });
-  app.whenReady().then(() => { if (!snip.register()) console.log('[snip] Win+Shift+Q is taken by another program'); });
+  app.whenReady().then(() => snip.register());
 
   // Windows locked, the PC going to sleep: lock the notes (and tell the page, for the app's PIN lock)
   app.whenReady().then(() => {

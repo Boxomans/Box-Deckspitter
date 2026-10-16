@@ -7,7 +7,7 @@ import {
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { modal, confirmDialog, choiceDialog, toast, errorToast } from '../core/ui.js';
-import { detectMode, extForLang, OPEN_FILTERS, VIDEO_FILTERS } from '../core/filetypes.js';
+import { detectMode, extForLang, OPEN_FILTERS, VIDEO_FILTERS, PAINT_EXT } from '../core/filetypes.js';
 import { pickOpen, pickSave, setLastDir, getLastDir } from '../core/files.js';
 import { TOOLS, EDITORS, SINGLE_MODES } from '../core/tools.js';
 
@@ -56,10 +56,10 @@ export class DocumentsPart {
     tab.pane.append(h('div', { class: 'loading-pane' }, h('div', { class: 'spinner' }), `loading ${name}…`));
     try {
       // videos stream straight from disk instead of being loaded into memory
-      if (forcedMode === 'video' || (!forcedMode && detectMode(name).mode === 'video')) {
+      if (forcedMode === 'video' || forcedMode === 'player' || (!forcedMode && detectMode(name).mode === 'video')) {
         const st = await api.stat(path);
         tab.mtime = st.mtime;
-        tab.mode = 'video';
+        tab.mode = forcedMode || (this.settings.videoOpen === 'trim' ? 'video' : 'player');
         setLastDir(dirname(path));
         api.addRecent(path).catch(() => {});
         await this.mountEditor(tab, null, {});
@@ -69,6 +69,7 @@ export class DocumentsPart {
       tab.mtime = mtime;
       let det = forcedMode ? { mode: forcedMode } : detectMode(name, bytes);
       if (!forcedMode && extOf(name) === 'doc' && bytes[0] === 0x7b && String.fromCharCode(...bytes.subarray(0, 5)) === '{\\rtf') det = { mode: 'doc' };
+      if (!forcedMode && det.mode === 'image' && this.settings.imageOpen === 'paint' && PAINT_EXT.includes(extOf(name))) det = { mode: 'paint' };
       tab.mode = det.mode;
       tab.lang = det.lang;
       setLastDir(dirname(path));
@@ -205,6 +206,11 @@ export class DocumentsPart {
     const tab = await this.openPath(path);
     const ed = tab?.editor;
     if (ed?.gotoLine) setTimeout(() => ed.gotoLine(line, col), 60);
+  }
+
+  async openVideoPlayer() {
+    const paths = await pickOpen({ title: 'Open a video or audio file to play', filters: VIDEO_FILTERS });
+    if (paths) await this.openPath(paths[0], { mode: 'player' });
   }
 
   async openVideoTrimmer() {

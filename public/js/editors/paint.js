@@ -322,7 +322,7 @@ export class PaintEditor extends BaseEditor {
     type.addEventListener('change', sync);
     bg.addEventListener('change', sync);
     sync();
-    const presets = h('div', { class: 'row', style: { flexWrap: 'wrap' } }, [['1280×720', 1280, 720], ['1920×1080', 1920, 1080], ['1080×1080', 1080, 1080], ['800×600', 800, 600], ['Letter 2550×3300', 2550, 3300]].map(([l, a, b]) =>
+    const presets = h('div', { class: 'row', style: { flexWrap: 'wrap' } }, [['1280×720', 1280, 720], ['1920×1080', 1920, 1080], ['2560×1440', 2560, 1440], ['1080×1080', 1080, 1080], ['800×600', 800, 600], ['Letter 2550×3300', 2550, 3300]].map(([l, a, b]) =>
       h('button', { class: 'chip', onclick: () => { w.value = a; hh.value = b; } }, l)));
     const res = await modal({
       title: 'New image', dismissable: false,

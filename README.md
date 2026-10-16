@@ -11,7 +11,7 @@ form filler, a notepad, a code/config editor, spreadsheets, a layered image edit
 compare tool, a multi-track video editor and a quick trimmer, a video grabber, Gmail, a YouTube/Spotify-to-MP3
 tool with a music player, audio routing, a folder file-swapper, encrypted Secure notes for passwords, folder
 workspaces and a disk-space explorer. Everything is served from `127.0.0.1`. Your files stay on
-this machine. The only exceptions are the ones you switch on yourself (Ask Claude, Discord status, BoxMail,
+this machine. The only exceptions are the ones you switch on yourself (the AI assistant, Discord status, BoxMail,
 downloads, update checks).
 
 ## Start it
@@ -176,7 +176,7 @@ other users, WindowsApps) and counts the NTFS file table.
 Gmail's tabs (Primary, Updates, Promotions, Social, Forums), plus Starred, Sent, Drafts, All mail, Spam and
 Trash, and Gmail search works (`from:`, `has:attachment`, ...). Compose, reply and forward, with
 attachments in one click from the media dump, the doc dump, any open document or your disk. Drop files on
-the composer to attach them. **✦ Claude** drafts emails from a note, polishes or shortens them, fixes
+the composer to attach them. **✦ AI** drafts emails from a note, polishes or shortens them, fixes
 grammar, summarizes emails, lists action items and drafts replies. Nothing is sent until you press Send.
 Attachments you receive can go straight into the dumps. Setup: Settings → Email → **Add Gmail account**,
 with a Google *app password* from myaccount.google.com/apppasswords (needs 2-Step Verification). The password
@@ -260,10 +260,11 @@ copying one clears it from the clipboard after 20 seconds. Opening Secure notes 
 - **Ω chars**: every Alt code (Alt+1–255 and Alt+0128–0255) plus Unicode symbol sets: arrows, math,
   currency, Greek, box drawing, emoji and more. Searchable by name or code. **Click** adds the character
   to your document. **Right-click** copies it.
-- **✦ claude**: optional assistant. Paste your Anthropic API key once. It's saved to
-  `data/secrets.json` and never shown again. Then summarize, rewrite, fix grammar, translate or explain
-  code, using your selection or the whole file. Text goes to Anthropic only when you press a button.
-  Default model: Claude Opus 5.5.
+- **✦ ai**: optional AI assistant: Claude, ChatGPT, Gemini, OpenRouter or Perplexity, picked at the top
+  of the panel. Paste that service's API key once. It's saved to `data/secrets.json`, sealed to your
+  Windows account, and never shown again. Then summarize, rewrite, fix grammar, translate or explain
+  code, using your selection or the whole file. Text goes to the service you picked only when you press a
+  button. Perplexity answers list their sources. Default model for Claude: Opus 5.5.
 
 - **✂ clip**: two sub-tabs.
   - **History** keeps what you copy inside Box-DocSpitter: text (Ctrl+C, Copy buttons, characters, paths),
@@ -319,7 +320,7 @@ Secure notes don't open in a browser tab at all — only in the Box-DocSpitter w
   to the clipboard, which is cleared after 20 s and marked so Windows clipboard history (Win+V) and cloud
   clipboard skip it.
 - **Screenshots and screen shares** show the window as black while Secure notes are open.
-- **Kept out of** Ask Claude, the clip history, crash-recovery drafts, Ctrl+right-click sends and Discord
+- **Kept out of** the AI assistant, the clip history, crash-recovery drafts, Ctrl+right-click sends and Discord
   status.
 - **Safe saving:** each save is written to a temporary file, flushed to disk and swapped in, and the last
   10 versions are kept in `data/secure-notes/backups`. A vault file that's been swapped underneath the app is
@@ -385,7 +386,7 @@ the point of the encryption. Keep the sticky note somewhere other than next to t
 | Folder | What |
 |---|---|
 | `data/settings.json` | your preferences, Discord lines, My info |
-| `data/secrets.json` | keys you add: Anthropic, Gmail app passwords, GitHub token, Spotify key |
+| `data/secrets.json` | keys you add: AI services (Anthropic, OpenAI, Google, OpenRouter, Perplexity), Gmail app passwords, GitHub token, Spotify key |
 | `data/fonts/` | fonts you added under Your fonts |
 | `data/backgrounds/` | the app background picture |
 | `data/boxswap/` | BoxSwap's profiles, the originals they replaced, and anything removed (`.removed`) |
@@ -413,7 +414,7 @@ back; `electron/shell.js` is the window itself, which runs `server.js` as a chil
 `settings-transfer.js` (setup export/import and the app PIN lock), `dumps-server.js` (the dumps), `media-server.js`
 (streaming, yt-dlp / ffmpeg, BoxKlep and BoxTape downloads), `appearance-server.js` (backgrounds and your fonts),
 `spaces-server.js` (BoxSpaces), `storage-server.js` (StoragePeek), `market-server.js` (BoxTicker),
-`presence-server.js` (Discord), `ai-server.js` (Ask Claude) and `secrets-store.js` (the sealed keys and passwords).
+`presence-server.js` (Discord), `ai-server.js` (the AI assistant) and `secrets-store.js` (the sealed keys and passwords).
 `electron/secure-notes.js` runs in the window process, not the server.
 
 The page is plain ES modules. `public/js/app.js` starts the app; its methods are spread over `public/js/app/`, a

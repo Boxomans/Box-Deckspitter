@@ -140,6 +140,7 @@ export class RailPart {
       b.append(icon(railIcons[b.dataset.panel], 'lg'));
       b.addEventListener('click', () => this.togglePanel(b.dataset.panel));
     }
+    this.syncRecentRail();
     // the browser opens in the main area, not as a side panel; it needs the desktop app (web pages in <webview>s)
     const web = $('#rail-browser');
     web.append(icon('globe', 'lg'));
@@ -153,6 +154,14 @@ export class RailPart {
       if (!this.workspace.contains(t)) return;
       if (t.isContentEditable || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|url|email|)$/.test(t.type))) this.lastEditable = t;
     });
+  }
+
+  /** The Recent button goes away while recent files are hidden (Settings › Files). */
+  syncRecentRail() {
+    const off = this.settings.showRecent === false;
+    const b = $('.rail-btn[data-panel="recent"]');
+    if (b) b.hidden = off;
+    if (off && this.panel === 'recent') this.hidePanel();
   }
 
   /** The right sidebar collapses when nothing is in it (it slides out again while a button is dragged toward it). */

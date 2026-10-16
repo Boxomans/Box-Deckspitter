@@ -24,4 +24,4 @@ export const HIDDEN_THEMES = [
 ];
 
 // side panels that can move between the right sidebar and the top bar
-export const SIDE_PANELS = { chars: 'Special characters', ai: 'Ask Claude', clip: 'Clipboard & snippets' };
+export const SIDE_PANELS = { chars: 'Special characters', ai: 'AI assistant', clip: 'Clipboard & snippets' };

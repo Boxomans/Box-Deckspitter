@@ -232,7 +232,7 @@ export class HomePart {
     inner.append(recentHost);
 
     try {
-      const recent = (await api.recent()).slice(0, 12);
+      const recent = this.settings.showRecent === false ? [] : (await api.recent()).slice(0, 12);
       if (recent.length) {
         recentHost.append(h('div', { class: 'home-section-title' }, 'recent',
           h('button', { class: 'home-clear', title: 'Clear the recent list (the files themselves stay where they are)', onclick: async () => { await api.removeRecent(null); this.refreshHome(); toast('Recent list cleared', { timeout: 1400 }); } }, 'clear')));

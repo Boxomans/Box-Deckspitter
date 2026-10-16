@@ -32,7 +32,7 @@ import { WindowPart } from './app/window.js';
 const DEFAULT_SETTINGS = {
   theme: 'dark', uiFont: 'theme', nativeDialogs: true, showHidden: false, drafts: true, spellcheck: true,
   docFont: 'Calibri', docSize: 11, codeFontSize: 13, textFont: 'mono', textFontSize: 14, paper: 'white',
-  sidebar: null, explorerDir: null,
+  sidebar: null, explorerDir: null, videoOpen: 'player', imageOpen: 'viewer',
 };
 
 class App {
@@ -83,7 +83,9 @@ class App {
     this.weather = createWeather(this);
     this.translate = createTranslate(this);
     // Win+Shift+Q screenshots (electron/snip.js) land in the media dump
-    window.bdsShell?.onSnip?.((s) => toast(`Screenshot saved to the media dump: ${s.name}`, { type: 'ok', timeout: 5000, action: { label: 'Open', fn: () => this.openPath(s.path) } }));
+    window.bdsShell?.onSnip?.((s) => (s.error
+      ? toast(`Screenshot didn't work: ${s.error}`, { type: 'warn', timeout: 8000 })
+      : toast(`Screenshot saved to the media dump: ${s.name}`, { type: 'ok', timeout: 5000, action: { label: 'Open', fn: () => this.openPath(s.path) } })));
     this.calendar = createCalendar(this);
 
     this.decorateChrome();

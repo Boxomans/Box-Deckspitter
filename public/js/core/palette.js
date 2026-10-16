@@ -22,7 +22,7 @@ async function commandItems(app) {
   const em = ed?.menus?.() || {};
   const out = [];
   flattenMenu(app.newMenuItems(), 'New › ', out);
-  flattenMenu(app.fileMenu().filter((x) => x.label !== 'New' && x.label !== 'Open recent'), 'File › ', out);
+  flattenMenu(app.fileMenu().filter((x) => x && x.label !== 'New' && x.label !== 'Open recent'), 'File › ', out);
   flattenMenu(app.editMenu(em.edit), 'Edit › ', out);
   flattenMenu(app.viewMenu(em.view), 'View › ', out);
   flattenMenu(em.insert, 'Insert › ', out);
@@ -46,7 +46,7 @@ async function fileItems(app) {
     }
   }
   try {
-    for (const r of await api.recent()) {
+    for (const r of app.settings.showRecent === false ? [] : await api.recent()) {
       if (!r.exists || seen.has(r.path.toLowerCase())) continue;
       out.push({ label: r.name, detail: dirname(r.path), icon: iconForName(r.name), match: r.path, recent: true, run: () => app.openPath(r.path) });
     }
