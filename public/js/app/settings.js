@@ -169,7 +169,7 @@ export class SettingsPart {
   /** Settings → Appearance → Your fonts: type a name and it's fetched, or add a file; each one can be removed. */
   userFontSettings() {
     const status = h('div', { class: 'uf-status faint' });
-    const input = h('input', { type: 'text', class: 'input uf-input', placeholder: 'Font name, e.g. Cinzel Decorative', spellcheck: 'false' });
+    const input = h('input', { type: 'text', class: 'input uf-input', placeholder: 'Font name', spellcheck: 'false' });
     const getBtn = h('button', { class: 'btn sm primary' }, icon('download', 'sm'), 'Get');
     const get = async (name) => {
       if (!name.trim()) { input.focus(); return; }

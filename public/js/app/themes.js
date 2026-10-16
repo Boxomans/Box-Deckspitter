@@ -60,7 +60,7 @@ export class ThemesPart {
     for (const t of this.tabs) t.editor?.onThemeChange?.(theme);
     if (window.bdsShell) {
       const cs = getComputedStyle(document.documentElement);
-      window.bdsShell.setTitlebar((cs.getPropertyValue('--titlebar-solid') || cs.getPropertyValue('--bg-1')).trim(), cs.getPropertyValue('--text-2').trim(), shown).catch(() => {});
+      window.bdsShell.setTitlebar((cs.getPropertyValue('--titlebar-solid') || cs.getPropertyValue('--bg-1')).trim(), (cs.getPropertyValue('--titlebar-text') || cs.getPropertyValue('--text-2')).trim(), shown).catch(() => {});
     }
   }
 }

@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.0.46",
+    "date": "2026-10-15",
+    "notes": [
+      "Video editor: a video placed on the timeline puts its picture on a video track and its sound on an audio track, linked together. They move, trim, split and delete as one; Ctrl+L unlinks or relinks them.",
+      "Video editor: Ctrl+click selects several clips, which move and delete together. With one picture and one sound selected, Ctrl+L links them.",
+      "Video editor: Space plays and pauses the video instead of the music, pausing and playing no longer flickers, and a clip whose own sound is muted keeps playing its picture.",
+      "Video editor: Volume is a box you can type in or a slider that pops out; the properties panel keeps its place when you click into it; the colour Pick button and the media list's header fit their space.",
+      "The tab strip scrolls with the mouse wheel when there are more tabs than fit.",
+      "Adding a time zone to the clock finds states, countries and cities by name, and its list scrolls.",
+      "The Bloodflame Talons theme is less red: greys and gold trims.",
+      "Three more hidden themes."
+    ]
+  },
+  {
     "version": "1.0.45",
     "date": "2026-10-15",
     "notes": [
@@ -245,7 +259,7 @@
       "New: a built-in web browser (globe button on the left). Tabs, find in page, search engine choice and unpacked Chrome extensions; your tabs come back next time.",
       "Right-click a picture, video or sound on a web page to send it to the media dump, or save the whole page to the doc dump as a PDF.",
       "Website logins are kept encrypted on this PC (switched on automatically after the first close). Camera, microphone, location and similar requests ask first.",
-      "Links that open other programs, like mod-manager buttons that open Vortex, ask before they do (with an \"Always for this site\" option).",
+      "Links that open other programs, like a site's open-in-app buttons, ask before they do (with an \"Always for this site\" option).",
       "The browser has its own 10-band equalizer for sound from web pages (browser menu → Equalizer).",
       "Help → README opens the full guide in its own window.",
       "The music player's song list and queue get more room when opened from the top bar.",

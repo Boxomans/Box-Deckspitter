@@ -20,7 +20,7 @@ module.exports = function createAppearance({ DATA, IS_WIN, ok, readJSONBody, req
   const FONT_LIST = path.join(FONT_DIR, 'fonts.json');
   const FONT_FILE_FMT = { '.woff2': 'woff2', '.woff': 'woff', '.ttf': 'truetype', '.otf': 'opentype' };
   const FONT_ID_RE = /^[a-z0-9-]{1,80}$/;
-  /** What a typed font name is matched on: no case, spaces, dashes or other symbols ("cinzel-DECORATIVE" = "Cinzel Decorative"). */
+  /** What a typed font name is matched on: no case, spaces, dashes or other symbols ("open-SANS" = "Open Sans"). */
   const fontKey = (s) => String(s || '').normalize('NFKD').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
   const readFonts = () => { try { const j = JSON.parse(fs.readFileSync(FONT_LIST, 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; } };
   async function saveFont(entry) {

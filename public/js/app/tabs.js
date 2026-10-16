@@ -24,6 +24,17 @@ export class TabsPart {
 
   renderTabs() {
     const host = clear($('#tabs'));
+    if (!host._wheel) {
+      // the strip has no scrollbar: the mouse wheel (or a trackpad's sideways swipe) scrolls it when tabs overflow
+      host._wheel = true;
+      host.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || host.scrollWidth <= host.clientWidth) return;
+        const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (!d) return;
+        e.preventDefault();
+        host.scrollLeft += e.deltaMode === 1 ? d * 40 : d;
+      }, { passive: false });
+    }
     for (const t of this.tabs) {
       const el = h('div', {
         class: `tab ${t === this.active ? 'active' : ''} ${t.dirty ? 'dirty' : ''} ${t.pinned ? 'pinned' : ''}`,

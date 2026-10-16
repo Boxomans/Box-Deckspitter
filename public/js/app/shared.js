@@ -18,6 +18,9 @@ export const HIDDEN_THEMES = [
   ['blood', 'Bloodflame Talons', 'Bloodflame Talons — blood & ember', 'star'],
   ['blurple', 'Blurple', 'Blurple — old-school chat app', 'star'],
   ['kabuto', 'Kabuto-chō', 'Kabuto-chō — 80s Tokyo quote board', 'activity'],
+  ['temple', 'TEMPLE', 'TEMPLE — 16-colour VGA', 'star'],
+  ['lubyanka', 'Lubyanka', 'Lubyanka — ministry terminal', 'file-text'],
+  ['miami', 'Miami Hotline', 'Miami Hotline — 80s retrowave', 'sun'],
 ];
 
 // side panels that can move between the right sidebar and the top bar

@@ -825,6 +825,8 @@ export function createMusic(app) {
       if (full && e.key === 'Escape' && !document.querySelector('.modal-backdrop, .menu')) { e.preventDefault(); setFull(false); return; }
       if ((!state.open && !wide) || ((state.docked || wide) && !el.contains(e.target) && e.target !== document.body)) return;
       if (e.key === 'Escape' && !state.docked && !wide) setOpen(false);
+      // in the video editor (or a video tab) Space is that video's, unless you're clicked into the player itself
+      if (e.key === ' ' && ['cut', 'video'].includes(app.active?.mode) && !el.contains(e.target)) return;
       if (e.key === ' ' && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && !e.target.isContentEditable) { e.preventDefault(); toggle(); }
     });
   }

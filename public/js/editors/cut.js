@@ -8,7 +8,7 @@
 import { BaseEditor } from './base.js';
 import { h, clear, clamp, basename, extOf, stripExt, uid, dirname, formatBytes } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { tbButton, tbSep, toast, errorToast, contextMenu, modal, promptDialog, hoverKeys, PATHS_MIME, draggedPaths, setDraggedPaths } from '../core/ui.js';
+import { tbButton, tbSep, toast, errorToast, contextMenu, modal, promptDialog, hoverKeys, PATHS_MIME, draggedPaths, setDraggedPaths, popover } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { pickOpen, pickSave } from '../core/files.js';
 import { fmtTime } from './video.js';
@@ -30,7 +30,7 @@ const PROPS = {
   scale: { label: 'Scale', def: 100, step: 1, min: 1, max: 1000, unit: '%' },
   rotation: { label: 'Rotation', def: 0, step: 1, unit: '°' },
   opacity: { label: 'Opacity', def: 100, step: 1, min: 0, max: 100, unit: '%' },
-  volume: { label: 'Volume', def: 100, step: 1, min: 0, max: 200, unit: '%' },
+  volume: { label: 'Volume', def: 100, step: 1, min: 0, max: 200, unit: '%', slider: true }, // slider: one pops out under the box
 };
 const VISUAL = ['x', 'y', 'scale', 'rotation', 'opacity'];
 const IMAGE_LEN = 5;
@@ -189,7 +189,8 @@ export class CutEditor extends BaseEditor {
     }
     this.t = 0; // playhead (s)
     this.pps = 60; // timeline zoom: pixels per second
-    this.sel = null; // selected clip id
+    this.extra = new Set(); // more selected clips (Ctrl+click), besides `sel`
+    this.sel = null; // selected clip id (the one the properties panel shows)
     this.undoStack = [];
     this.redoStack = [];
     this.els = new Map(); // preview media elements: clip id → <video>/<audio>; media id → <img>
@@ -206,6 +207,22 @@ export class CutEditor extends BaseEditor {
   clip(id) { for (const tr of this.p.tracks) { const c = tr.clips.find((x) => x.id === id); if (c) return { c, tr }; } return null; }
   get duration() { return Math.max(1, ...this.allClips().map(({ c }) => c.start + c.len)); }
   get selected() { return this.sel ? this.clip(this.sel) : null; }
+  // choosing one clip drops the rest of a Ctrl+click selection
+  get sel() { return this._sel; }
+  set sel(id) { this._sel = id; this.extra?.clear(); }
+  isPicked(id) { return id != null && (id === this._sel || this.extra.has(id)); }
+  /** Every selected clip that still exists. */
+  picked() { return [this._sel, ...this.extra].map((id) => id && this.clip(id)).filter(Boolean); }
+  /** Ctrl+click: add a clip to the selection, or take it out. */
+  togglePick(id) {
+    if (!this.isPicked(id)) { if (this._sel) this.extra.add(this._sel); this._sel = id; return; }
+    if (id !== this._sel) { this.extra.delete(id); return; }
+    const next = [...this.extra][0] ?? null;
+    this.extra.delete(next);
+    this._sel = next;
+  }
+  /** A video's picture and its sound are two clips that go together (same `link`): the other one, or null. */
+  partner(c) { return c.link ? this.allClips().find((x) => x.c.link === c.link && x.c !== c) || null : null; }
 
   /** Call before a change: remembers the project for undo. */
   remember() {
@@ -489,15 +506,24 @@ export class CutEditor extends BaseEditor {
   placeMedia(m, trackId = null, at = null) {
     const kind = m.kind === 'audio' ? 'audio' : 'video';
     let tr = trackId ? this.p.tracks.find((x) => x.id === trackId) : this.p.tracks.find((x) => x.kind === kind);
-    if (!tr || tr.kind !== kind) tr = this.addTrack(kind, { quiet: true });
+    // a video dropped on an audio track puts just its sound there
+    if (!tr || (tr.kind !== kind && !(m.kind === 'video' && tr.kind === 'audio'))) tr = this.addTrack(kind, { quiet: true });
     const len = m.kind === 'image' ? IMAGE_LEN : Math.max(MIN_LEN, m.duration || IMAGE_LEN);
+    const free = (t, s) => !t.clips.some((c) => s < c.start + c.len && s + len > c.start);
     let start = at ?? this.t;
     // don't drop on top of another clip on that track
-    const hit = tr.clips.find((c) => start < c.start + c.len && start + len > c.start);
-    if (hit && at == null) start = Math.max(...tr.clips.map((c) => c.start + c.len));
+    if (!free(tr, start) && at == null) start = Math.max(...tr.clips.map((c) => c.start + c.len));
+    start = Math.max(0, start);
     this.remember();
-    const c = { id: uid('c'), media: m.id, start: Math.max(0, start), in: 0, len, props: {}, keys: {} };
+    const c = { id: uid('c'), media: m.id, start, in: 0, len, props: {}, keys: {} };
     tr.clips.push(c);
+    // a video's sound goes on an audio track of its own, linked to the picture (they move, trim, split and delete together)
+    if (m.kind === 'video' && tr.kind === 'video') {
+      const atr = this.p.tracks.find((t) => t.kind === 'audio' && free(t, start)) || this.addTrack('audio', { quiet: true });
+      c.link = uid('l');
+      c.mute = true;
+      atr.clips.push({ id: uid('c'), media: m.id, start, in: 0, len, props: {}, keys: {}, link: c.link });
+    }
     this.sel = c.id;
     this.renderAll();
     return c;
@@ -526,11 +552,23 @@ export class CutEditor extends BaseEditor {
   split() {
     const s = this.selected || this.allClips().find(({ c }) => this.t > c.start && this.t < c.start + c.len);
     if (!s) return toast('Put the playhead over a clip to split it.', { timeout: 1600 });
-    const { c, tr } = s;
-    const at = this.t - c.start;
-    if (at <= MIN_LEN / 2 || at >= c.len - MIN_LEN / 2) return;
+    const at = this.t - s.c.start;
+    if (at <= MIN_LEN / 2 || at >= s.c.len - MIN_LEN / 2) return;
     this.remember();
+    const p = this.partner(s.c);
+    const pat = p && this.t - p.c.start;
+    const both = p && pat > MIN_LEN / 2 && pat < p.c.len - MIN_LEN / 2;
+    const link = both ? uid('l') : null;
+    this.sel = s.c.id;
+    this.cut(s, at, link);
+    if (both) this.cut(p, pat, link);
+    this.renderAll();
+  }
+
+  /** Split one clip `at` seconds in; the second half is selected (and linked by `link` if it has a partner). */
+  cut({ c, tr }, at, link) {
     const b = JSON.parse(JSON.stringify(c));
+    if (link) b.link = link; else delete b.link;
     b.id = uid('c');
     b.start = this.t;
     b.in = c.in + (this.media(c.media)?.kind === 'image' ? 0 : at);
@@ -543,15 +581,60 @@ export class CutEditor extends BaseEditor {
     }
     c.len = at;
     tr.clips.push(b);
-    this.sel = b.id;
+    if (this.sel === c.id) this.sel = b.id;
+  }
+
+  /** Ctrl+L: unlink the selected clip from its picture / sound, or link it back to the matching clip (same file, overlapping, on the other kind of track). */
+  /** The two picked clips, when they're linked to each other. */
+  linkedPair() {
+    const [a, b] = this.picked();
+    return a && b && a.c.link && a.c.link === b.c.link;
+  }
+
+  toggleLink() {
+    const all = this.picked();
+    if (all.length === 2) {
+      const [a, b] = all;
+      if (this.linkedPair()) { this.remember(); delete a.c.link; delete b.c.link; toast('Unlinked.', { timeout: 1400 }); return this.renderAll(); }
+      if (a.tr.kind === b.tr.kind) return toast('Pick one clip on a video track and one on an audio track to link them.', { timeout: 2400 });
+      if (this.media((a.tr.kind === 'video' ? a : b).c.media)?.kind === 'image') return toast('A picture has no sound to link.', { timeout: 2000 });
+      this.remember();
+      for (const x of all) { const q = this.partner(x.c); if (q) delete q.c.link; } // each leaves its old partner
+      a.c.link = b.c.link = uid('l');
+      // the same video's own sound would double up with its sound clip
+      const v = a.tr.kind === 'video' ? a.c : b.c;
+      if (a.c.media === b.c.media) v.mute = true;
+      toast('Linked — they move, trim, split and delete together.', { timeout: 1800 });
+      return this.renderAll();
+    }
+    if (all.length > 2) return toast('Pick two clips to link (or one linked clip to unlink).', { timeout: 2000 });
+    const s = this.selected;
+    if (!s) return toast('Select a clip first.', { timeout: 1600 });
+    const p = this.partner(s.c);
+    if (p) {
+      this.remember();
+      delete s.c.link; delete p.c.link;
+      toast('Picture and sound unlinked — they move on their own now.', { timeout: 1800 });
+      return this.renderAll();
+    }
+    if (this.media(s.c.media)?.kind !== 'video') return toast('Only a video’s picture and sound link together.', { timeout: 2000 });
+    const end = (c) => c.start + c.len;
+    const near = this.allClips()
+      .filter(({ c, tr }) => tr.kind !== s.tr.kind && c.media === s.c.media && !c.link && c.start < end(s.c) && end(c) > s.c.start)
+      .sort((a, b) => Math.abs(a.c.start - s.c.start) - Math.abs(b.c.start - s.c.start))[0];
+    if (!near) return toast('No unlinked sound or picture of this video overlaps it.', { timeout: 2200 });
+    this.remember();
+    s.c.link = near.c.link = uid('l');
+    (s.tr.kind === 'video' ? s.c : near.c).mute = true; // the sound plays from the audio track
+    toast('Picture and sound linked.', { timeout: 1600 });
     this.renderAll();
   }
 
   deleteSelected() {
-    const s = this.selected;
-    if (!s) return;
+    const all = this.picked();
+    if (!all.length) return;
     this.remember();
-    s.tr.clips = s.tr.clips.filter((c) => c !== s.c);
+    for (const s of all) for (const x of [s, this.partner(s.c)]) if (x) x.tr.clips = x.tr.clips.filter((c) => c !== x.c);
     this.sel = null;
     this.renderAll();
   }
@@ -636,7 +719,7 @@ export class CutEditor extends BaseEditor {
         h('button', { class: 'btn sm', onclick: () => this.addTrack('video') }, icon('plus', 'sm'), 'Video track'),
         h('button', { class: 'btn sm', onclick: () => this.addTrack('audio') }, icon('plus', 'sm'), 'Audio track'),
         h('div', { class: 'grow' }),
-        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Shift+click or Shift+drag to seek · drag clips (they snap; press Shift mid-drag to place freely) · drag edges to trim · S split · Del delete · Ctrl+wheel zoom'),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Shift+click or Shift+drag to seek · drag clips (they snap; press Shift mid-drag to place freely) · drag edges to trim · S split · Del delete · Ctrl+click select several · Ctrl+L link / unlink · Ctrl+wheel zoom'),
         h('button', { class: 'icon-btn', 'data-tip': 'Zoom out', onclick: () => this.zoom(-1) }, icon('zoom-out', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': 'Zoom in', onclick: () => this.zoom(1) }, icon('zoom-in', 'sm'))),
       h('div', { class: 'cut-tl-body' }, this.tlHead, this.tlScroll));
@@ -727,7 +810,7 @@ export class CutEditor extends BaseEditor {
   fits(trackId, m) {
     const tr = this.p.tracks.find((t) => t.id === trackId);
     const kind = m.kind === 'audio' ? 'audio' : 'video';
-    return tr && tr.kind === kind ? tr.id : null;
+    return tr && (tr.kind === kind || (m.kind === 'video' && tr.kind === 'audio')) ? tr.id : null;
   }
 
   fitCanvas() {
@@ -823,13 +906,15 @@ export class CutEditor extends BaseEditor {
 
   clipEl(c, tr) {
     const m = this.media(c.media);
-    const on = c.id === this.sel;
-    const el = h('div', { class: `cut-clip ${m?.kind || 'missing'} ${on ? 'on' : ''} ${c.key?.on ? 'keyed' : ''}`, dataset: { clip: c.id }, style: { left: `${this.tToX(c.start)}px`, width: `${Math.max(4, this.tToX(c.len))}px` }, title: `${m?.name || 'missing media'} · ${fmtTime(c.len)}` },
-      h('span', { class: 'cut-clip-name' }, m?.name || 'missing'),
+    const on = this.isPicked(c.id);
+    const p = this.partner(c);
+    const linkedOn = p && !on && this.isPicked(p.c.id);
+    const el = h('div', { class: `cut-clip ${m ? (tr.kind === 'audio' ? 'audio' : m.kind) : 'missing'} ${on ? 'on' : ''} ${linkedOn ? 'linked-on' : ''} ${c.key?.on ? 'keyed' : ''}`, dataset: { clip: c.id }, style: { left: `${this.tToX(c.start)}px`, width: `${Math.max(4, this.tToX(c.len))}px` }, title: `${m?.name || 'missing media'} · ${fmtTime(c.len)}${p ? ` · its ${tr.kind === 'audio' ? 'picture' : 'sound'} is on ${p.tr.name}` : ''}` },
+      h('span', { class: 'cut-clip-name' }, p ? icon('link', 'sm') : null, m?.name || 'missing'),
       h('span', { class: 'cut-trim l' }), h('span', { class: 'cut-trim r' }));
     if (m?.kind === 'image' && !m.missing) el.style.backgroundImage = `linear-gradient(90deg, rgba(0,0,0,.55), rgba(0,0,0,.25)), url("${srcOf(m)}")`;
     // keyframe diamonds of the selected clip
-    if (on) {
+    if (c.id === this.sel) {
       const times = [...new Set(Object.values(c.keys || {}).flat().map((k) => Math.round(k.t * 1000) / 1000))];
       for (const kt of times) {
         const d = h('span', { class: 'cut-kf', title: `keyframe at ${fmtTime(kt)} — click to jump, drag to move`, style: { left: `${this.tToX(kt)}px` } });
@@ -839,11 +924,26 @@ export class CutEditor extends BaseEditor {
     }
     el.addEventListener('pointerdown', (e) => this.dragClip(e, c, tr, el));
     el.addEventListener('contextmenu', (e) => {
-      this.sel = c.id; this.renderTimeline(); this.renderProps();
+      if (!this.isPicked(c.id)) this.sel = c.id;
+      this.renderTimeline(); this.renderProps();
+      const two = this.picked().length === 2;
       contextMenu(e, [
         { label: 'Split at the playhead', shortcut: 'S', action: () => this.split() },
         { label: 'Copy its file to the media dump', icon: 'download', disabled: !m || m.missing, action: () => this.toDump([m.path]) },
-        { label: 'Duplicate', action: () => { this.remember(); const d = JSON.parse(JSON.stringify(c)); d.id = uid('c'); d.start = c.start + c.len; tr.clips.push(d); this.sel = d.id; this.renderAll(); } },
+        { label: 'Duplicate', action: () => {
+          this.remember();
+          const link = p ? uid('l') : null;
+          for (const x of [{ c, tr }, p]) {
+            if (!x) continue;
+            const d = JSON.parse(JSON.stringify(x.c));
+            d.id = uid('c'); d.start = x.c.start + x.c.len;
+            if (link) d.link = link;
+            x.tr.clips.push(d);
+            if (x.c === c) this.sel = d.id;
+          }
+          this.renderAll();
+        } },
+        two || m?.kind === 'video' ? { label: two ? (this.linkedPair() ? 'Unlink these two' : 'Link these two (picture + sound)') : p ? (tr.kind === 'audio' ? 'Unlink from its picture' : 'Unlink its sound') : (tr.kind === 'audio' ? 'Link to its picture' : 'Link to its sound'), icon: (two ? this.linkedPair() : p) ? 'unlink' : 'link', shortcut: 'Ctrl+L', action: () => this.toggleLink() } : null,
         { sep: true },
         { label: 'Delete', icon: 'trash', shortcut: 'Del', action: () => this.deleteSelected() },
       ]);
@@ -854,7 +954,8 @@ export class CutEditor extends BaseEditor {
   /** The clip edge / playhead / 0 that time t is within a few pixels of, or null. */
   snapPoint(t, skip) {
     const pts = [0, this.t];
-    for (const { c } of this.allClips()) if (c.id !== skip) pts.push(c.start, c.start + c.len);
+    // not to the clip being dragged, nor to its linked partner (it moves along)
+    for (const { c } of this.allClips()) if (c !== skip && !(skip?.link && c.link === skip.link)) pts.push(c.start, c.start + c.len);
     let best = null;
     let bd = SNAP_PX / this.pps;
     for (const p of pts) { const d = Math.abs(p - t); if (d < bd) { bd = d; best = p; } }
@@ -871,13 +972,22 @@ export class CutEditor extends BaseEditor {
     if (e.button !== 0) return;
     e.stopPropagation();
     if (e.shiftKey) return this.scrub(e); // Shift+click / Shift+drag seeks, even over a clip
+    if (e.ctrlKey || e.metaKey) { this.togglePick(c.id); this.renderTimeline(); this.renderProps(); return; } // Ctrl+click: select several
     const m = this.media(c.media);
     const mode = e.target.classList.contains('cut-trim') ? (e.target.classList.contains('l') ? 'left' : 'right') : 'move';
     const sx = e.clientX;
     const orig = { start: c.start, in: c.in, len: c.len };
+    // its linked picture / sound comes along (trims too); moving, so does the rest of a Ctrl+click selection and their partners
+    const pc = this.partner(c)?.c;
+    const porig = pc && { start: pc.start, in: pc.in, len: pc.len };
+    if (this.isPicked(c.id) && this.extra.size) { if (this._sel !== c.id) { this.extra.add(this._sel); this.extra.delete(c.id); this._sel = c.id; } }
+    else this.sel = c.id;
+    const group = new Set();
+    if (mode === 'move') for (const x of this.picked()) for (const y of [x, this.partner(x.c)]) if (y && y.c !== c && y.c !== pc) group.add(y.c);
+    const gorig = new Map([...group].map((g) => [g, g.start]));
+    const gmin = Math.min(Infinity, ...gorig.values());
     let moved = false;
     let curTrack = tr;
-    this.sel = c.id;
     const maxLen = m && m.kind !== 'image' && m.duration ? m.duration : Infinity;
     let overDump = false;
     const move = (ev) => {
@@ -901,8 +1011,8 @@ export class CutEditor extends BaseEditor {
       let guide = null;
       if (mode === 'move') {
         let start = Math.max(0, orig.start + dt);
-        const a = free ? null : this.snapPoint(start, c.id);
-        const b = free ? null : this.snapPoint(start + c.len, c.id);
+        const a = free ? null : this.snapPoint(start, c);
+        const b = free ? null : this.snapPoint(start + c.len, c);
         if (a != null && (b == null || Math.abs(a - start) <= Math.abs(b - (start + c.len)))) { start = a; guide = a; }
         else if (b != null && b - c.len >= 0) { start = b - c.len; guide = b; }
         c.start = Math.max(0, start);
@@ -917,7 +1027,7 @@ export class CutEditor extends BaseEditor {
         }
       } else if (mode === 'left') {
         let start = orig.start + dt;
-        const sp = free ? null : this.snapPoint(start, c.id);
+        const sp = free ? null : this.snapPoint(start, c);
         if (sp != null) { start = sp; guide = sp; }
         start = clamp(start, Math.max(0, orig.start - (m?.kind === 'image' ? Infinity : orig.in)), orig.start + orig.len - MIN_LEN);
         const d = start - orig.start;
@@ -928,13 +1038,32 @@ export class CutEditor extends BaseEditor {
         if (d) for (const keys of Object.values(c.keys || {})) for (const k of keys) k.t = (k._t0 ?? (k._t0 = k.t)) - d;
       } else {
         let end = orig.start + orig.len + dt;
-        const sp = free ? null : this.snapPoint(end, c.id);
+        const sp = free ? null : this.snapPoint(end, c);
         if (sp != null) { end = sp; guide = sp; }
         c.len = clamp(end - orig.start, MIN_LEN, maxLen - (m?.kind === 'image' ? 0 : orig.in));
       }
       this.showSnap(guide);
       el.style.left = `${this.tToX(c.start)}px`;
       el.style.width = `${Math.max(4, this.tToX(c.len))}px`;
+      if (group.size) {
+        // nothing in the group goes before 0
+        if (gmin + (c.start - orig.start) < 0) c.start = orig.start - gmin;
+        for (const [g, s0] of gorig) {
+          g.start = s0 + c.start - orig.start;
+          const gel = this.lanes.querySelector(`.cut-clip[data-clip="${g.id}"]`);
+          if (gel) gel.style.left = `${this.tToX(g.start)}px`;
+        }
+        el.style.left = `${this.tToX(c.start)}px`;
+      }
+      if (pc) {
+        const d = c.start - orig.start;
+        pc.start = Math.max(0, porig.start + d);
+        pc.len = Math.max(MIN_LEN, porig.len + (c.len - orig.len));
+        pc.in = Math.max(0, porig.in + (c.in - orig.in));
+        if (mode === 'left') for (const keys of Object.values(pc.keys || {})) for (const k of keys) k.t = (k._t0 ?? (k._t0 = k.t)) - d;
+        const pel = this.lanes.querySelector(`.cut-clip[data-clip="${pc.id}"]`);
+        if (pel) { pel.style.left = `${this.tToX(pc.start)}px`; pel.style.width = `${Math.max(4, this.tToX(pc.len))}px`; }
+      }
       this.requestUpdate();
     };
     const up = () => {
@@ -952,8 +1081,10 @@ export class CutEditor extends BaseEditor {
         this.toDump([m.path], overDump.dataset?.folder ?? this.dumpDir ?? '');
         return;
       }
-      for (const keys of Object.values(c.keys || {})) for (const k of keys) delete k._t0;
-      if (mode === 'left') for (const [p, keys] of Object.entries(c.keys || {})) c.keys[p] = keys.filter((k) => k.t >= -1e-6 && k.t <= c.len + 1e-6);
+      for (const x of pc ? [c, pc] : [c]) {
+        for (const keys of Object.values(x.keys || {})) for (const k of keys) delete k._t0;
+        if (mode === 'left') for (const [p, keys] of Object.entries(x.keys || {})) x.keys[p] = keys.filter((k) => k.t >= -1e-6 && k.t <= x.len + 1e-6);
+      }
       this.renderTimeline();
       this.renderProps();
       this.refreshStatus();
@@ -1052,19 +1183,46 @@ export class CutEditor extends BaseEditor {
   // =================================================================== properties panel
 
   renderProps() {
+    // rebuilding empties the panel, which would jump it back to the top: keep the scroll while it's the same clip
+    const key = this.selected?.c.id ?? null;
+    const top = key === this.propsFor ? this.props.scrollTop : 0;
+    this.propsFor = key;
+    this.buildProps();
+    this.props.scrollTop = top;
+  }
+
+  buildProps() {
+    this.sliderPop?.close(); // its box is about to be replaced
+    this.sliderPop = null;
     const P = clear(this.props);
     const s = this.selected;
     if (!s) return this.renderProjectProps(P);
-    const { c } = s;
+    const { c, tr } = s;
     const m = this.media(c.media);
+    const sound = m?.kind === 'audio' || tr.kind === 'audio'; // a video's sound on an audio track is edited as audio
+    const p = this.partner(c);
     const local = clamp(this.t - c.start, 0, c.len);
     const inside = this.t >= c.start && this.t <= c.start + c.len;
     const num = (label, value, onSet, { step = 0.01, min = 0, unit = 's' } = {}) => {
       const inp = h('input', { type: 'number', step: String(step), value: String(Math.round(value * 100) / 100) });
-      inp.addEventListener('change', () => { const v = Number(inp.value); if (Number.isFinite(v)) { this.remember(); onSet(Math.max(min, v)); this.renderAll(); } });
+      inp.addEventListener('change', () => {
+        const v = Number(inp.value);
+        if (!Number.isFinite(v)) return;
+        this.remember();
+        const was = { start: c.start, len: c.len, in: c.in };
+        onSet(Math.max(min, v));
+        const pc = this.partner(c)?.c;
+        if (pc) { pc.start = Math.max(0, pc.start + c.start - was.start); pc.len = Math.max(MIN_LEN, pc.len + c.len - was.len); pc.in = Math.max(0, pc.in + c.in - was.in); }
+        this.renderAll();
+      });
       return h('label', { class: 'cut-row' }, h('span', {}, label), inp, h('span', { class: 'faint' }, unit));
     };
-    P.append(h('div', { class: 'cut-props-title' }, icon(m?.kind === 'audio' ? 'music' : m?.kind === 'image' ? 'image' : 'video', 'sm'), h('span', {}, m?.name || 'missing media')));
+    P.append(h('div', { class: 'cut-props-title' }, icon(sound ? 'music' : m?.kind === 'image' ? 'image' : 'video', 'sm'), h('span', {}, m?.name || 'missing media')));
+    if (this.extra.size) {
+      const n = this.picked().length;
+      P.append(h('div', { class: 'cut-link-row' }, h('span', { class: 'faint' }, `${n} clips selected — they move and delete together.`),
+        n === 2 ? h('button', { class: 'btn sm', title: 'Ctrl+L', onclick: () => this.toggleLink() }, icon(this.linkedPair() ? 'unlink' : 'link', 'sm'), this.linkedPair() ? 'Unlink' : 'Link') : null));
+    }
     P.append(h('div', { class: 'cut-group' }, h('h5', {}, 'Timing'),
       num('Start', c.start, (v) => { c.start = v; }),
       num('Length', c.len, (v) => { c.len = Math.max(MIN_LEN, m?.kind === 'image' ? v : Math.min(v, (m?.duration || v) - c.in)); }),
@@ -1103,6 +1261,22 @@ export class CutEditor extends BaseEditor {
         addEventListener('pointermove', mv);
         addEventListener('pointerup', upf);
       });
+      // type in the box, or drag the slider that pops out under it
+      const showSlider = () => {
+        if (this.sliderPop?.el.isConnected) return;
+        const r = h('input', { type: 'range', class: 'cut-pop-slider', min: String(def.min), max: String(def.max), step: String(def.step), value: inp.value });
+        let first = true;
+        r.addEventListener('input', () => {
+          if (first) { this.remember(); first = false; }
+          this.setProp(c, prop, Number(r.value));
+          inp.value = r.value;
+          this.requestUpdate(false);
+        });
+        r.addEventListener('change', () => { first = true; this.renderTimeline(); });
+        inp.addEventListener('input', () => { r.value = inp.value; });
+        this.sliderPop = popover(inp, r);
+      };
+      if (def.slider) { inp.addEventListener('focus', showSlider); inp.addEventListener('click', showSlider); }
       const kb = h('button', { class: `cut-keybtn ${here ? 'here' : keys.length ? 'has' : ''}`, disabled: !inside, title: here ? 'Remove the keyframe here' : keys.length ? 'Add a keyframe here' : 'Animate: add a keyframe at the playhead' }, '◆');
       kb.addEventListener('click', () => this.toggleKey(c, prop));
       const row = h('div', { class: 'cut-row' }, lab, inp, h('span', { class: 'faint' }, def.unit), kb);
@@ -1113,7 +1287,7 @@ export class CutEditor extends BaseEditor {
       return row;
     };
 
-    if (m?.kind !== 'audio') {
+    if (!sound) {
       P.append(h('div', { class: 'cut-group' }, h('h5', {}, 'Transform', h('span', { class: 'faint' }, ' · ◆ = keyframe at the playhead')), ...VISUAL.map(propRow)));
       // chroma key
       const k = c.key || { on: false, color: '#00ff00', tolerance: 40, softness: 20, spill: 50 };
@@ -1131,15 +1305,23 @@ export class CutEditor extends BaseEditor {
       onBox.addEventListener('change', () => setK({ on: onBox.checked }));
       P.append(h('div', { class: 'cut-group' }, h('h5', {}, 'Chroma key'),
         h('label', { class: 'check' }, onBox, 'Remove a colour (green screen)'),
-        h('div', { class: 'cut-row' }, h('span', {}, 'Colour'), color,
+        h('div', { class: 'cut-row cut-pick' }, h('span', {}, 'Colour'), color,
           h('button', { class: `btn sm ${this.picking ? 'primary' : ''}`, title: 'Click the colour in the preview', onclick: () => { this.picking = !this.picking; this.canvas.classList.toggle('picking', this.picking); this.renderProps(); } }, icon('pipette', 'sm'), this.picking ? 'Click the preview…' : 'Pick')),
         slider('Tolerance', 'tolerance', 150), slider('Softness', 'softness', 100), slider('Spill', 'spill', 100)));
     }
-    if (m?.kind !== 'image') {
+    if (p && !sound) {
+      // its sound is the linked clip on an audio track
+      P.append(h('div', { class: 'cut-group' }, h('h5', {}, 'Audio'),
+        h('div', { class: 'cut-link-row' }, h('span', { class: 'faint' }, `Its sound is on ${p.tr.name}.`),
+          h('button', { class: 'btn sm', onclick: () => { this.sel = p.c.id; this.renderTimeline(); this.renderProps(); } }, icon('music', 'sm'), 'Select it'),
+          h('button', { class: 'btn sm ghost', title: 'Unlink picture and sound (Ctrl+L)', onclick: () => this.toggleLink() }, icon('unlink', 'sm'), 'Unlink'))));
+    } else if (m?.kind !== 'image') {
       const muteBox = h('input', { type: 'checkbox', checked: !!c.mute });
       muteBox.addEventListener('change', () => { this.remember(); c.mute = muteBox.checked; this.draw(); });
       P.append(h('div', { class: 'cut-group' }, h('h5', {}, 'Audio'), propRow('volume'),
-        m?.kind === 'video' ? h('label', { class: 'check' }, muteBox, 'Mute this clip’s sound') : null));
+        m?.kind === 'video' ? h('label', { class: 'check' }, muteBox, sound ? 'Mute this clip' : 'Mute this clip’s sound') : null,
+        p ? h('div', { class: 'cut-link-row' }, h('span', { class: 'faint' }, `Linked to its picture on ${p.tr.name}.`),
+          h('button', { class: 'btn sm ghost', title: 'Unlink picture and sound (Ctrl+L)', onclick: () => this.toggleLink() }, icon('unlink', 'sm'), 'Unlink')) : null));
     }
     P.append(h('div', { class: 'cut-actions' },
       h('button', { class: 'btn sm', onclick: () => this.split() }, 'Split (S)'),
@@ -1240,11 +1422,20 @@ export class CutEditor extends BaseEditor {
         const want = c.in + (this.t - c.start);
         if (Math.abs(el.currentTime - want) > 0.02) el.currentTime = want;
       }
+      if (this.seeking()) return; // 'seeked' draws it
     }
     this.composite(this.ctx2d, this.canvas.width, this.canvas.height, this.t, (c, m) => {
       const el = this.elFor(c, m);
       return m.kind === 'image' ? el : el.readyState >= 2 ? el : null;
     });
+  }
+
+  /** A visible video mid-seek has no frame to give: drawing then would flash it blank (pausing and playing both seek). */
+  seeking() {
+    for (const { c, tr } of this.allClips()) {
+      if (tr.kind === 'video' && this.t >= c.start && this.t < c.start + c.len && this.els.get(c.id)?.seeking) return true;
+    }
+    return false;
   }
 
   // =================================================================== playback
@@ -1262,7 +1453,7 @@ export class CutEditor extends BaseEditor {
       this.t = (performance.now() - this.clock0) / 1000;
       if (this.t >= this.duration) { this.t = this.duration; this.pause(); this.placePlayhead(); return; }
       this.syncMedia(false);
-      this.composite(this.ctx2d, this.canvas.width, this.canvas.height, this.t, (c, m) => { const el = this.elFor(c, m); return m.kind === 'image' ? el : el.readyState >= 2 ? el : null; });
+      if (!this.seeking()) this.composite(this.ctx2d, this.canvas.width, this.canvas.height, this.t, (c, m) => { const el = this.elFor(c, m); return m.kind === 'image' ? el : el.readyState >= 2 ? el : null; });
       this.placePlayhead();
       // keep the playhead in view
       const x = this.tToX(this.t) - this.tlScroll.scrollLeft;
@@ -1276,6 +1467,15 @@ export class CutEditor extends BaseEditor {
     this.playing = false;
     cancelAnimationFrame(this.raf);
     for (const el of this.els.values()) if (el.pause) el.pause();
+    // stop on the frame that's showing: the video runs a little ahead of the clock, and seeking back to it jumps the picture
+    for (const { c, tr } of this.allClips()) {
+      const el = this.els.get(c.id);
+      if (tr.kind !== 'video' || !el || el.seeking || this.t < c.start || this.t >= c.start + c.len) continue;
+      const t = c.start + el.currentTime - c.in;
+      if (Math.abs(t - this.t) < 0.25) this.t = clamp(t, c.start, c.start + c.len - 0.001);
+      break;
+    }
+    this.placePlayhead();
     clear(this.playBtn).append(icon('play'));
     this.renderProps();
     this.draw();
@@ -1291,10 +1491,10 @@ export class CutEditor extends BaseEditor {
       const el = this.elFor(c, m);
       live.add(el);
       const want = c.in + (this.t - c.start);
-      if (force || Math.abs(el.currentTime - want) > 0.25) el.currentTime = want;
+      if (Math.abs(el.currentTime - want) > (force ? 0.02 : 0.25)) el.currentTime = want; // a seek blanks the frame: only when it's off
       const vol = (tr.muted || c.mute) ? 0 : clamp(valueAt(c, 'volume', this.t - c.start) / 100, 0, 1);
       el.volume = vol;
-      el.muted = vol === 0;
+      el.muted = false; // volume 0 rather than muted: Chromium pauses muted videos that aren't on screen
       if (el.paused) el.play().catch(() => {});
     }
     for (const el of this.els.values()) if (el.pause && !live.has(el) && !el.paused) el.pause();
@@ -1480,6 +1680,7 @@ export class CutEditor extends BaseEditor {
     const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); return this.undo(); }
     if (ctrl && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); return this.redo(); }
+    if (ctrl && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'l') { e.preventDefault(); return this.toggleLink(); }
     if (ctrl || e.altKey) return;
     if (e.key === ' ') { e.preventDefault(); return this.togglePlay(); }
     if (e.key.toLowerCase() === 's') { e.preventDefault(); return this.split(); }

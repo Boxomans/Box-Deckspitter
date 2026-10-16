@@ -228,7 +228,7 @@ export class WindowPart {
     const d = w.document;
     d.open();
     d.write(`<!doctype html><html><head><meta charset="utf-8"><title>Box-DocSpitter — README</title><style>
-      :root { color-scheme: ${document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'}; }
+      :root { color-scheme: ${['light', 'temple', 'lubyanka'].includes(document.documentElement.dataset.theme) ? 'light' : 'dark'}; }
       body { margin: 0; background: ${v('--bg-0')}; color: ${v('--text')}; font: 14px/1.6 Inter, "Segoe UI", system-ui, sans-serif; }
       main { max-width: 860px; margin: 0 auto; padding: 28px 32px 60px; }
       h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 0.6em; }

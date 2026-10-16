@@ -10,6 +10,37 @@ import { icon } from './icons.js';
 import { toast } from './ui.js';
 
 const REPEAT = { once: 'Once', daily: 'Every day', weekdays: 'Weekdays', weekends: 'Weekends' };
+
+// Places people type that aren't among the zones' own names (those name one city per zone): US states, the US
+// zone names, countries and big cities. a|b where engines spell a zone differently.
+const NY = 'America/New_York', CHI = 'America/Chicago', DEN = 'America/Denver', LA = 'America/Los_Angeles';
+const IN = 'Asia/Kolkata|Asia/Calcutta', TOR = 'America/Toronto';
+const PLACES = {
+  Alabama: CHI, Alaska: 'America/Anchorage', Arizona: 'America/Phoenix', Arkansas: CHI, California: LA, Colorado: DEN,
+  Connecticut: NY, Delaware: NY, Florida: NY, Georgia: NY, Hawaii: 'Pacific/Honolulu', Idaho: 'America/Boise', Illinois: CHI,
+  Indiana: 'America/Indiana/Indianapolis|America/Indianapolis', Iowa: CHI, Kansas: CHI, Kentucky: NY, Louisiana: CHI, Maine: NY,
+  Maryland: NY, Massachusetts: NY, Michigan: 'America/Detroit', Minnesota: CHI, Mississippi: CHI, Missouri: CHI, Montana: DEN,
+  Nebraska: CHI, Nevada: LA, 'New Hampshire': NY, 'New Jersey': NY, 'New Mexico': DEN, 'New York': NY, 'North Carolina': NY,
+  'North Dakota': CHI, Ohio: NY, Oklahoma: CHI, Pennsylvania: NY, 'Rhode Island': NY, 'South Carolina': NY,
+  'South Dakota': CHI, Tennessee: CHI, Texas: CHI, Utah: DEN, Vermont: NY, Virginia: NY, Washington: LA, 'Washington DC': NY,
+  'West Virginia': NY, Wisconsin: CHI, Wyoming: DEN, 'Puerto Rico': 'America/Puerto_Rico',
+  'Eastern Time': NY, 'Central Time': CHI, 'Mountain Time': DEN, 'Pacific Time': LA,
+  'San Francisco': LA, Seattle: LA, Portland: LA, 'Las Vegas': LA, 'San Diego': LA, Dallas: CHI, Houston: CHI, Austin: CHI,
+  Atlanta: NY, Miami: NY, Boston: NY, Philadelphia: NY, Orlando: NY, 'Salt Lake City': DEN, Nashville: CHI, Minneapolis: CHI,
+  Canada: TOR, Ontario: TOR, Quebec: TOR, Montreal: TOR, Ottawa: TOR, 'British Columbia': 'America/Vancouver',
+  Alberta: 'America/Edmonton', Calgary: 'America/Edmonton', Mexico: 'America/Mexico_City', Brazil: 'America/Sao_Paulo',
+  'Rio de Janeiro': 'America/Sao_Paulo', Argentina: 'America/Argentina/Buenos_Aires|America/Buenos_Aires',
+  UK: 'Europe/London', England: 'Europe/London', Britain: 'Europe/London', Scotland: 'Europe/London', Ireland: 'Europe/Dublin',
+  France: 'Europe/Paris', Germany: 'Europe/Berlin', Spain: 'Europe/Madrid', Italy: 'Europe/Rome', Netherlands: 'Europe/Amsterdam',
+  Belgium: 'Europe/Brussels', Switzerland: 'Europe/Zurich', Austria: 'Europe/Vienna', Sweden: 'Europe/Stockholm', Norway: 'Europe/Oslo',
+  Denmark: 'Europe/Copenhagen', Finland: 'Europe/Helsinki', Poland: 'Europe/Warsaw', Portugal: 'Europe/Lisbon', Greece: 'Europe/Athens',
+  Ukraine: 'Europe/Kyiv|Europe/Kiev', Kyiv: 'Europe/Kyiv|Europe/Kiev', Russia: 'Europe/Moscow', Turkey: 'Europe/Istanbul',
+  Israel: 'Asia/Jerusalem', Egypt: 'Africa/Cairo', 'South Africa': 'Africa/Johannesburg', Nigeria: 'Africa/Lagos', Kenya: 'Africa/Nairobi',
+  UAE: 'Asia/Dubai', 'Saudi Arabia': 'Asia/Riyadh', India: IN, Mumbai: IN, Delhi: IN, Bangalore: IN, Pakistan: 'Asia/Karachi',
+  China: 'Asia/Shanghai', Beijing: 'Asia/Shanghai', Japan: 'Asia/Tokyo', Korea: 'Asia/Seoul', 'South Korea': 'Asia/Seoul',
+  Taiwan: 'Asia/Taipei', Philippines: 'Asia/Manila', Vietnam: 'Asia/Ho_Chi_Minh|Asia/Saigon', Thailand: 'Asia/Bangkok',
+  Indonesia: 'Asia/Jakarta', Australia: 'Australia/Sydney', 'New Zealand': 'Pacific/Auckland',
+};
 const PRESETS = [1, 5, 10, 15, 25, 60];
 const SNOOZE_MIN = 5;
 const RING_MAX_MS = 90_000; // a ring nobody answers stops on its own
@@ -180,6 +211,24 @@ export function createClock(app) {
   }
   const allZones = (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })();
   const zoneName = (tz) => tz.split('/').pop().replace(/_/g, ' ');
+  // what the zone box searches: the places above (shown with the zone they're on), then every zone by its own name
+  const norm = (t) => t.toLowerCase().replace(/[_\s]+/g, ' ').trim();
+  const choices = [
+    ...Object.entries(PLACES).flatMap(([label, alts]) => { const tz = alts.split('|').find((z) => allZones.includes(z)); return tz ? [{ label, tz }] : []; }),
+    ...allZones.map((tz) => ({ label: tz.replace(/_/g, ' '), tz, plain: true })),
+  ];
+  for (const c of choices) { c.key = norm(c.label); c.city = norm(zoneName(c.tz)); }
+  /** Best first: names (or a zone's city) that start with it, then any word that does, then anything containing it. */
+  function zoneMatches(q) {
+    q = norm(q);
+    if (!q) return [];
+    const rank = (c) => {
+      if (c.key.startsWith(q) || (c.plain && c.city.startsWith(q))) return 0;
+      if (c.key.split(/[ /]/).some((w) => w.startsWith(q))) return 1;
+      return c.key.includes(q) ? 2 : -1;
+    };
+    return choices.map((c) => [rank(c), c]).filter(([r]) => r >= 0).sort((a, b) => a[0] - b[0] || !!a[1].plain - !!b[1].plain || a[1].label.localeCompare(b[1].label)).map(([, c]) => c);
+  }
 
   function render() {
     liveEls = [];
@@ -205,21 +254,40 @@ export function createClock(app) {
         h('button', { class: 'icon-btn sm', title: `Remove ${name}`, onclick: () => { save({ clockZones: zones().filter((x) => x !== z) }); render(); } }, icon('x', 'sm'))));
     }
     if (!zones().length) zl.append(h('div', { class: 'faint clock-empty' }, 'No other time zones yet.'));
-    const zin = h('input', { type: 'text', placeholder: 'Add a city or zone, e.g. Tokyo', list: 'clock-zone-list', spellcheck: 'false' });
-    const addZone = () => {
-      const q = zin.value.trim().toLowerCase().replace(/\s+/g, '_');
-      if (!q) return;
-      const tz = allZones.find((z) => z.toLowerCase() === q) || allZones.find((z) => z.toLowerCase().endsWith('/' + q)) || allZones.find((z) => z.toLowerCase().includes(q));
-      if (!tz) { toast('No time zone matches that.', { type: 'warn' }); return; }
-      if (zones().some((z) => z.tz === tz)) { toast(`${zoneName(tz)} is already there.`); return; }
-      save({ clockZones: [...zones(), { tz }] });
+    const zin = h('input', { type: 'text', placeholder: 'Add a city, state or zone, e.g. Tokyo', spellcheck: 'false', autocomplete: 'off' });
+    // our own suggestion list: the browser's one doesn't scroll here and only knows the zones' own names
+    const sug = h('div', { class: 'clock-sug', hidden: true });
+    let found = [], pick = -1;
+    const showSug = () => {
+      found = zoneMatches(zin.value).slice(0, 80);
+      pick = found.length ? 0 : -1;
+      clear(sug).append(...found.map((c, i) => h('div', { class: `clock-sug-row${i === pick ? ' on' : ''}`, onmousedown: (e) => { e.preventDefault(); addZone(c); } },
+        h('span', {}, c.label), c.plain ? null : h('span', { class: 'faint' }, c.tz.replace(/_/g, ' ')))));
+      sug.hidden = !found.length;
+    };
+    const movePick = (d) => {
+      if (!found.length) return;
+      pick = (pick + d + found.length) % found.length;
+      [...sug.children].forEach((r, i) => r.classList.toggle('on', i === pick));
+      sug.children[pick]?.scrollIntoView({ block: 'nearest' });
+    };
+    const addZone = (c = found[pick] || zoneMatches(zin.value)[0]) => {
+      if (!zin.value.trim()) return;
+      if (!c) { toast('No time zone matches that.', { type: 'warn' }); return; }
+      if (zones().some((z) => z.tz === c.tz)) { toast(`${zoneName(c.tz)} is already there.`); return; }
+      save({ clockZones: [...zones(), c.plain ? { tz: c.tz } : { tz: c.tz, label: c.label }] });
       render();
       pop.querySelector('.clock-zone-add input')?.focus();
     };
-    zin.addEventListener('keydown', (e) => { if (e.key === 'Enter') addZone(); });
+    zin.addEventListener('input', showSug);
+    zin.addEventListener('blur', () => { sug.hidden = true; });
+    zin.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') addZone();
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); movePick(e.key === 'ArrowDown' ? 1 : -1); }
+      else if (e.key === 'Escape' && !sug.hidden) { e.stopPropagation(); sug.hidden = true; }
+    });
     pop.append(h('div', { class: 'clock-sec' }, h('div', { class: 'clock-sec-title' }, 'Time zones'), zl,
-      h('div', { class: 'clock-add clock-zone-add' }, zin, h('button', { class: 'btn sm', onclick: addZone }, 'Add')),
-      h('datalist', { id: 'clock-zone-list' }, allZones.map((z) => h('option', { value: z })))));
+      h('div', { class: 'clock-add clock-zone-add' }, zin, h('button', { class: 'btn sm', onclick: () => addZone() }, 'Add')), sug));
 
     // today's events (from the calendar)
     if (app.calendar) {
