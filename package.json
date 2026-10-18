@@ -1,5 +1,5 @@
 {
-  "name": "box-deckspitter",
+  "name": "box-docspitter",
   "version": "1.1.0",
   "description": "Box-Deckspitter — a self-hosted document, PDF, text and code editor that runs entirely on your PC.",
   "main": "server.js",
