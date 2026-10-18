@@ -4,8 +4,6 @@ https://discord.gg/3qxNWFErAV
 
 > local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to
 
-![Box-Deckspitter home screen](docs/screenshot.png)
-
 A self-hosted document workstation that runs entirely on your PC: a Word-style editor, a PDF editor and
 form filler, a notepad, a code/config editor, spreadsheets, a layered image editor, offline OCR, a file
 compare tool, a multi-track video editor and a quick trimmer, a video grabber, Gmail, a YouTube/Spotify-to-MP3
