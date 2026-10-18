@@ -120,7 +120,37 @@ function wordHit(w, t) {
   return grams.filter((g) => t.includes(g)).length / grams.length;
 }
 // versions you almost never want unless the Spotify title says so
-const AVOID = ['live', 'cover', 'karaoke', 'instrumental', 'remix', 'sped up', 'slowed', 'nightcore', '8d', 'reverb', 'reaction', 'tutorial', 'lesson', 'extended', '1 hour', '10 hours', 'loop', 'bass boosted', 'acapella', 'acoustic', 'demo', 'concert', 'club mix'];
+const AVOID = ['live', 'cover', 'karaoke', 'instrumental', 'remix', 'sped up', 'slowed', 'nightcore', '8d', 'reverb', 'reaction', 'tutorial', 'lesson', 'extended', '1 hour', '10 hours', 'loop', 'bass boosted', 'acapella', 'acoustic', 'demo', 'concert', 'club mix',
+  // not music at all: trailers, shows and clips that happen to share a song's name
+  'trailer', 'teaser', 'episode', 'season', 'full movie', 'scene', 'interview', 'review', 'gameplay', 'reaction', 'explained', 'behind the scenes'];
+// words that come with a song's upload title and say nothing about which song it is
+const TITLE_TAGS = ['official', 'music', 'video', 'audio', 'lyric', 'lyrics', 'mv', 'pv', 'hd', 'hq', '4k', 'remaster', 'remastered', 'version', 'ver', 'feat', 'ft', 'prod', 'with', 'full', 'song', 'album', 'single', 'the', 'a', 'and', 'by', 'visualizer', 'color', 'coded', 'sub', 'subs', 'english', 'romaji'];
+const LATIN = /^[\p{Script=Latin}\p{N} ]+$/u;
+
+/** How sure a result is by the song's artist: 1 by name (in the channel, or the artist part of an "Artist - Song" title),
+ *  a share when only some of the name's words are there (a romanisation spelled a little differently), 0 when nothing
+ *  says either way, -1 when it's clearly someone else's. A name that's only somewhere in the title doesn't count (a
+ *  video can use the artist's name as an ordinary word); a Japanese/Chinese/Korean artist part or channel is let through for a Latin-letter name, as it's
+ *  likely the same artist written natively (泰葉 for Yasuha), unless another Latin-letter name sits in the artist part. */
+function artistFit(c, want) {
+  const a = norm(String(want.artist || '').split(',')[0]);
+  if (!a) return 0;
+  const ch = norm(c.channel || c.uploader);
+  const songW = norm(want.title).split(' ').filter((w) => w.length > 1 || CJK.test(w));
+  // the title's other parts (split at " - ", " | ", 「 」 …) once the part naming the song is taken out
+  const parts = String(c.title || '').split(/\s[-–—|:]\s|[|「」『』【】]/).map(norm).filter(Boolean);
+  const songAt = parts.findIndex((p) => songW.length && songW.every((w) => wordHit(w, p) >= 0.5));
+  const slot = parts.length > 1 ? parts.filter((_, i) => i !== songAt).join(' ') : '';
+  const has = (x) => x.includes(a) || x.split(' ').includes(a);
+  if (has(ch) || (slot && has(slot)) || new RegExp(`\\bby ${a}\\b`).test(norm(c.title))) return 1;
+  const aw = a.split(' ').filter((w) => w.length > 2);
+  const some = aw.filter((w) => ch.split(' ').includes(w) || slot.split(' ').includes(w)).length / (a.split(' ').length || 1);
+  if (some) return some;
+  if (!LATIN.test(a)) return 0;
+  const latinSlot = /\p{Script=Latin}/u.test(slot.replace(/\b(official|music|video|audio|lyrics?|mv|hd|hq|full|ver(sion)?|feat|ft)\b/g, ''));
+  if (!latinSlot && (CJK.test(slot) || CJK.test(ch))) return 0;
+  return -1;
+}
 
 function score(c, want) {
   const t = norm(c.title);
@@ -135,8 +165,21 @@ function score(c, want) {
   const words = wantT.split(' ').filter((w) => w.length > 1 || CJK.test(w));
   const hit = words.reduce((n, w) => n + wordHit(w, t), 0) / (words.length || 1);
   s += Math.round(hit * 35);
-  if (firstArtist && (t.includes(firstArtist) || ch.includes(firstArtist))) s += 20;
-  if (/ topic$/.test(ch)) s += 25; // YouTube's auto-generated "Artist - Topic" uploads are the studio recording
+  // the artist: a same-named song by someone else is the commonest wrong match, so a missing artist costs, not just a
+  // missing bonus (see artistFit).
+  let artistHit = 0;
+  if (firstArtist) {
+    artistHit = artistFit(c, want);
+    if (artistHit > 0) s += Math.round(artistHit * 20);
+    else if (artistHit < 0) s -= 35;
+  }
+  // YouTube's auto-generated "Artist - Topic" uploads are the studio recording, of the right song when it's the right artist
+  if (/ topic$/.test(ch)) s += artistHit > 0 || !firstArtist ? 25 : 5;
+  // a song's upload is titled with little more than the artist and the song; a long title of other words is a vlog, a
+  // news clip or a show that just mentions them
+  const known = new Set([...wantT.split(' '), ...firstArtist.split(' '), ...TITLE_TAGS]);
+  const extra = t.split(' ').filter((w) => w && !known.has(w) && !/^\d+$/.test(w)).length;
+  if (extra > 10) s -= 35; else if (extra > 6) s -= 15;
   if (/official audio/.test(t)) s += 10;
   if (/official (music )?video/.test(t)) s += 2; // videos often have intros/outros
   for (const w of AVOID) if (new RegExp(`\\b${w}\\b`).test(t) && !wantT.includes(w)) s -= 45;
@@ -155,10 +198,11 @@ module.exports = function createSpotify({ secrets, saveSecrets, readJSONBody, ru
       const json = JSON.parse(await runCapture(exe, ['-J', '--flat-playlist', '--no-warnings', '--', `ytsearch8:${q.replace(/["\n]/g, ' ')}`], timeoutMs));
       return (json.entries || []).filter((e) => e && (e.url || e.id)).map((e) => ({
         url: e.url && /^https?:/.test(e.url) ? e.url : `https://www.youtube.com/watch?v=${e.id}`, title: e.title, duration: e.duration, channel: e.channel || e.uploader,
-      })).map((c) => ({ ...c, score: score(c, want) })).sort((a, b) => b.score - a.score)[0];
+      })).map((c) => ({ ...c, score: score(c, want) })).filter((c) => artistFit(c, want) >= 0).sort((a, b) => b.score - a.score)[0];
     };
     let best = await search(artist ? `${artist} - ${want.title}` : want.title);
-    // nothing close: try the title on its own (Spotify's English artist name often isn't how YouTube writes it, e.g. Yasuha / 泰葉)
+    // nothing close: try the title on its own (results not by the artist are dropped above, so this can't take a same-named
+    // song by someone else, or a trailer, and file it under the wanted name) (Spotify's English artist name often isn't how YouTube writes it, e.g. Yasuha / 泰葉)
     if ((!best || best.score < 35) && artist) { const b2 = await search(want.title); if (b2 && (!best || b2.score > best.score)) best = b2; }
     if (!best || best.score < 35) throw err(404, 'no close enough match on YouTube');
     return best;

@@ -10,6 +10,7 @@ import { modal, confirmDialog, choiceDialog, toast, errorToast } from '../core/u
 import { detectMode, extForLang, OPEN_FILTERS, VIDEO_FILTERS, PAINT_EXT } from '../core/filetypes.js';
 import { pickOpen, pickSave, setLastDir, getLastDir } from '../core/files.js';
 import { TOOLS, EDITORS, SINGLE_MODES } from '../core/tools.js';
+import { openSharedFile } from '../core/playlist-share.js';
 
 const HTML_TEMPLATE = `<!doctype html>
 <html lang="en">
@@ -48,6 +49,8 @@ export class DocumentsPart {
   }
 
   async openPath(path, { mode: forcedMode } = {}) {
+    // a shared playlist opens in BoxTape, ready to download its songs
+    if (!forcedMode && extOf(path) === 'plylst') return openSharedFile(this, { path });
     const existing = this.tabs.find((t) => t.path && t.path.toLowerCase() === path.toLowerCase());
     if (existing && (!forcedMode || existing.mode === forcedMode)) { this.activate(existing); return existing; }
     const name = basename(path);
@@ -92,6 +95,7 @@ export class DocumentsPart {
 
   /** Open in-memory bytes (drag & drop, version copies). */
   async openBytes(name, bytes, { mode, path = null } = {}) {
+    if (!mode && extOf(name) === 'plylst') return openSharedFile(this, { text: new TextDecoder().decode(bytes).replace(/^\uFEFF/, '') });
     const tab = this.createTab({ title: name, path, ext: extOf(name) });
     this.activate(tab);
     try {

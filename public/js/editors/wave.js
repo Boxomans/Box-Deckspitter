@@ -17,6 +17,12 @@ const AUDIO_EXT = ['wav', 'mp3', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'wm
 const OUT = [['wav', 'WAV (16-bit)'], ['mp3', 'MP3'], ['flac', 'FLAC'], ['ogg', 'OGG Vorbis'], ['opus', 'Opus'], ['m4a', 'M4A (AAC)']];
 const UNDO_BYTES = 768 * 1024 * 1024;
 const stream = (p) => `/api/stream?token=${encodeURIComponent(api.token)}&path=${encodeURIComponent(p)}`;
+/** "1:02.5", "62.5" or "1:02:03" → seconds (null if it isn't a time). */
+const parseTime = (t) => {
+  const p = String(t).trim().split(':');
+  if (!p.length || p.length > 3 || p.some((x) => !/^\d*\.?\d+$/.test(x.trim()))) return null;
+  return p.reduce((acc, x) => acc * 60 + parseFloat(x), 0);
+};
 const fmt = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`; };
 const REC_WORKLET = URL.createObjectURL(new Blob([`registerProcessor('bds-rec', class extends AudioWorkletProcessor {
   process(inputs) { const i = inputs[0]; if (i && i.length) this.port.postMessage(i.map((c) => c.slice(0))); return true; }
@@ -87,9 +93,12 @@ export class WaveEditor extends BaseEditor {
     this.app.renderTabs?.();
   }
 
-  /** Remember the sound before a change (for undo). */
-  snapshot(label) {
-    this.undoStack.push({ label, ch: this.ch.map((c) => c.slice()), len: this.len, sel: { ...this.sel } });
+  /** Remember the sound before a change (for undo). `redo` does the change again on whatever the sound is then, so
+   *  an effect further back can be taken out or moved and everything after it done again. An effect or filter gives
+   *  `again(a, b)` instead, which does it on any stretch, and `fx` = [a, b], where it went; the Applied list shows those. */
+  snapshot(label, redo = null, fx = null, again = null) {
+    if (again) redo = () => again(fx[0], fx[1]);
+    this.undoStack.push({ label, redo, fx, again, ch: this.ch.map((c) => c.slice()), len: this.len, sel: { ...this.sel } });
     this.redoStack = [];
     // keep the newest steps that fit
     let bytes = 0;
@@ -109,7 +118,7 @@ export class WaveEditor extends BaseEditor {
     const s = from.pop();
     if (!s) return;
     this.stop();
-    to.push({ label: s.label, ch: this.ch, len: this.len, sel: { ...this.sel } });
+    to.push({ ...s, ch: this.ch, len: this.len, sel: { ...this.sel } });
     this.ch = s.ch; this.len = s.len; this.sel = s.sel;
     this.clampView();
     this.changed();
@@ -156,8 +165,9 @@ export class WaveEditor extends BaseEditor {
   del(label = 'Delete') {
     if (!this.need()) return;
     this.stop();
-    this.snapshot(label);
-    this.splice(this.sel.a, this.sel.b);
+    const { a, b } = this.sel;
+    this.snapshot(label, () => this.splice(a, b));
+    this.splice(a, b);
     this.sel = { a: this.sel.a, b: this.sel.a };
     this.clampView();
     this.changed();
@@ -166,9 +176,9 @@ export class WaveEditor extends BaseEditor {
     const clip = WaveEditor.clip;
     if (!clip) { toast('Nothing copied yet.'); return; }
     this.stop();
-    this.snapshot('Paste');
-    const a = this.sel.a;
-    this.splice(a, this.sel.b, clip);
+    const a = this.sel.a, b = this.sel.b;
+    this.snapshot('Paste', () => this.splice(a, b, clip));
+    this.splice(a, b, clip);
     this.sel = { a, b: a + clip[0].length };
     this.clampView();
     this.changed();
@@ -176,18 +186,20 @@ export class WaveEditor extends BaseEditor {
   trim() {
     if (!this.need()) return;
     this.stop();
-    this.snapshot('Trim');
     const { a, b } = this.sel;
-    this.ch = this.ch.map((c) => c.slice(a, b));
-    this.len = b - a;
+    const keep = () => { this.ch = this.ch.map((c) => c.slice(a, b)); this.len = this.ch[0]?.length || 0; };
+    this.snapshot('Trim', keep);
+    keep();
     this.sel = { a: 0, b: this.len };
     this.fitView();
     this.changed();
   }
   silence() {
     if (!this.need()) return;
-    this.snapshot('Silence');
-    for (const c of this.ch) c.fill(0, this.sel.a, this.sel.b);
+    const { a, b } = this.sel;
+    const hush = (a2, b2) => { for (const c of this.ch) c.fill(0, a2, b2); };
+    this.snapshot('Silence', null, [a, b], hush);
+    hush(a, b);
     this.changed();
   }
   insertSilence = async () => {
@@ -195,9 +207,13 @@ export class WaveEditor extends BaseEditor {
     const s = +v;
     if (!(s > 0)) return;
     const n = Math.round(Math.min(3600, s) * SR);
-    this.snapshot('Insert silence');
-    this.splice(this.sel.a, this.sel.a, Array.from({ length: this.chans }, () => new Float32Array(n)));
-    if (!this.ch.length) this.ch = [new Float32Array(n), new Float32Array(n)];
+    const at = this.sel.a;
+    const add = () => {
+      this.splice(at, at, Array.from({ length: this.chans }, () => new Float32Array(n)));
+      if (!this.ch.length) { this.ch = [new Float32Array(n), new Float32Array(n)]; this.len = n; }
+    };
+    this.snapshot('Insert silence', add);
+    add();
     this.sel = { a: this.sel.a, b: this.sel.a + n };
     this.fitIfEmpty();
     this.changed();
@@ -209,8 +225,9 @@ export class WaveEditor extends BaseEditor {
     if (!this.need(false)) return;
     const [a, b] = this.range();
     this.stop();
-    this.snapshot(label);
-    this.ch.forEach((c, i) => fn(c, a, b, i));
+    const run = (a2, b2) => this.ch.forEach((c, i) => fn(c, a2, b2, i));
+    this.snapshot(label, null, [a, b], run);
+    run(a, b);
     this.changed();
   }
   peak(a, b) { let p = 0; for (const c of this.ch) for (let i = a; i < b; i++) { const v = Math.abs(c[i]); if (v > p) p = v; } return p; }
@@ -245,10 +262,12 @@ export class WaveEditor extends BaseEditor {
   invert() { this.process('Invert', (c, a, b) => { for (let i = a; i < b; i++) c[i] = -c[i]; }); }
   toMono() {
     if (!this.need(false) || this.ch.length < 2) return;
-    this.snapshot('Make mono');
-    const m = new Float32Array(this.len);
-    for (let i = 0; i < this.len; i++) m[i] = (this.ch[0][i] + this.ch[1][i]) / 2;
-    this.ch = [m, m.slice()];
+    const mono = (a, b) => {
+      if (this.ch.length < 2) return;
+      for (let i = a; i < b; i++) this.ch[0][i] = this.ch[1][i] = (this.ch[0][i] + this.ch[1][i]) / 2;
+    };
+    this.snapshot('Make mono', null, [0, this.len], mono);
+    mono(0, this.len);
     this.changed();
   }
 
@@ -260,26 +279,76 @@ export class WaveEditor extends BaseEditor {
     this.busy(`${label}…`);
     try {
       const outLen = Math.max(1, Math.round(n / speed));
-      const ctx = new OfflineAudioContext(2, outLen, SR);
-      const buf = ctx.createBuffer(2, n, SR);
-      for (let c = 0; c < 2; c++) buf.copyToChannel((this.ch[c] || this.ch[0]).subarray(a, b), c);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.playbackRate.value = speed;
-      const out = ctx.createGain();
-      await build(ctx, src, out);
-      out.connect(ctx.destination);
-      src.start();
-      const r = await ctx.startRendering();
+      const r = await this.renderRange(a, b, build, speed);
       this.stop();
-      this.snapshot(label);
-      this.splice(a, b, [r.getChannelData(0), r.getChannelData(1)]);
+      this.snapshot(label, null, [a, b], async (a2, b2) => this.splice(a2, b2, await this.renderRange(a2, b2, build, speed)));
+      this.splice(a, b, r);
       this.sel = { a, b: a + outLen };
       this.clampView();
       this.changed();
     } catch (e) { errorToast(e, `Couldn’t ${label.toLowerCase()}`); }
     this.busy(null);
   }
+
+  /** [a,b) of the sound through build(ctx, input, output), as new channels. */
+  async renderRange(a, b, build, speed = 1) {
+    const n = b - a;
+    const ctx = new OfflineAudioContext(2, Math.max(1, Math.round(n / speed)), SR);
+    const buf = ctx.createBuffer(2, n, SR);
+    for (let c = 0; c < 2; c++) buf.copyToChannel((this.ch[c] || this.ch[0]).subarray(a, b), c);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = speed;
+    const out = ctx.createGain();
+    await build(ctx, src, out);
+    out.connect(ctx.destination);
+    src.start();
+    const r = await ctx.startRendering();
+    return [r.getChannelData(0), r.getChannelData(1)];
+  }
+
+  /** Take one effect back out (`to` null) or do it on another stretch instead (`to` = [a, b]): back to the sound
+   *  before it, then every later step done again on top. */
+  async rebuild(k, to = null) {
+    const e = this.undoStack[k];
+    if (!e?.fx || this.busyNow) return;
+    const what = to ? `moving ${e.label}` : `taking out ${e.label}`;
+    // an "undo that" step from an earlier rebuild belongs to the old sound; it goes
+    const later = this.undoStack.slice(k + 1).filter((x) => !x.jump);
+    if (later.some((x) => !x.redo)) { toast(`A step after ${e.label} can’t be done again, so it can only be undone.`, { type: 'error' }); return; }
+    const lenAfter = later[0]?.len;
+    this.stop();
+    this.busyNow = true;
+    this.busy(`${what[0].toUpperCase()}${what.slice(1)}…`);
+    const keep = { stack: this.undoStack, ch: this.ch, len: this.len, sel: { ...this.sel } };
+    try {
+      this.undoStack = this.undoStack.slice(0, k);
+      this.ch = e.ch.map((c) => c.slice()); this.len = e.len;
+      if (to) {
+        this.undoStack.push({ ...e, fx: to, redo: () => e.again(to[0], to[1]), ch: this.ch.map((c) => c.slice()), len: this.len });
+        await e.again(to[0], to[1]);
+      }
+      // the steps after it are placed by time, so they only fit if the length comes out the same
+      if (later.length && this.len !== lenAfter) throw new Error(`${e.label} changes the length, and the steps after it are placed by time, so it can only be ${to ? 'moved' : 'taken out'} while it’s the latest step. Undo back to it instead.`);
+      for (const x of later) {
+        this.undoStack.push({ ...x, ch: this.ch.map((c) => c.slice()), len: this.len });
+        await x.redo();
+      }
+      // undo puts it back how it was
+      this.undoStack.push({ label: what, jump: true, redo: null, fx: null, ch: keep.ch, len: keep.len, sel: keep.sel });
+      this.redoStack = [];
+      this.sel = to ? { a: to[0], b: to[1] } : keep.sel;
+      this.clampView();
+      this.changed();
+      toast(to ? `${e.label} now on ${fmt(to[0] / SR)} → ${fmt(to[1] / SR)}` : `Took out ${e.label}`, { timeout: 1600 });
+    } catch (err) {
+      Object.assign(this, { undoStack: keep.stack, ch: keep.ch, len: keep.len, sel: keep.sel });
+      errorToast(err, `Couldn’t do that`);
+    }
+    this.busyNow = false;
+    this.busy(null);
+  }
+  removeFx(k) { return this.rebuild(k); }
 
   async speed() {
     const v = await promptDialog('Change speed', 'Speed (0.25–4; the pitch goes with it, like a tape)', '1.25');
@@ -407,9 +476,9 @@ export class WaveEditor extends BaseEditor {
     if (!n) return;
     const join = (list) => { const o = new Float32Array(n); let at = 0; for (const p of list) { o.set(p.subarray(0, n - at), at); at += p.length; if (at >= n) break; } return o; };
     const ins = [join(r.parts[0]), join(r.parts[1])];
-    this.snapshot('Recording');
-    if (!this.ch.length) this.ch = [new Float32Array(0), new Float32Array(0)];
-    this.splice(r.at, r.b, ins);
+    const put = () => { if (!this.ch.length) this.ch = [new Float32Array(0), new Float32Array(0)]; this.splice(r.at, r.b, ins); };
+    this.snapshot('Recording', put);
+    put();
     this.sel = { a: r.at, b: r.at + n };
     if (!this.path && this.name === 'Untitled') this.name = `Recording ${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
     this.setTitle();
@@ -474,6 +543,24 @@ export class WaveEditor extends BaseEditor {
       if (!onlySel) { this.path = dest; this.name = stripExt(basename(dest)); this.setTitle(); this.dirty = false; }
       toast(`Exported ${basename(dest)}`, { type: 'ok', action: { label: 'Show', fn: () => api.reveal(dest) } });
     } catch (e) { errorToast(e); }
+    this.busy(null);
+  }
+
+  /** The selection straight into the audio dump, for the music player: an MP3 (a WAV without ffmpeg), named after the sound. */
+  async exportToDump() {
+    if (!this.need()) return;
+    const { a, b } = this.sel;
+    this.busy('Saving to the audio dump…');
+    try {
+      const tools = await api.get('/api/tools').catch(() => ({}));
+      const fmt = tools.ffmpeg ? 'mp3' : 'wav';
+      const res = await fetch(`/api/wave/export?dump=audio&format=${fmt}&name=${encodeURIComponent(`${this.name || 'Sound'} (part)`)}`,
+        { method: 'POST', headers: { 'X-BDS-Token': api.token }, body: this.wav(fmt === 'wav' ? 16 : 32, a, b) });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || 'Couldn’t save it');
+      await this.app.music?.refresh?.();
+      toast(`Saved ${out.name} to the audio dump`, { type: 'ok', action: { label: 'Play', fn: () => this.app.music?.playByName(out.name) } });
+    } catch (e) { errorToast(e, 'Couldn’t save it to the audio dump'); }
     this.busy(null);
   }
 
@@ -562,6 +649,7 @@ export class WaveEditor extends BaseEditor {
   buildUI() {
     this.cv = h('canvas', { class: 'wv-canvas' });
     this.head = h('div', { class: 'wv-head', hidden: true });
+    this.played = h('div', { class: 'wv-played', hidden: true });
     this.ruler = h('canvas', { class: 'wv-ruler' });
     this.empty = h('div', { class: 'wv-empty' },
       icon('wave', 'xl'), h('div', {}, 'Open a sound, drop one here, or record from your mic.'),
@@ -569,16 +657,17 @@ export class WaveEditor extends BaseEditor {
         h('button', { class: 'btn primary', onclick: () => this.open() }, icon('folder-open', 'sm'), 'Open…'),
         h('button', { class: 'btn', onclick: () => this.record() }, icon('rec', 'sm'), 'Record')));
     this.busyEl = h('div', { class: 'wv-busy', hidden: true });
-    this.wrap = h('div', { class: 'wv-wrap', tabindex: '0' }, this.ruler, h('div', { class: 'wv-tracks' }, this.cv, this.head), this.empty, this.busyEl);
+    this.wrap = h('div', { class: 'wv-wrap', tabindex: '0' }, this.ruler, h('div', { class: 'wv-tracks' }, this.cv, this.played, this.head), this.empty, this.busyEl);
     this.timeEl = h('span', { class: 'wv-time mono' }, '0:00.000');
     this.recEl = h('span', { class: 'wv-rectime mono', hidden: true });
     this.selEl = h('div', { class: 'wv-selinfo mono' });
+    this.fxEl = h('div', { class: 'wv-applied', hidden: true });
     this.scroll = h('input', { type: 'range', class: 'wv-scroll', min: '0', max: '1000', value: '0', oninput: () => {
       const w = this.cv.clientWidth;
       this.view.start = (+this.scroll.value / 1000) * Math.max(0, this.len - w * this.view.spp);
       this.render();
     } });
-    this.root = h('div', { class: 'wv' }, this.wrap, this.scroll, h('div', { class: 'wv-bar' }, this.timeEl, this.recEl, h('div', { class: 'grow' }), this.selEl));
+    this.root = h('div', { class: 'wv' }, this.wrap, this.scroll, this.fxEl, h('div', { class: 'wv-bar' }, this.timeEl, this.recEl, h('div', { class: 'grow' }), this.selEl));
     this.pane.append(this.root);
     this.ro = new ResizeObserver(() => { this.clampView(); this.render(); });
     this.ro.observe(this.wrap);
@@ -610,7 +699,11 @@ export class WaveEditor extends BaseEditor {
         this.sel = { a: Math.min(anchor, s), b: Math.max(anchor, s) };
         this.render();
       };
-      const up = () => { cv.removeEventListener('pointermove', move); cv.removeEventListener('pointerup', up); if (wasPlaying) this.play(); };
+      const up = () => {
+        cv.removeEventListener('pointermove', move); cv.removeEventListener('pointerup', up);
+        if (this.editing && this.sel.b > this.sel.a) { this.editing.a = this.sel.a; this.editing.b = this.sel.b; this.render(); }
+        if (wasPlaying) this.play();
+      };
       cv.addEventListener('pointermove', move);
       cv.addEventListener('pointerup', up);
     });
@@ -626,6 +719,7 @@ export class WaveEditor extends BaseEditor {
         { sep: true },
         { label: 'Effects', icon: 'wand', submenu: this.fxMenu() },
         { label: 'Export the selection…', icon: 'download', disabled: !this.hasSel(), action: () => this.exportAs(true) },
+        { label: 'Export the selection to the audio dump', icon: 'music', disabled: !this.hasSel(), action: () => this.exportToDump() },
         { sep: true },
         { label: 'Select all', action: () => this.selectAll() },
       ]);
@@ -649,8 +743,8 @@ export class WaveEditor extends BaseEditor {
       this.busy('Adding…');
       try {
         const ins = await this.decode(await (await fetch(stream(p))).arrayBuffer());
-        this.snapshot(`Add ${basename(p)}`);
         const a = this.sel.a;
+        this.snapshot(`Add ${basename(p)}`, () => this.splice(a, a, ins));
         this.splice(a, a, ins);
         this.sel = { a, b: a + ins[0].length };
         this.changed();
@@ -681,7 +775,7 @@ export class WaveEditor extends BaseEditor {
     if (e.key === 'Delete' || e.key === 'Backspace') return run(() => this.del());
     if (e.key === 'Home') return run(() => { this.sel = { a: 0, b: 0 }; this.view.start = 0; this.render(); });
     if (e.key === 'End') return run(() => { this.sel = { a: this.len, b: this.len }; this.view.start = this.len; this.clampView(); this.render(); });
-    if (e.key === 'Escape') return run(() => { this.sel = { a: this.sel.a, b: this.sel.a }; this.render(); });
+    if (e.key === 'Escape') return run(() => { if (this.editing) { this.editFx(null); return; } this.sel = { a: this.sel.a, b: this.sel.a }; this.render(); });
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       return run(() => {
         const d = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? SR : Math.max(1, Math.round(this.view.spp * 10)));
@@ -714,7 +808,68 @@ export class WaveEditor extends BaseEditor {
     const { a, b } = this.sel;
     clear(this.selEl).append(this.len ? (b > a ? `${fmt(a / SR)} → ${fmt(b / SR)}  ·  ${fmt((b - a) / SR)}` : `cursor ${fmt(a / SR)}`) : '', this.len ? `  ·  ${fmt(this.dur)} · ${this.ch.length === 1 ? 'mono' : 'stereo'} · 48 kHz` : '');
     if (!this.src) this.timeEl.textContent = fmt(a / SR);
+    this.renderApplied();
     this.refreshStatus();
+  }
+
+  /** The effects and filters on the sound, each with an × to take it back out. Clicking one opens where it goes:
+   *  type the times, or drag across the waveform, then Apply. */
+  renderApplied() {
+    const list = this.undoStack.map((e, k) => [e, k]).filter(([e]) => e.fx);
+    if (this.editing && !this.undoStack.includes(this.editing.e)) this.editing = null;
+    this.fxEl.hidden = !list.length;
+    if (this.editing && this.fxEl.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') {
+      // typing in a time box: leave the boxes alone, only follow a drag on the waveform
+      return;
+    }
+    clear(this.fxEl);
+    if (!list.length) return;
+    this.fxEl.append(h('span', { class: 'wv-applied-h' }, 'Applied'));
+    for (const [e, k] of list) {
+      const [a, b] = e.fx;
+      const where = a === 0 && b >= e.len ? 'on everything' : `on ${fmt(a / SR)} → ${fmt(b / SR)}`;
+      const on = this.editing?.e === e;
+      this.fxEl.append(h('span', { class: `wv-chip${on ? ' on' : ''}`, 'data-tip': `${e.label}, ${where}. Click to change where it goes`,
+        onclick: () => this.editFx(on ? null : e) },
+      e.label,
+      h('button', { class: 'wv-chip-x', 'data-tip': `Take out ${e.label}`, onclick: (ev) => { ev.stopPropagation(); this.removeFx(k); } }, icon('x', 'sm'))));
+    }
+    if (this.editing) {
+      const ed = this.editing;
+      const box = (v, set) => h('input', { class: 'wv-time-in mono', value: fmt(v / SR), spellcheck: 'false',
+        onkeydown: (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ev.target.blur(); this.applyEdit(); } else if (ev.key === 'Escape') { ev.preventDefault(); this.editFx(null); } },
+        onchange: (ev) => {
+          const t = parseTime(ev.target.value);
+          if (t == null) { ev.target.value = fmt(v / SR); return; }
+          set(clamp(Math.round(t * SR), 0, this.len));
+          if (ed.b < ed.a) [ed.a, ed.b] = [ed.b, ed.a];
+          this.sel = { a: ed.a, b: ed.b };
+          this.render();
+        } });
+      this.fxEl.append(h('span', { class: 'wv-fxedit' },
+        h('span', { class: 'wv-fxedit-h' }, ed.e.label),
+        box(ed.a, (x) => { ed.a = x; }), '→', box(ed.b, (x) => { ed.b = x; }),
+        h('button', { class: 'btn sm', 'data-tip': 'Use the whole sound', onclick: () => { ed.a = 0; ed.b = this.len; this.sel = { a: 0, b: this.len }; this.render(); } }, 'All'),
+        h('button', { class: 'btn sm primary', onclick: () => this.applyEdit() }, 'Apply'),
+        h('button', { class: 'btn sm', onclick: () => this.editFx(null) }, 'Cancel')));
+    }
+  }
+  /** Start (or stop) changing where an applied effect goes; the selection shows it and dragging changes it. */
+  editFx(e) {
+    if (!e) { this.editing = null; this.render(); return; }
+    const [a, b] = e.fx;
+    this.editing = { e, a: Math.min(a, this.len), b: Math.min(b, this.len) };
+    this.sel = { a: this.editing.a, b: this.editing.b };
+    this.render();
+  }
+  applyEdit() {
+    const ed = this.editing;
+    if (!ed) return;
+    const k = this.undoStack.indexOf(ed.e);
+    this.editing = null;
+    if (ed.b <= ed.a) { toast('Pick a stretch with a start before its end.', { type: 'error' }); this.render(); return; }
+    if (k < 0 || (ed.a === ed.e.fx[0] && ed.b === ed.e.fx[1])) { this.render(); return; }
+    this.rebuild(k, [ed.a, ed.b]);
   }
 
   colors() {
@@ -802,10 +957,16 @@ export class WaveEditor extends BaseEditor {
   }
 
   drawHead(p = this.src ? this.playPos() : null) {
-    if (p == null) { this.head.hidden = true; return; }
+    if (p == null) { this.head.hidden = true; this.played.hidden = true; return; }
     const x = (p - this.view.start) / this.view.spp;
     this.head.hidden = x < 0 || x > this.cv.clientWidth;
     this.head.style.transform = `translateX(${x}px)`;
+    // what's been played so far, tinted: from where playback started (a selection's start), clipped to the view
+    const x0 = clamp(((this.playFrom?.a ?? 0) - this.view.start) / this.view.spp, 0, this.cv.clientWidth);
+    const x1 = clamp(x, 0, this.cv.clientWidth);
+    this.played.hidden = x1 <= x0;
+    this.played.style.left = `${x0}px`;
+    this.played.style.width = `${x1 - x0}px`;
   }
 
   // ================================================================ BaseEditor

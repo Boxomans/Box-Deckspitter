@@ -12,6 +12,15 @@ const { spawn } = require('child_process');
 
 const DEFAULT_REPO = 'Boxomans/Box-Deckspitter';
 const BRANCH = 'main';
+// package names this app has shipped under: an update may carry either (the package is renamed once every copy accepts both)
+const APP_PACKAGES = ['box-docspitter', 'box-deckspitter'];
+// electron/main.js is never replaced by an update. These versions of it differ only in the app's name, so an update
+// that carries one while another is installed doesn't count as a launcher change (sha-256, line endings ignored).
+const SAME_LAUNCHER = new Set([
+  'f458645139b1898760580b19af765d0c18bf44eecd20ac9f00d202e133c843fc',
+  '9b2816413c3c335316ccb1316420af325294e5b2877f034a77e6023f4cfc24cd',
+]);
+const launcherHash = (buf) => require('crypto').createHash('sha256').update(buf.toString('utf8').replace(/\r\n/g, '\n')).digest('hex');
 const MAX_ZIP = 300 * 1024 * 1024;
 const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-(docspitter|deckspitter)\.exe$/i];
 // Files that must be in any real release.
@@ -225,7 +234,7 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
       if (rel === 'electron/main.js') {
         let cur = null;
         try { cur = fs.readFileSync(path.join(root, 'electron', 'main.js')); } catch { /* none */ }
-        launcherDiffers = !cur || !cur.equals(buf);
+        launcherDiffers = !cur || (!cur.equals(buf) && !(SAME_LAUNCHER.has(launcherHash(cur)) && SAME_LAUNCHER.has(launcherHash(buf))));
       }
       if (isProtected(rel)) continue;
       files.set(rel, buf);
@@ -233,7 +242,7 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
     for (const r of REQUIRED) if (!files.has(r)) throw err(502, `The download is missing ${r}; stopped.`);
     let newPkg;
     try { newPkg = JSON.parse(files.get('package.json').toString('utf8')); } catch { throw err(502, 'The new package.json is unreadable; stopped.'); }
-    if (newPkg.name !== pkg().name) throw err(502, 'The download is a different app; stopped.');
+    if (!APP_PACKAGES.includes(newPkg.name)) throw err(502, 'The download is a different app; stopped.');
     if (cmpVersion(newPkg.version, version) <= 0) throw err(400, `The download is ${newPkg.version}, which isn’t newer than ${version}.`);
     if (launcherDiffers) throw err(409, 'This update changes the app launcher (electron/main.js), so it has to be installed by copying the new version over, not from inside the app.');
     const missing = depsMissing(newPkg);

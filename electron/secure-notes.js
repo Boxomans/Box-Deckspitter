@@ -36,7 +36,8 @@ const MAX_PIN_FAILS = 5;
 const KEEP_BACKUPS = 10;
 const CLIPBOARD_CLEAR_MS = 20000;
 const LIMITS = { title: 300, username: 500, password: 2000, url: 2000, notes: 200000, entries: 5000 };
-const DPAPI_ENTROPY = 'Box-DocSpitter secure notes device key v1';
+const DPAPI_ENTROPY = 'Box-Deckspitter secure notes device key v1';
+const OLD_DPAPI_ENTROPY = 'Box-DocSpitter secure notes device key v1'; // device keys sealed before 1.1.1 (no "2:" in front): read once, then sealed again
 
 const b64 = (b) => Buffer.from(b).toString('base64');
 const unb64 = (s) => Buffer.from(String(s || ''), 'base64');
@@ -64,10 +65,10 @@ function open(key, box, aad) {
 }
 
 /** Windows DPAPI (current user) through PowerShell. Data goes over stdin/stdout, never on the command line. */
-function dpapi(op, buf) {
+function dpapi(op, buf, entropy = DPAPI_ENTROPY) {
   if (process.platform !== 'win32') return Promise.reject(fail('Secure notes need Windows.', 'platform'));
   const fn = op === 'protect' ? 'Protect' : 'Unprotect';
-  const script = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; $in=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); $e=[Text.Encoding]::UTF8.GetBytes('${DPAPI_ENTROPY}'); $o=[Security.Cryptography.ProtectedData]::${fn}($in,$e,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($o))`;
+  const script = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; $in=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); $e=[Text.Encoding]::UTF8.GetBytes('${entropy}'); $o=[Security.Cryptography.ProtectedData]::${fn}($in,$e,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($o))`;
   return new Promise((resolve, reject) => {
     const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
@@ -164,13 +165,22 @@ module.exports = function createSecureNotes({ dir, clipboard, onLockChange = () 
       const key = crypto.randomBytes(32);
       fs.mkdirSync(dir, { recursive: true });
       if (fs.existsSync(DEVICE)) fs.copyFileSync(DEVICE, DEVICE + '.old');
-      fs.writeFileSync(DEVICE, b64(await dpapi('protect', key)));
+      fs.writeFileSync(DEVICE, '2:' + b64(await dpapi('protect', key)));
       return key;
     }
     if (!fs.existsSync(DEVICE)) throw fail('This PC’s key for Secure notes is missing. Open them with your secure key.', 'device');
     try {
-      const key = await dpapi('unprotect', unb64(fs.readFileSync(DEVICE, 'utf8').trim()));
+      const saved = fs.readFileSync(DEVICE, 'utf8').trim();
+      const old = !saved.startsWith('2:');
+      const key = await dpapi('unprotect', unb64(old ? saved : saved.slice(2)), old ? OLD_DPAPI_ENTROPY : DPAPI_ENTROPY);
       if (key.length !== 32) throw new Error('bad key');
+      if (old) {
+        try {
+          const tmp = DEVICE + '.tmp';
+          fs.writeFileSync(tmp, '2:' + b64(await dpapi('protect', key)));
+          fs.renameSync(tmp, DEVICE);
+        } catch { /* still sealed the old way: tried again next time */ }
+      }
       return key;
     } catch (e) {
       if (e.code === 'platform') throw e;

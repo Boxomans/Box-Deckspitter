@@ -12,8 +12,10 @@ import { SIDE_PANELS } from './shared.js';
  * Dropped back inside `home()` (the place it already is) it runs `onHome(event)` instead, to reorder it there.
  * `marker(event, el)` is told where the pointer is while dragging (and `null` at the end), to show where it would land.
  * A plain click (no drag) is left alone. A ghost copy follows the pointer and flies to where it lands.
+ * With `onFloat(event)`, letting go out on the page (well away from where it started, and not flicked at the zone)
+ * runs that instead of flying back.
  */
-function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
+function flingable(el, zone, onMove, { home, onHome, marker, onFloat } = {}) {
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const sx = e.clientX;
@@ -76,9 +78,11 @@ function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
       const ty = cy - ev.clientY;
       const aimed = speed > 0.5 && (vx * tx + vy * ty) / (speed * (Math.hypot(tx, ty) || 1)) > 0.75;
       const go = inside(z, ev.clientX, ev.clientY, 20) || aimed;
+      // let go out on the page (well away from where it started): with onFloat it stays there, the ghost fading in place
+      const float = !go && !!onFloat && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 80 && !(hm && inside(hm, ev.clientX, ev.clientY, 40));
       const was = el.getBoundingClientRect();
-      const toX = go ? cx : was.left + was.width / 2;
-      const toY = go ? cy : was.top + was.height / 2;
+      const toX = go ? cx : float ? ev.clientX : was.left + was.width / 2;
+      const toY = go ? cy : float ? ev.clientY : was.top + was.height / 2;
       ghost.style.transition = 'left 0.22s cubic-bezier(.2,.8,.2,1), top 0.22s cubic-bezier(.2,.8,.2,1), opacity 0.22s, transform 0.22s';
       requestAnimationFrame(() => {
         ghost.style.left = `${toX - ghost.offsetWidth / 2}px`;
@@ -90,6 +94,7 @@ function flingable(el, zone, onMove, { home, onHome, marker } = {}) {
       setTimeout(() => g.remove(), 260);
       const dropped = inside(z, ev.clientX, ev.clientY, 20) ? ev : null;
       if (go) setTimeout(() => onMove(dropped), 120);
+      else if (float) onFloat(ev);
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -177,7 +182,7 @@ export class RailPart {
   // ---- the ♪ player can sit under its top-bar button or dock as a right-sidebar tab; drag or flick to move it
   musicRailTab() {
     if (!this._musicTab) {
-      const b = h('button', { class: 'rrail-tab rrail-music', dataset: { rpanel: 'music' }, title: 'Music player · drag or flick it to the top bar to undock it' },
+      const b = h('button', { class: 'rrail-tab rrail-music', dataset: { rpanel: 'music' }, title: 'Music player · drag or flick it to the top bar to undock it, or out onto the page for a small player' },
         h('span', { class: 'rrail-glyph' }, '\u266a'), h('span', { class: 'rrail-label' }, 'music'));
       b.addEventListener('click', () => this.toggleRightPanel('music'));
       this._musicTab = b;
@@ -211,8 +216,10 @@ export class RailPart {
     const marker = (ev, el) => { this.railMarker(ev, el); this.topMarker(ev, el); };
     const inRail = (el) => ({ home: sideZone, onHome: (ev) => this.railMove(el, ev.clientY), marker });
     const onTop = (el) => ({ home: topZone, onHome: (ev) => this.topMove(el, ev.clientX), marker });
-    flingable($('#btn-music'), sideZone, (drop) => this.setMusicDock(true, { drop }), onTop($('#btn-music')));
-    flingable(this.musicRailTab(), topZone, () => this.setMusicDock(false), inRail(this.musicRailTab()));
+    // let go out on the page instead: a small player stays there
+    const onFloat = (ev) => this.music.popOut(ev.clientX, ev.clientY);
+    flingable($('#btn-music'), sideZone, (drop) => this.setMusicDock(true, { drop }), { ...onTop($('#btn-music')), onFloat });
+    flingable(this.musicRailTab(), topZone, () => this.setMusicDock(false), { ...inRail(this.musicRailTab()), onFloat });
     // chars, claude and clip can move to the top bar too (and back): there they open as a drop-down
     for (const tab of $$('.rrail-tab[data-rpanel]')) {
       const name = tab.dataset.rpanel;

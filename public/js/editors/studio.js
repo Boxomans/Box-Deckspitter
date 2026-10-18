@@ -47,10 +47,22 @@ const TYPES = {
   text: { icon: 'type', name: 'Text' },
   color: { icon: 'square', name: 'Colour' },
 };
-const SNAP = 14; // canvas px
+const SNAP = 8; // screen px: how close an edge comes before it snaps
 
 const rad = (d) => (d * Math.PI) / 180;
 const rot = (x, y, a) => { const c = Math.cos(a), s = Math.sin(a); return [x * c - y * s, x * s + y * c]; };
+/** The upright box a (maybe rotated) item covers: [x, y, w, h]. */
+const bbox = (it) => {
+  const a = rad(it.rot || 0), c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+  const w = it.w * c + it.h * s, hh = it.w * s + it.h * c;
+  return [it.x + (it.w - w) / 2, it.y + (it.h - hh) / 2, w, hh];
+};
+/** The closest pairing of one of `vals` with one of `targets` within `tol`: { d (how far to shift), t (the target) }, or null. */
+const nearest = (vals, targets, tol) => {
+  let best = null;
+  for (const v of vals) for (const t of targets) { const d = t - v; if (Math.abs(d) < tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, t }; }
+  return best;
+};
 const fmtTime = (s) => { s = Math.max(0, Math.floor(s)); return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const keyLabel = (a) => (a || '').replace(/Super/g, 'Win').replace(/\+/g, ' + ');
 
@@ -834,6 +846,7 @@ export class StudioEditor extends BaseEditor {
         { label: 'Stretch to screen', action: () => { this.fitItem(it, cw, ch, 'stretch'); redo(); } },
         { label: 'Actual size', action: () => { const W = this.cfg.canvas.w, H = this.cfg.canvas.h; it.w = cw; it.h = ch; it.x = (W - cw) / 2; it.y = (H - ch) / 2; redo(); } },
         { label: 'Center', action: () => { it.x = (this.cfg.canvas.w - it.w) / 2; it.y = (this.cfg.canvas.h - it.h) / 2; redo(); } },
+        { label: `Canvas to this source (${Math.round(cw)}×${Math.round(ch)})`, icon: 'crop', disabled: !cw || !ch, action: () => this.canvasToItem(it) },
         { sep: true },
         { label: 'Rotate 90° right', icon: 'rotate-cw', action: () => { it.rot = ((it.rot || 0) + 90) % 360; redo(); } },
         { label: 'Rotate 90° left', icon: 'rotate-ccw', action: () => { it.rot = ((it.rot || 0) + 270) % 360; redo(); } },
@@ -881,7 +894,8 @@ export class StudioEditor extends BaseEditor {
     this.selBox = h('div', { class: 'st-box', hidden: true },
       ...[[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]].map(([x, y]) => h('div', { class: 'st-h', dataset: { hx: x, hy: y } })),
       h('div', { class: 'st-rot', 'data-tip': 'Rotate (Shift: 15° steps)' }));
-    this.frame = h('div', { class: 'st-frame' }, this.canvas, this.selBox, h('div', { class: 'st-guides' }));
+    this.readEl = h('div', { class: 'st-readout mono', hidden: true });
+    this.frame = h('div', { class: 'st-frame' }, this.canvas, this.selBox, h('div', { class: 'st-guides' }), this.readEl);
     this.stage = h('div', { class: 'st-stage', tabindex: '0' }, this.frame);
     this.props = h('div', { class: 'st-props' });
     const main = h('div', { class: 'st-main' }, this.stage, this.props);
@@ -1016,7 +1030,7 @@ export class StudioEditor extends BaseEditor {
       p.append(h('div', { class: 'st-props-head' }, 'Properties'),
         h('div', { class: 'st-help' },
           h('p', {}, 'Pick a source to change it. On the preview: drag to move; drag a corner to resize (keeps the shape, Shift frees it); Alt+drag an edge to crop; the dot on top rotates; right-click for more.'),
-          h('p', {}, 'Arrow keys nudge the selected source (Shift: 10 px). Hold Ctrl while dragging to turn off snapping.'),
+          h('p', {}, 'Edges snap to the canvas and to the other sources; hold Ctrl while dragging to turn that off, or Shift while moving to keep to one direction. Arrow keys nudge the selected source (Shift: 10 px).'),
           h('p', {}, `${keyLabel(this.cfg.hotkeys.area) || 'The area key'} picks an area of the screen to record, from anywhere. Click the desktop on that overlay to go back to the whole screen.`)));
       return;
     }
@@ -1076,7 +1090,8 @@ export class StudioEditor extends BaseEditor {
         num('Opacity %', () => (it.opacity ?? 1) * 100, (v) => { it.opacity = clamp(v / 100, 0, 1); }, { min: 0, max: 100 })),
       h('div', { class: 'st-checks' },
         h('label', {}, h('input', { type: 'checkbox', checked: !!it.flipH, onchange: (e) => { it.flipH = e.target.checked; redo(); } }), 'Flip ↔'),
-        h('label', {}, h('input', { type: 'checkbox', checked: !!it.flipV, onchange: (e) => { it.flipV = e.target.checked; redo(); } }), 'Flip ↕'))),
+        h('label', {}, h('input', { type: 'checkbox', checked: !!it.flipV, onchange: (e) => { it.flipV = e.target.checked; redo(); } }), 'Flip ↕')),
+        h('button', { class: 'btn sm', 'data-tip': 'Make the canvas (the size recordings come out at) exactly this source at its real size', onclick: () => this.canvasToItem(it) }, icon('crop', 'sm'), 'Canvas to this source')),
       it.type !== 'color' ? sec('Crop (%)', h('div', { class: 'st-grid4' }, pct('l'), pct('t'), pct('r'), pct('b'))) : '',
       h('div', { class: 'st-props-foot' },
         h('button', { class: 'btn sm ghost', onclick: (e) => this.itemMenu(e, it) }, icon('more', 'sm'), 'More'),
@@ -1181,6 +1196,54 @@ export class StudioEditor extends BaseEditor {
     this.selBox.classList.toggle('locked', !!it.locked);
   }
 
+  /** Lines a dragged source snaps to: the canvas's edges and middle, and every other shown source's edges and middle. */
+  snapTargets(self) {
+    const W = this.cfg.canvas.w, H = this.cfg.canvas.h;
+    const xs = [0, W / 2, W], ys = [0, H / 2, H];
+    for (const o of this.items()) {
+      if (o === self || o.hidden || !o.w) continue;
+      const [x, y, w, hh] = bbox(o);
+      xs.push(x, x + w / 2, x + w);
+      ys.push(y, y + hh / 2, y + hh);
+    }
+    return { xs, ys };
+  }
+
+  /** The little label under the selection while dragging it ('' hides it). */
+  readout(text) {
+    if (!this.readEl) return;
+    this.readEl.textContent = text;
+    this.readEl.hidden = !text;
+    const it = text && this.item(this.sel);
+    if (!it) return;
+    const [x, y, w, hh] = bbox(it);
+    Object.assign(this.readEl.style, { left: `${(x + w / 2) * this.k}px`, top: `${(y + hh) * this.k + 8}px` });
+  }
+
+  /** Make the canvas exactly the size of this source at its real size, with the source filling it.
+   *  The scene's other sources move along with it, so they keep their place relative to it. */
+  canvasToItem(it) {
+    const src = { w: it.nw || it.tw || it.w, h: it.nh || it.th || it.h };
+    const c = it.crop || {};
+    const cw = src.w * (1 - (c.l || 0) - (c.r || 0)), ch = src.h * (1 - (c.t || 0) - (c.b || 0));
+    if (!cw || !ch) return;
+    // to its real size, around its middle
+    const mx = it.x + it.w / 2, my = it.y + it.h / 2;
+    it.w = cw; it.h = ch; it.x = mx - cw / 2; it.y = my - ch / 2;
+    const [bx, by, bw, bh] = bbox(it);
+    const W = clamp(Math.round(bw / 2) * 2, 16, 7680), H = clamp(Math.round(bh / 2) * 2, 16, 4320);
+    // its box's corner to the canvas corner (centred in the half pixel rounding adds)
+    const ox = bx - (W - bw) / 2, oy = by - (H - bh) / 2;
+    for (const o of this.scene().items) { o.x -= ox; o.y -= oy; }
+    this.cfg.canvas.w = W; this.cfg.canvas.h = H;
+    this.sizeCanvas();
+    this.changed();
+    this.renderTop?.();
+    this.updateSel();
+    this.renderProps();
+    toast(`The canvas is now ${W}×${H}, the size of ${it.name}.`, { type: 'ok' });
+  }
+
   guides(lines) {
     const g = this.frame.querySelector('.st-guides');
     clear(g);
@@ -1202,49 +1265,74 @@ export class StudioEditor extends BaseEditor {
       const s0 = { x: it.x, y: it.y, w: it.w, h: it.h, rot: it.rot || 0, crop: { ...(it.crop || { l: 0, t: 0, r: 0, b: 0 }) } };
       const mode = !handle ? 'move' : handle.classList.contains('st-rot') ? 'rot' : e.altKey ? 'crop' : 'size';
       const hx = handle ? +handle.dataset.hx || 0 : 0, hy = handle ? +handle.dataset.hy || 0 : 0;
-      const W = this.cfg.canvas.w, H = this.cfg.canvas.h;
+      // what edges snap to: the canvas's edges and middle, and the edges and middles of the other sources
+      const T = this.snapTargets(it);
+      const square = !(s0.rot % 90);
       const move = (ev) => {
         const [px, py] = this.toCanvas(ev);
-        const dx = px - x, dy = py - y;
+        let dx = px - x, dy = py - y;
         const lines = [];
+        const snapping = !ev.ctrlKey;
+        const tol = SNAP / Math.max(this.k, 0.05);
         if (mode === 'move') {
+          // Shift: only along the way the drag mostly goes
+          const lock = ev.shiftKey ? (Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y') : null;
+          if (lock === 'x') dy = 0; else if (lock === 'y') dx = 0;
           let nx = s0.x + dx, ny = s0.y + dy;
-          if (!ev.ctrlKey && !(s0.rot % 360)) {
-            // snap the edges and the middle to the canvas edges and middle
-            const snapX = [[nx, 0], [nx + s0.w, W], [nx + s0.w / 2, W / 2], [nx, W / 2], [nx + s0.w, W / 2]];
-            for (const [v, t] of snapX) if (Math.abs(v - t) < SNAP / Math.max(this.k, 0.2) * 0.5) { nx += t - v; lines.push(['v', t]); break; }
-            const snapY = [[ny, 0], [ny + s0.h, H], [ny + s0.h / 2, H / 2], [ny, H / 2], [ny + s0.h, H / 2]];
-            for (const [v, t] of snapY) if (Math.abs(v - t) < SNAP / Math.max(this.k, 0.2) * 0.5) { ny += t - v; lines.push(['h', t]); break; }
+          if (snapping && square) {
+            const [bx, by, bw, bh] = bbox({ ...s0, x: nx, y: ny });
+            const sx = lock !== 'y' && nearest([bx, bx + bw / 2, bx + bw], T.xs, tol);
+            const sy = lock !== 'x' && nearest([by, by + bh / 2, by + bh], T.ys, tol);
+            if (sx) { nx += sx.d; lines.push(['v', sx.t]); }
+            if (sy) { ny += sy.d; lines.push(['h', sy.t]); }
           }
           it.x = nx; it.y = ny;
+          this.readout(`${Math.round(nx)}, ${Math.round(ny)}`);
         } else if (mode === 'rot') {
           const cx = s0.x + s0.w / 2, cy = s0.y + s0.h / 2;
           let a = (Math.atan2(py - cy, px - cx) * 180) / Math.PI + 90;
           if (ev.shiftKey) a = Math.round(a / 15) * 15;
           else if (!ev.ctrlKey) for (const t of [0, 90, 180, 270, 360]) if (Math.abs(a - t) < 3 || Math.abs(a + 360 - t) < 3) a = t;
           it.rot = ((a % 360) + 360) % 360;
+          this.readout(`${Math.round(it.rot)}°`);
         } else {
           // in the item's own (unrotated) frame
           const [lx, ly] = rot(dx, dy, -rad(s0.rot));
           let nw = s0.w + hx * lx, nh = s0.h + hy * ly;
-          if (mode === 'crop') {
-            const srcW = (it.nw || it.tw || s0.w), srcH = (it.nh || it.th || s0.h);
-            const c0 = s0.crop;
-            const kx = s0.w / (srcW * (1 - c0.l - c0.r)), ky = s0.h / (srcH * (1 - c0.t - c0.b));
-            const c = { ...c0 };
-            if (hx < 0) c.l = clamp(c0.l - lx / (kx * srcW), 0, 0.99 - c0.r);
-            if (hx > 0) c.r = clamp(c0.r + lx / (kx * srcW) * -1 * -1 * -1, 0, 0.99 - c0.l);
-            if (hy < 0) c.t = clamp(c0.t - ly / (ky * srcH), 0, 0.99 - c0.b);
-            if (hy > 0) c.b = clamp(c0.b - ly / (ky * srcH), 0, 0.99 - c0.t);
-            if (hx > 0) c.r = clamp(c0.r - lx / (kx * srcW), 0, 0.99 - c0.l);
-            it.crop = c;
-            nw = srcW * (1 - c.l - c.r) * kx; nh = srcH * (1 - c.t - c.b) * ky;
-          } else if (hx && hy && !ev.shiftKey) {
+          const keep = mode === 'size' && hx && hy && !ev.shiftKey;
+          if (keep) {
             // corners keep the shape
             const sc = Math.max(nw / s0.w, nh / s0.h);
             nw = s0.w * sc; nh = s0.h * sc;
           }
+          // the dragged edges snap (only when the source sits square: a tilted edge has no one line to snap)
+          if (snapping && !(s0.rot % 360)) {
+            const sx = hx && nearest([hx > 0 ? s0.x + nw : s0.x + s0.w - nw], T.xs, tol);
+            const sy = hy && nearest([hy > 0 ? s0.y + nh : s0.y + s0.h - nh], T.ys, tol);
+            if (keep) {
+              // the nearer edge wins and the other follows the shape
+              if (sx && (!sy || Math.abs(sx.d) <= Math.abs(sy.d))) { const w2 = nw + hx * sx.d; nh *= w2 / nw; nw = w2; lines.push(['v', sx.t]); }
+              else if (sy) { const h2 = nh + hy * sy.d; nw *= h2 / nh; nh = h2; lines.push(['h', sy.t]); }
+            } else {
+              if (sx) { nw += hx * sx.d; lines.push(['v', sx.t]); }
+              if (sy) { nh += hy * sy.d; lines.push(['h', sy.t]); }
+            }
+          }
+          if (mode === 'crop') {
+            // the crop that shows this much of the source at the same scale
+            const srcW = (it.nw || it.tw || s0.w), srcH = (it.nh || it.th || s0.h);
+            const c0 = s0.crop;
+            const kx = s0.w / (srcW * (1 - c0.l - c0.r)), ky = s0.h / (srcH * (1 - c0.t - c0.b));
+            const c = { ...c0 };
+            if (hx < 0) c.l = clamp(1 - c0.r - nw / (kx * srcW), 0, 0.99 - c0.r);
+            if (hx > 0) c.r = clamp(1 - c0.l - nw / (kx * srcW), 0, 0.99 - c0.l);
+            if (hy < 0) c.t = clamp(1 - c0.b - nh / (ky * srcH), 0, 0.99 - c0.b);
+            if (hy > 0) c.b = clamp(1 - c0.t - nh / (ky * srcH), 0, 0.99 - c0.t);
+            it.crop = c;
+            nw = srcW * (1 - c.l - c.r) * kx; nh = srcH * (1 - c.t - c.b) * ky;
+          }
           nw = Math.max(4, nw); nh = Math.max(4, nh);
+          this.readout(`${Math.round(nw)} × ${Math.round(nh)}`);
           // the opposite side stays where it was
           const cxl = hx * (nw - s0.w) / 2, cyl = hy * (nh - s0.h) / 2;
           const [cx, cy] = rot(cxl, cyl, rad(s0.rot));
@@ -1259,6 +1347,7 @@ export class StudioEditor extends BaseEditor {
         removeEventListener('pointerup', up, true);
         removeEventListener('pointercancel', up, true);
         this.guides([]);
+        this.readout('');
         this.changed();
         this.renderProps();
       };
@@ -1366,7 +1455,8 @@ export class StudioEditor extends BaseEditor {
     const { w, h: hh, fps } = this.cfg?.canvas || {};
     const r = this.rec;
     return {
-      left: [{ text: this.app.toolName('BoxStudio'), icon: 'video' }, { text: this.scene()?.name || '' }],
+      // the mode chip already says BoxStudio
+      left: [{ text: this.scene()?.name || '', icon: 'video' }],
       right: [
         r ? { text: `● ${r.recorder.state === 'paused' ? 'PAUSED' : 'REC'} ${fmtTime(this.recSeconds())}`, cls: 'st-status-rec' } : { text: this.saving ? 'saving…' : 'ready' },
         { text: `${w}×${hh} · ${fps} fps` },

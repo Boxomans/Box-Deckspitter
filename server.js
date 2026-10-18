@@ -997,7 +997,10 @@ const routes = {
 Object.assign(routes, marketRoutes, weatherRoutes, translateRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, storageRoutes, aiRoutes);
 
 // Windows file associations ("open .pdf with Box-Deckspitter").
-Object.assign(routes, require('./file-assoc')({ root: ROOT, isWin: IS_WIN, readJSONBody }));
+Object.assign(routes, require('./file-assoc')({ root: ROOT, data: DATA, isWin: IS_WIN, readJSONBody }));
+
+// Playlist sharing: a playlist → a code or a .plylst file of its songs' links, and back.
+Object.assign(routes, require('./playlist-share')({ dumpAbs, dumpRel, readJSONBody, requirePath }));
 
 // Settings export / import (.zip: settings + the still-encrypted Secure notes) and the app PIN lock.
 Object.assign(routes, require('./settings-transfer')({
@@ -1011,7 +1014,7 @@ Object.assign(routes, require('./settings-transfer')({
 Object.assign(routes, require('./swap-server')({ readJSONBody, requirePath, dataDir: DATA, appRoot: ROOT }));
 
 // BoxStudio: scenes + recordings (MediaRecorder pieces streamed to disk, rewrapped by ffmpeg).
-Object.assign(routes, require('./studio-server')({ readBody, readJSONBody, requirePath, tools, dumpDir: DUMP, dataFile: path.join(DATA, 'studio.json'), readJSON, writeJSON, log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
+Object.assign(routes, require('./studio-server')({ readBody, readJSONBody, requirePath, tools, dumpDir: DUMP, audioDir: AUDIO_DUMP, dataFile: path.join(DATA, 'studio.json'), readJSON, writeJSON, log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
 
 // BoxMap: offline map regions (PMTiles cut from the free OpenStreetMap build), search, pins.
 Object.assign(routes, require('./map-server')({ readJSONBody, newJob, startJob, dataDir: DATA, cacheDir: path.join(DATA, 'cache'), worldFile: path.join(PUBLIC, 'assets', 'map', 'world.json'), readJSON, writeJSON, version: VERSION, log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));

@@ -184,6 +184,7 @@ export class SettingsSectionsPart {
       ['config', 'Config files', ['json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'xml', 'properties'], true],
       ['sheet', 'Spreadsheets', ['xlsx', 'xls', 'ods', 'csv', 'tsv'], true],
       ['mail', 'Saved emails', ['eml'], true],
+      ['playlist', 'Shared playlists', ['plylst'], true],
       ['code', 'Code', ['js', 'ts', 'py', 'ps1', 'bat', 'cmd', 'sh', 'css', 'lua', 'sql'], false],
       ['web', 'Web pages', ['html', 'htm'], false],
       ['image', 'Images', ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'], false],

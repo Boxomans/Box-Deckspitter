@@ -312,6 +312,7 @@ module.exports = function createMedia({
       const child = spawn(t.ytdlp, args, { windowsHide: true });
       onChild(child);
       let last = '';
+      let meta = { artist: '', title: '', genre: '' };
       let err = '';
       child.stdout.on('data', (d) => {
         for (const line of String(d).split(/\r?\n/)) {
@@ -498,6 +499,11 @@ module.exports = function createMedia({
   async function findBpm(file, artist, title) {
     return (await deezerBpm(artist, title).catch(() => null)) || measureBpm(file);
   }
+
+  /** Downloads left in audio-dump/.incoming when the app closed before moving them in. They never got their tags or
+   *  playlist and never reached the audio dump, so downloading the playlist again brings them back properly: clear
+   *  them. Runs once at start, before any download can be using the folder. */
+  setTimeout(() => fsp.rm(path.join(AUDIO_DUMP, '.incoming'), { recursive: true, force: true }).catch(() => {}), 2000).unref?.();
 
   async function grabAudio(job, items, parallel = 3, folder = '', retries = 3) {
     // folder: a playlist (a folder in the audio dump) to save into; '' = the top of the audio dump

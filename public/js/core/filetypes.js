@@ -65,6 +65,7 @@ export function detectMode(name, bytes) {
   if (PDF_EXT.includes(ext)) return { mode: 'pdf' };
   if (ext === 'boxcut') return { mode: 'cut' };
   if (ext === 'eml') return { mode: 'mail' };
+  if (ext === 'plylst') return { mode: 'tape' };
   if (DOC_EXT.includes(ext)) return { mode: 'doc' };
   if (SHEET_EXT.includes(ext)) return { mode: 'sheet' };
   if (ext === 'gif') return { mode: 'paint' }; // GIFs open with their frames, ready to edit

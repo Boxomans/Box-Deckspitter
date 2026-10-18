@@ -346,7 +346,9 @@ export class TabsPart {
       if (it.action) el.addEventListener('click', (e) => it.action(e, el));
       return el;
     };
-    (st.left || []).forEach((it) => L.append(render(it)));
+    // a tool naming itself again next to the mode chip says nothing new
+    const said = modeBtn.textContent.trim().toLowerCase();
+    (st.left || []).filter((it) => String(it.text ?? '').trim().toLowerCase() !== said).forEach((it) => L.append(render(it)));
     (st.right || []).forEach((it) => R.append(render(it)));
   }
 

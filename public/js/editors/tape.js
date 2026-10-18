@@ -29,7 +29,7 @@ export class TapeEditor extends BaseEditor {
   async load() {
     this.tools = await get('/api/tools').catch(() => ({}));
     this.items = [];
-    this.input = h('input', { type: 'text', class: 'klep-url', placeholder: 'search for a song, paste a list of songs, or a YouTube / Spotify link…', spellcheck: 'false' });
+    this.input = h('input', { type: 'text', class: 'klep-url', placeholder: 'search for a song, paste a list of songs, a YouTube / Spotify link, or a playlist code…', spellcheck: 'false' });
     this.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.fetch(); });
     // pasting several lines (a list of songs) keeps them apart: one line becomes one ";"-separated entry
     this.input.addEventListener('paste', (e) => {
@@ -59,6 +59,12 @@ export class TapeEditor extends BaseEditor {
   async fetch() {
     const url = this.input.value.trim();
     if (!url) return toast('Type a song to search for, or paste a link.', { type: 'warn' });
+    // a playlist code a friend shared
+    if (/PLYLST1:/.test(url)) {
+      try { await this.loadShared(await post('/api/audio/share/read', { text: url })); } catch (e) { clear(this.results).append(h('div', { class: 'klep-note error' }, e.message)); }
+      return;
+    }
+    this.shared = false;
     const isLink = /^https?:\/\//i.test(url) || /^spotify:/i.test(url);
     const list = !isLink && url.includes(';') ? url.split(';').map((x) => x.trim()).filter(Boolean) : null;
     this.goBtn.disabled = true;
@@ -75,6 +81,31 @@ export class TapeEditor extends BaseEditor {
     } finally {
       this.goBtn.disabled = false;
     }
+  }
+
+  /** A playlist a friend shared (a code or a .plylst file, read by playlist-share.js) → its songs, set to go into a playlist
+   *  of the same name. Songs that came with a link download from it; the rest are matched on YouTube by name. */
+  async loadShared(pl) {
+    let have = new Set();
+    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
+    const items = pl.songs.map((s) => {
+      const label = s.artist && !s.title.toLowerCase().includes(s.artist.toLowerCase()) ? `${s.artist} - ${s.title}` : s.title;
+      const already = have.has(songKey(label)) || have.has(songKey(s.title));
+      return s.url
+        ? { type: 'ytdlp', url: s.url, title: label, uploader: s.artist || null, already }
+        : { type: 'spotify', url: 'https://www.youtube.com/', title: s.title, artist: s.artist, duration: 0, label, uploader: s.artist || null, already };
+    });
+    this.items = items;
+    this.title = pl.name;
+    this.shared = true;
+    this.input.value = '';
+    const n = items.filter((x) => x.already).length;
+    const byName = items.filter((x) => x.type === 'spotify').length;
+    this.render({ title: pl.name, items, notes: [
+      `A shared playlist: ${items.length} song${items.length === 1 ? '' : 's'}. They go into a playlist of the same name unless you pick another.`,
+      byName ? `${byName} came without a link, so ${byName === 1 ? 'it’s' : 'they’re'} matched on YouTube by name when ${byName === 1 ? 'it downloads' : 'they download'}.` : null,
+      n ? `${n} song${n === 1 ? ' is' : 's are'} already in your audio dump, so ${n === 1 ? 'it starts' : 'they start'} unticked.` : null,
+    ].filter(Boolean) });
   }
 
   /** The "BoxTape needs yt-dlp and ffmpeg" note, with a button that installs them with winget. */
@@ -256,7 +287,8 @@ export class TapeEditor extends BaseEditor {
       sel.value = [...sel.options].some((o) => o.value === pick) ? pick : '';
     };
     let playlists = this.app.music?.playlists || [];
-    fill(playlists, this.app.settings.tapePlaylist || '');
+    // a shared playlist goes into one of its own name
+    fill(playlists, this.shared ? clean(this.title) : this.app.settings.tapePlaylist || '');
     api.dump('audio', '').then((r) => { playlists = (r.folders || []).map((f) => f.base); fill(playlists, sel.value || this.app.settings.tapePlaylist || ''); }).catch(() => {});
     let last = sel.value;
     sel.addEventListener('change', async () => {

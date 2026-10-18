@@ -3,7 +3,7 @@
 export const PROVIDERS = {
   anthropic: { name: 'Claude', company: 'Anthropic', keyUrl: 'console.anthropic.com → API Keys', placeholder: 'sk-ant-…', model: 'claude-opus-5-5' },
   openai: { name: 'ChatGPT', company: 'OpenAI', keyUrl: 'platform.openai.com → API keys', placeholder: 'sk-…', model: 'gpt-5' },
-  gemini: { name: 'Gemini', company: 'Google', keyUrl: 'aistudio.google.com → Get API key', placeholder: 'AIza…', model: 'gemini-2.5-flash' },
+  gemini: { name: 'Gemini', company: 'Google', keyUrl: 'aistudio.google.com → Get API key', placeholder: 'Paste your key…', model: 'gemini-2.5-flash' },
   openrouter: { name: 'OpenRouter', company: 'OpenRouter', keyUrl: 'openrouter.ai → Keys', placeholder: 'sk-or-…', model: 'openrouter/auto' },
   perplexity: { name: 'Perplexity', company: 'Perplexity', keyUrl: 'perplexity.ai → Settings → API', placeholder: 'pplx-…', model: 'sonar' },
 };

@@ -12,7 +12,7 @@ const PROVIDERS = {
     keep: (id) => /^(gpt-|o\d|chatgpt-)/.test(id) && !/audio|realtime|tts|transcribe|image|embedding|instruct|search|codex/.test(id),
   },
   gemini: {
-    name: 'Gemini', company: 'Google', secret: 'geminiKey', env: 'GEMINI_API_KEY', keyRe: /^[\w-]{30,}$/, keyHint: 'Gemini keys come from aistudio.google.com',
+    name: 'Gemini', company: 'Google', secret: 'geminiKey', env: 'GEMINI_API_KEY', keyRe: /^[\w.~+/=-]{20,}$/, keyHint: 'Gemini keys come from aistudio.google.com',
     chat: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', models: 'https://generativelanguage.googleapis.com/v1beta/openai/models',
     keep: (id) => /^gemini-/.test(id) && !/embedding|image|tts|live|audio/.test(id),
   },
@@ -208,7 +208,8 @@ module.exports = function createAi({ ok, readJSONBody, saveSecrets, secrets }) {
       const body = await readJSONBody(req);
       const provider = providerOf(body.provider);
       const P = PROVIDERS[provider];
-      const k = String(body.key || '').trim();
+      // pasted keys: spaces, line breaks, invisible characters and quotes around them are dropped
+      const k = String(body.key || '').replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '').replace(/^['"`]+|['"`]+$/g, '');
       if (k && !P.keyRe.test(k)) throw httpError(`That doesn’t look like an API key from ${P.company} (${P.keyHint}).`);
       await saveSecrets({ ...secrets(), [P.secret]: k || undefined });
       if (provider === 'anthropic') anthropicClient = null;

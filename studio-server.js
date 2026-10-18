@@ -14,7 +14,7 @@ const err = (status, message) => Object.assign(new Error(message), { status });
 const FORMATS = ['mp4', 'mkv', 'webm', 'mov'];
 const RAW_EXT = ['mp4', 'webm'];
 
-module.exports = function createStudio({ readBody, readJSONBody, requirePath, tools, dumpDir, dataFile, readJSON, writeJSON, log }) {
+module.exports = function createStudio({ readBody, readJSONBody, requirePath, tools, dumpDir, audioDir, dataFile, readJSON, writeJSON, log }) {
   const recs = new Map(); // id -> { id, part, dir, inDump, ext, size, writing, idle }
 
   const pad = (n) => String(n).padStart(2, '0');
@@ -147,18 +147,26 @@ module.exports = function createStudio({ readBody, readJSONBody, requirePath, to
         opus: ['-c:a', 'libopus', '-b:a', '160k'],
         m4a: ['-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart'],
       };
-      const args = ENC[q.get('format')];
-      if (!args) throw err(400, 'Can’t export to that');
-      if (!tools().ffmpeg) throw err(400, 'Exporting that needs ffmpeg (WAV works without it)');
-      const out = requirePath(q.get('path'));
+      const fmt = q.get('format');
+      // ?dump=audio&name=…: into the audio dump under a free name (for the music player) instead of a chosen path
+      const toDump = q.get('dump') === 'audio' && audioDir;
+      const args = ENC[fmt];
+      if (!args && !(toDump && fmt === 'wav')) throw err(400, 'Can’t export to that');
+      if (args && !tools().ffmpeg) throw err(400, 'Exporting that needs ffmpeg (WAV works without it)');
+      let out;
+      if (toDump) {
+        await fsp.mkdir(audioDir, { recursive: true });
+        out = uniquePath(audioDir, `${safeName(q.get('name'), `Clip ${stamp()}`)}.${fmt}`);
+      } else out = requirePath(q.get('path'));
       const buf = await readBody(req, 1536 * 1024 * 1024);
       if (buf.slice(0, 4).toString() !== 'RIFF') throw err(400, 'Not a WAV');
+      if (!args) { await fsp.writeFile(out, buf); return { ok: true, path: out, name: path.basename(out), size: buf.length }; }
       const tmp = `${out}.${crypto.randomBytes(4).toString('hex')}.wav`;
       await fsp.writeFile(tmp, buf);
       try { await ffmpeg(['-y', '-i', tmp, '-map', '0:a:0', ...args, '-f', q.get('format') === 'm4a' ? 'ipod' : q.get('format'), out]); }
       finally { await fsp.unlink(tmp).catch(() => {}); }
       const st = await fsp.stat(out);
-      return { ok: true, path: out, size: st.size };
+      return { ok: true, path: out, name: path.basename(out), size: st.size };
     },
 
     // ---- a still of the output (PNG body) → ?dir=… or the media dump

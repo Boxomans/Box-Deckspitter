@@ -10,6 +10,7 @@ import { h, clear, formatBytes, stripExt, extOf } from './dom.js';
 import { icon } from './icons.js';
 import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal, promptDialog, confirmDialog } from './ui.js';
 import { pickOpen } from './files.js';
+import { sharePlaylist, importPlaylist } from './playlist-share.js';
 
 // 10-band graphic EQ (±18 dB) between a low cut (high-pass) and a high cut (low-pass).
 export const BANDS = [
@@ -44,6 +45,8 @@ const fmt = (t) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.fl
 // a song's name in the dump may have its playlist (folder) in front: "Road trip/Song.mp3"
 const songTitle = (name) => stripExt(String(name || '').split('/').pop());
 const plOf = (name) => (String(name).includes('/') ? String(name).split('/')[0] : '');
+const likeKey = (name) => String(name || '').split('/').pop().toLowerCase();
+const LIKED = '\u0001liked'; // the liked songs, picked like a playlist (a folder name can't hold this character)
 
 export function createMusic(app) {
   const s = app.settings;
@@ -67,11 +70,23 @@ export function createMusic(app) {
     queue: Array.isArray(s.musicQueue) ? s.musicQueue.filter((x) => typeof x === 'string') : [], // file names, in play order
     libIdx: -1, // where the library is up to (queued songs don't move it)
     view: s.musicView === 'queue' ? 'queue' : 'library',
-    // null: every song · '': songs not in a playlist · 'name': that playlist (a folder in the audio dump)
+    // null: every song · '': songs not in a playlist · 'name': that playlist (a folder in the audio dump) · LIKED: liked songs
     playlist: typeof s.musicPlaylist === 'string' ? s.musicPlaylist : null,
     playlists: [],
+    // liked songs, by file name without the playlist, so a song stays liked when it moves between playlists
+    liked: new Set(Array.isArray(s.musicLiked) ? s.musicLiked.filter((x) => typeof x === 'string') : []),
   };
-  const inList = (t) => !!t && (state.playlist == null || plOf(t.name) === state.playlist);
+  const isLiked = (name) => state.liked.has(likeKey(name));
+  const inList = (t) => !!t && (state.playlist == null || (state.playlist === LIKED ? isLiked(t.name) : plOf(t.name) === state.playlist));
+  /** Like a song, or take the like back; liked songs have their own list (the ♥ Liked chip). */
+  function toggleLike(name) {
+    if (!name) return;
+    const k = likeKey(name);
+    if (state.liked.has(k)) state.liked.delete(k); else state.liked.add(k);
+    app.saveSettings({ musicLiked: [...state.liked] });
+    if (state.playlist === LIKED) reshuffle(true);
+    render();
+  }
   const visible = () => state.tracks.map((t, i) => i).filter((i) => inList(state.tracks[i]));
   let restored = false;
   let ui = null;
@@ -139,7 +154,7 @@ export function createMusic(app) {
       const names = new Set(folders.map((f) => f.base));
       for (const t of state.tracks) { const p = plOf(t.name); if (p) names.add(p); }
       state.playlists = [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-      if (state.playlist && !names.has(state.playlist)) { state.playlist = null; app.saveSettings({ musicPlaylist: null }); }
+      if (state.playlist && state.playlist !== LIKED && !names.has(state.playlist)) { state.playlist = null; app.saveSettings({ musicPlaylist: null }); }
     }
     if (ok) {
       // songs that were removed or renamed outside the player drop out of the queue
@@ -354,7 +369,7 @@ export function createMusic(app) {
   });
   for (const ev of ['play', 'pause']) audio.addEventListener(ev, () => { render(); app.syncMusicButton?.(!audio.paused); savePos(true); app.presence?.update(); });
   audio.addEventListener('seeked', () => savePos(true));
-  audio.addEventListener('timeupdate', () => { updateTime(); if (!audio.paused) savePos(); });
+  audio.addEventListener('timeupdate', () => { updateTime(); miniTime(); if (!audio.paused) savePos(); });
   audio.addEventListener('loadedmetadata', () => updateTime());
   audio.addEventListener('error', () => { if (audio.src) toast(`Couldn’t play ${state.tracks[state.idx]?.name || 'that file'}`, { type: 'warn' }); });
 
@@ -407,7 +422,7 @@ export function createMusic(app) {
   }
 
   /** A new song's name: inside the playlist that's picked, if one is. */
-  const intoPl = (name) => (state.playlist ? `${state.playlist}/${name}` : name);
+  const intoPl = (name) => (state.playlist && state.playlist !== LIKED ? `${state.playlist}/${name}` : name);
 
   // ---------------------------------------------------------------- playlists
   function setPlaylist(p) {
@@ -418,6 +433,11 @@ export function createMusic(app) {
     if (!inList(state.tracks[state.libIdx])) state.libIdx = -1;
     setView('library');
   }
+  /** The player floats above everything, so it steps back while one of these dialogs is up. */
+  const overDialog = async (fn) => {
+    ui?.el.classList.add('behind');
+    try { await fn(); } finally { ui?.el.classList.remove('behind'); }
+  };
   const askName = async (title, value = '') => {
     ui?.el.classList.add('behind');
     const n = await promptDialog(title, 'Name', value, { placeholder: 'e.g. Road trip' });
@@ -436,6 +456,9 @@ export function createMusic(app) {
     const wasPlaying = !audio.paused;
     if (state.queue.some((n) => map.has(n))) { state.queue = state.queue.map((n) => map.get(n) ?? n); app.saveSettings({ musicQueue: [...state.queue] }); }
     if (state.orderNames) state.orderNames = state.orderNames.map((n) => map.get(n) ?? n);
+    let likes = false;
+    for (const [from, to] of map) if (state.liked.has(likeKey(from)) && likeKey(from) !== likeKey(to)) { state.liked.delete(likeKey(from)); state.liked.add(likeKey(to)); likes = true; }
+    if (likes) app.saveSettings({ musicLiked: [...state.liked] });
     for (const t of state.tracks) if (map.has(t.name)) t.name = map.get(t.name); // so refresh() keeps the same song picked
     await refresh();
     const t = state.tracks[state.idx];
@@ -508,6 +531,7 @@ export function createMusic(app) {
           { label: 'Play', icon: 'play', action: () => playPlaylist(p, false) },
           { label: 'Shuffle play', icon: 'shuffle', action: () => playPlaylist(p, true) },
           { sep: true },
+          { label: 'Share…', icon: 'send', action: () => overDialog(() => sharePlaylist(app, p)) },
           { label: 'Rename…', icon: 'edit', action: () => renamePlaylist(p) },
           { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('audio', p) },
           { sep: true },
@@ -517,8 +541,14 @@ export function createMusic(app) {
       }
       return b;
     };
+    const likedN = state.tracks.filter((t) => isLiked(t.name)).length;
+    const likedChip = likedN || state.playlist === LIKED
+      ? h('button', { class: `chip music-pl music-pl-liked ${state.playlist === LIKED ? 'on' : ''}`, title: 'Your liked songs', onclick: () => setPlaylist(LIKED) },
+        icon('heart-fill', 'sm'), h('span', { class: 'music-pl-name' }, 'Liked'), h('span', { class: 'mono faint' }, String(likedN)))
+      : null;
     clear(ui.pls).append(
       chip(null, 'All songs'),
+      likedChip,
       state.playlists.length ? chip('', 'No playlist') : null,
       ...state.playlists.map((p) => chip(p, p)),
       h('button', { class: 'chip music-pl-add', 'data-tip': 'New playlist', onclick: () => newPlaylist() }, icon('plus', 'sm'), state.playlists.length ? null : 'New playlist'));
@@ -663,6 +693,7 @@ export function createMusic(app) {
     const btn = (ic, tip, fn, cls = '') => h('button', { class: `icon-btn music-btn ${cls}`, 'data-tip': tip, onclick: fn }, icon(ic));
     const shuffleB = btn('shuffle', 'Shuffle', () => setShuffle(!state.shuffle));
     const loopB = btn('repeat', 'Loop: all', () => cycleLoop());
+    const likeB = btn('heart', 'Like this song', () => toggleLike(state.tracks[state.idx]?.name), 'music-like-btn');
     const playB = h('button', { class: 'music-play', 'data-tip': 'Play / pause (Space when this is open)', onclick: () => toggle() }, icon('play'));
     const vol = h('input', { type: 'range', class: 'music-vol', min: '0', max: '1', step: '0.01', value: String(state.volume) });
     vol.addEventListener('input', () => setVolume(Number(vol.value)));
@@ -828,21 +859,22 @@ export function createMusic(app) {
     const head = h('div', { class: 'music-head' }, h('span', { class: 'music-note' }, '♪'), h('span', { class: 'mono' }, 'audio-dump/'), h('div', { class: 'grow' }),
       h('button', { class: 'icon-btn', 'data-tip': 'Add songs', onclick: () => addFromDisk() }, icon('plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': `${app.toolName?.('BoxTape') || 'BoxTape'}: songs from a YouTube or Spotify playlist`, onclick: () => app.newDocument('tape') }, icon('download', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Import a playlist a friend shared (a code or a .plylst file)', onclick: () => overDialog(async () => { if (await importPlaylist(app) && !state.docked) setOpen(false); }) }, icon('inbox', 'sm')),
       dupeBtn,
       h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => refresh() }, icon('refresh', 'sm')),
-      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio', state.playlist || undefined) }, icon('external', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio', state.playlist && state.playlist !== LIKED ? state.playlist : undefined) }, icon('external', 'sm')),
       h('button', { class: 'icon-btn music-tab-btn', 'data-tip': 'Open as a tab', onclick: () => { setOpen(false); app.newDocument('music'); } }, icon('window', 'sm')),
       fullB,
       h('button', { class: 'icon-btn', 'data-tip': 'Close (music keeps playing)', onclick: () => setOpen(false) }, icon('x', 'sm')));
     const tagsEl = h('div', { class: 'music-tags mono', hidden: true });
     const nowEl = h('div', { class: 'music-now' }, title, tagsEl, sub);
     const timeEl = h('div', { class: 'music-time' }, cur, seek, dur);
-    const controlsEl = h('div', { class: 'music-controls' }, shuffleB, btn('skip-back', 'Previous', () => prev()), playB, btn('skip-forward', 'Next', () => next()), loopB);
+    const controlsEl = h('div', { class: 'music-controls' }, shuffleB, btn('skip-back', 'Previous', () => prev()), playB, btn('skip-forward', 'Next', () => next()), loopB, likeB);
     const volEl = h('div', { class: 'music-volrow' }, icon('volume', 'sm'), vol, mixerB);
     const parts = [head, nowEl, timeEl, controlsEl, volEl, eqWrap, tabs, pls, list];
     el.append(...parts);
     document.body.append(el);
-    ui = { el, title, tagsEl, sub, seek, cur, dur, playB, shuffleB, loopB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
+    ui = { el, title, tagsEl, sub, seek, cur, dur, playB, shuffleB, loopB, likeB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
     document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && !wide && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music, .music-opener')) setOpen(false); }, true);
     document.addEventListener('keydown', (e) => {
       if (full && e.key === 'Escape' && !document.querySelector('.modal-backdrop, .menu')) { e.preventDefault(); setFull(false); return; }
@@ -880,17 +912,18 @@ export function createMusic(app) {
   }
 
   function render() {
+    paintMini();
     if (!ui) return;
     const t = state.tracks[state.idx];
     const vis = visible();
-    const plName = state.playlist == null ? '' : state.playlist || 'no playlist';
+    const plName = state.playlist == null ? '' : state.playlist === LIKED ? 'liked songs' : state.playlist || 'no playlist';
     ui.title.textContent = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
     showTags(t);
     const upNext = state.queue[0] ? ` · up next: ${songTitle(state.queue[0])}` : '';
     const at = vis.indexOf(state.idx);
     ui.sub.textContent = t ? `${at >= 0 ? `${at + 1} of ${vis.length}` : plOf(t.name) ? `from “${plOf(t.name)}”` : 'not in this playlist'}${plName ? ` · ${plName}` : ''}${upNext}`
       : state.tracks.length ? `${vis.length} song${vis.length === 1 ? '' : 's'}${plName ? ` in ${plName}` : ' in the audio dump'}` : 'drop mp3s here or put them in Box-Deckspitter\\audio-dump';
-    clear(ui.libTab).append(state.playlist ? 'Playlist ' : 'Library ', h('span', { class: 'mono faint' }, String(vis.length)));
+    clear(ui.libTab).append(state.playlist === LIKED ? 'Liked ' : state.playlist ? 'Playlist ' : 'Library ', h('span', { class: 'mono faint' }, String(vis.length)));
     ui.pls.hidden = state.view !== 'library' || !state.tracks.length && !state.playlists.length;
     if (!ui.pls.hidden) renderPlaylists();
     ui.fullB.dataset.tip = full ? 'Leave full screen (Esc)' : 'Full screen';
@@ -910,6 +943,11 @@ export function createMusic(app) {
     ui.queueTab.classList.toggle('on', state.view === 'queue');
     clear(ui.playB).append(icon(audio.paused ? 'play' : 'pause-bars'));
     ui.shuffleB.classList.toggle('active', state.shuffle);
+    const likedNow = !!t && isLiked(t.name);
+    ui.likeB.classList.toggle('active', likedNow);
+    ui.likeB.disabled = !t;
+    ui.likeB.dataset.tip = likedNow ? 'Unlike this song' : 'Like this song';
+    clear(ui.likeB).append(icon(likedNow ? 'heart-fill' : 'heart'));
     ui.loopB.classList.toggle('active', state.loop !== 'off');
     clear(ui.loopB).append(icon(state.loop === 'one' ? 'repeat-1' : 'repeat'));
     ui.loopB.dataset.tip = `Loop: ${state.loop === 'one' ? 'this song' : state.loop === 'all' ? 'all songs' : 'off'}`;
@@ -918,7 +956,9 @@ export function createMusic(app) {
     if (!state.tracks.length) {
       ui.list.append(h('div', { class: 'music-empty' }, 'Drop music files here, use ', h('b', {}, '+'), ', or put files in the ', h('span', { class: 'mono' }, 'audio-dump'), ' folder (', h('a', { href: '#', onclick: (e) => { e.preventDefault(); api.dumpReveal('audio'); } }, 'open it'), ').'));
     }
-    if (state.tracks.length && !vis.length) {
+    if (state.tracks.length && !vis.length && state.playlist === LIKED) {
+      ui.list.append(h('div', { class: 'music-empty' }, 'No liked songs yet. Click the ', icon('heart', 'sm'), ' on a song, or under the song that’s playing.'));
+    } else if (state.tracks.length && !vis.length) {
       ui.list.append(h('div', { class: 'music-empty' }, state.playlist ? 'Nothing in this playlist yet. Drag songs from All songs onto its name above, right-click a song → ' : 'Every song is in a playlist. ',
         state.playlist ? h('b', {}, 'Move to playlist') : null, state.playlist ? ', or drop music files here.' : null));
     }
@@ -927,9 +967,12 @@ export function createMusic(app) {
       const nameEl = h('span', { class: 'music-track-name' }, songTitle(tr.name));
       const qAdd = h('span', { class: 'music-qadd', role: 'button', title: 'Add to the queue' }, icon('plus', 'sm'));
       qAdd.addEventListener('click', (e) => { e.stopPropagation(); enqueue(tr.name); });
+      const liked = isLiked(tr.name);
+      const likeB = h('span', { class: `music-like ${liked ? 'on' : ''}`, role: 'button', title: liked ? 'Unlike' : 'Like' }, icon(liked ? 'heart-fill' : 'heart', 'sm'));
+      likeB.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(tr.name); });
       const row = h('button', { class: `music-track ${i === state.idx ? 'on' : ''}`, draggable: 'true', title: `${tr.name} · ${formatBytes(tr.size)}\nF2: rename · Del: remove · drag onto Queue to queue it` },
         h('span', { class: 'music-track-n mono' }, i === state.idx && !audio.paused ? '♪' : String(k + 1)),
-        nameEl, state.playlist == null && plOf(tr.name) ? h('span', { class: 'music-track-pl' }, plOf(tr.name)) : null, qAdd);
+        nameEl, (state.playlist == null || state.playlist === LIKED) && plOf(tr.name) ? h('span', { class: 'music-track-pl' }, plOf(tr.name)) : null, likeB, qAdd);
       row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/bds-song', tr.name); e.dataTransfer.effectAllowed = 'copy'; });
       const remove = async () => {
         if (i === state.idx) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
@@ -941,6 +984,7 @@ export function createMusic(app) {
         { label: 'Play', icon: 'play', action: () => play(i) },
         { label: 'Play next', icon: 'skip-forward', action: () => enqueue(tr.name, true) },
         { label: 'Add to queue', icon: 'plus', action: () => enqueue(tr.name) },
+        { label: isLiked(tr.name) ? 'Unlike' : 'Like', icon: isLiked(tr.name) ? 'heart-fill' : 'heart', action: () => toggleLike(tr.name) },
         { sep: true },
         { label: 'Move to playlist', icon: 'folder', submenu: [
           ...state.playlists.filter((p) => p !== plOf(tr.name)).map((p) => ({ label: p, action: () => moveSongs([tr.name], p) })),
@@ -1027,7 +1071,7 @@ export function createMusic(app) {
     if (!state.shuffle || !state.tracks.length) return;
     const base = state.order.indexOf(state.libIdx >= 0 ? state.libIdx : state.idx);
     const upcoming = [...state.order.slice(base + 1), ...(state.loop === 'all' ? state.order.slice(0, Math.max(0, base)) : [])];
-    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, `${state.queue.length ? 'Then from' : 'Up next from'} ${state.playlist ? `“${state.playlist}”` : state.playlist === '' ? 'songs not in a playlist' : 'the library'} (shuffled) · drag to reorder`), h('div', { class: 'grow' }),
+    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, `${state.queue.length ? 'Then from' : 'Up next from'} ${state.playlist === LIKED ? 'your liked songs' : state.playlist ? `“${state.playlist}”` : state.playlist === '' ? 'songs not in a playlist' : 'the library'} (shuffled) · drag to reorder`), h('div', { class: 'grow' }),
       h('button', { class: 'chip', title: 'Deal a new random order', onclick: () => { reshuffle(true); render(); } }, icon('shuffle', 'sm'), 'Reshuffle')));
     if (!upcoming.length) { L.append(h('div', { class: 'music-empty' }, state.loop === 'off' ? 'That’s the last song — turn on Loop to keep going.' : 'Nothing else to play.')); return; }
     const shown = upcoming.slice(0, 300);
@@ -1107,6 +1151,144 @@ export function createMusic(app) {
     }
   }
 
+  // ---------------------------------------------------------------- the pop-out widget
+  // Drag the ♪ button (from the top bar or the right sidebar) out onto the page and a small player stays there: the
+  // song, a progress bar to click along, and previous / play / next. Drag it to move it; let go over the right
+  // sidebar or the top bar and it folds back into the ♪ button there. A click opens the full player.
+  let mini = null;
+  const miniCfg = () => app.settings.musicMini || {};
+  function setMini(patch) {
+    app.saveSettings({ musicMini: { ...miniCfg(), ...patch } });
+    syncMini();
+  }
+  function buildMini() {
+    const btn = (ic, tip, fn, cls = '') => {
+      const b = h('button', { class: `mm-btn ${cls}`, 'data-tip': tip }, icon(ic, 'sm'));
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      return b;
+    };
+    const fill = h('div', { class: 'mm-fill' });
+    const bar = h('div', { class: 'mm-bar', 'data-tip': 'Click to jump there' }, fill);
+    bar.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      if (e.button !== 0 || !audio.duration) return;
+      const r = bar.getBoundingClientRect();
+      audio.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * audio.duration;
+      miniTime();
+    });
+    mini = {
+      title: h('div', { class: 'mm-title' }), sub: h('div', { class: 'mm-sub faint' }), fill, time: h('span', { class: 'mm-time mono faint' }),
+      playB: btn('play', 'Play / pause', () => toggle(), 'mm-play'),
+      likeB: btn('heart', 'Like this song', () => toggleLike(state.tracks[state.idx]?.name), 'mm-like'),
+    };
+    mini.el = h('div', { class: 'music-mini', tabindex: '0' },
+      h('div', { class: 'mm-top' }, h('span', { class: 'mm-note' }, '♪'), h('div', { class: 'mm-text' }, mini.title, mini.sub),
+        btn('x', 'Close the small player', () => setMini({ on: false }), 'mm-x')),
+      bar,
+      h('div', { class: 'mm-controls' }, mini.time, h('div', { class: 'grow' }), mini.likeB, btn('skip-back', 'Previous', () => prev()), mini.playB, btn('skip-forward', 'Next', () => next())));
+    mini.el.title = 'Click for the full player · drag to move, or onto the right sidebar or the top bar to fold it back into the ♪ button';
+    mini.el.addEventListener('pointerdown', dragMini);
+    mini.el.addEventListener('dragstart', (e) => e.preventDefault()); // the browser's own drag would cancel ours
+  }
+  function syncMini() {
+    if (!miniCfg().on || app.mainWindow === false) { mini?.el.remove(); return; }
+    if (!mini) buildMini();
+    if (mini.el.parentElement !== document.body) document.body.append(mini.el);
+    paintMini();
+    placeMini();
+  }
+  function paintMini() {
+    if (!mini?.el.isConnected) return;
+    const t = state.tracks[state.idx];
+    mini.title.textContent = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
+    mini.sub.textContent = t ? (plOf(t.name) || 'audio-dump') : 'click to open the player';
+    clear(mini.playB).append(icon(audio.paused ? 'play' : 'pause-bars', 'sm'));
+    const liked = !!t && isLiked(t.name);
+    clear(mini.likeB).append(icon(liked ? 'heart-fill' : 'heart', 'sm'));
+    mini.likeB.classList.toggle('on', liked);
+    mini.likeB.dataset.tip = liked ? 'Unlike this song' : 'Like this song';
+    mini.el.classList.toggle('playing', !audio.paused);
+    miniTime();
+  }
+  function miniTime() {
+    if (!mini?.el.isConnected) return;
+    mini.fill.style.width = `${audio.duration ? (audio.currentTime / audio.duration) * 100 : 0}%`;
+    mini.time.textContent = audio.duration ? `${fmt(audio.currentTime)} / ${fmt(audio.duration)}` : '';
+  }
+  function placeMini(x = miniCfg().x, y = miniCfg().y) {
+    if (!mini?.el.isConnected) return;
+    const w = mini.el.offsetWidth || 240, ht = mini.el.offsetHeight || 90;
+    x ??= innerWidth - w - 50;
+    y ??= innerHeight - ht - 60;
+    mini.el.style.left = `${Math.max(0, Math.min(innerWidth - w, x))}px`;
+    mini.el.style.top = `${Math.max(0, Math.min(innerHeight - ht, y))}px`;
+  }
+  addEventListener('resize', () => placeMini());
+  /** The ♪ button was dragged out and let go at (x, y): the small player appears there. */
+  function popOut(x, y) {
+    setMini({ on: true });
+    const w = mini.el.offsetWidth, ht = mini.el.offsetHeight;
+    placeMini(x - w / 2, y - ht / 2);
+    const q = mini.el.getBoundingClientRect();
+    setMini({ x: Math.round(q.left), y: Math.round(q.top) });
+  }
+  /** Drag to move; let go on the right sidebar or the top bar to fold it into the ♪ button there; a click opens the player. */
+  function dragMini(e) {
+    if (e.button !== 0 || e.target.closest('.mm-btn, .mm-bar')) return;
+    e.preventDefault();
+    const m = mini.el, rail = document.getElementById('rightrail'), top = document.querySelector('.titlebar-actions');
+    const sx = e.clientX, sy = e.clientY, r = m.getBoundingClientRect();
+    const dx = sx - r.left, dy = sy - r.top;
+    let dragging = false;
+    try { m.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const over = (z, x, y) => { const q = z?.getBoundingClientRect(); return !!q && x >= q.left - 20 && x <= q.right + 20 && y >= q.top - (z === top ? 20 : 0) && y <= q.bottom + (z === top ? 20 : 0); };
+    // the ♪ button where it is now (the sidebar's music tab when it's docked there), for the "it goes here" outlines
+    const target = () => (app.settings.musicDock === 'side' ? app.musicRailTab?.() : document.getElementById('btn-music'));
+    const move = (ev) => {
+      if (!dragging) {
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+        dragging = true;
+        m.classList.add('dragging');
+        rail.classList.add('fling-target');
+        top?.classList.add('fling-target');
+      }
+      placeMini(ev.clientX - dx, ev.clientY - dy);
+      if (rail.classList.contains('rail-empty')) rail.classList.toggle('peek', ev.clientX > innerWidth - 260);
+      rail.classList.toggle('fling-hot', over(rail, ev.clientX, ev.clientY));
+      top?.classList.toggle('fling-hot', over(top, ev.clientX, ev.clientY));
+      const el = target();
+      if (el) { app.railMarker?.(ev, el); app.topMarker?.(ev, el); }
+    };
+    const up = (ev) => {
+      m.removeEventListener('pointermove', move);
+      m.removeEventListener('pointerup', up);
+      m.removeEventListener('pointercancel', up);
+      rail.classList.remove('fling-target', 'fling-hot', 'peek');
+      top?.classList.remove('fling-target', 'fling-hot');
+      m.classList.remove('dragging');
+      const el = target();
+      if (el) { app.railMarker?.(null, el); app.topMarker?.(null, el); }
+      if (!dragging) { (state.docked ? (app.rightPanel !== 'music' && app.toggleRightPanel('music')) : setOpen(true)); return; }
+      if (over(rail, ev.clientX, ev.clientY)) {
+        setMini({ on: false });
+        app.setMusicDock?.(true, { drop: ev, animate: false });
+        return;
+      }
+      if (over(top, ev.clientX, ev.clientY)) {
+        setMini({ on: false });
+        if (app.settings.musicDock === 'side') app.setMusicDock?.(false);
+        app.topMove?.(document.getElementById('btn-music'), ev.clientX);
+        return;
+      }
+      const q = m.getBoundingClientRect();
+      setMini({ x: Math.round(q.left), y: Math.round(q.top) });
+    };
+    m.addEventListener('pointermove', move);
+    m.addEventListener('pointerup', up);
+    m.addEventListener('pointercancel', up);
+  }
+  syncMini();
+
   refresh();
   // songs deleted (or added) in the folder outside the app show up here within a few seconds
   let dumpRev = null;
@@ -1128,6 +1310,7 @@ export function createMusic(app) {
     toggleOpen: () => (tabHost ? undefined : state.docked ? app.toggleRightPanel(app.rightPanel === 'music' ? null : 'music') : setOpen(!state.open)),
     open: () => (state.docked ? (app.rightPanel !== 'music' && app.toggleRightPanel('music')) : setOpen(true)),
     dockInto, get docked() { return !!state.docked; },
+    popOut, get miniOn() { return !!miniCfg().on; },
     /** Playlists (folders in the audio dump), for BoxTape's "save to". */
     get playlists() { return [...state.playlists]; },
     fullscreen: (on = true) => { if (!ui) build(); setFull(on); },

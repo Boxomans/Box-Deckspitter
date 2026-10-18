@@ -85,6 +85,7 @@ export function createCalendar(app) {
   const now0 = new Date();
   let month = new Date(now0.getFullYear(), now0.getMonth(), 1);
   let picked = keyOf(now0);
+  let wheelSum = 0, wheelAt = 0; // turning months with the wheel
   let host = null;
 
   const events = () => (Array.isArray(app.settings.calendarEvents) ? app.settings.calendarEvents : []);
@@ -156,7 +157,7 @@ export function createCalendar(app) {
     host = into;
     const today = new Date();
     const head = h('div', { class: 'panel-head' }, 'Calendar', h('div', { class: 'grow' }),
-      h('button', { class: 'icon-btn', 'data-tip': 'Today', onclick: () => { month = new Date(today.getFullYear(), today.getMonth(), 1); picked = keyOf(today); render(); } }, icon('calendar', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': `Back to today, ${today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`, onclick: () => { month = new Date(today.getFullYear(), today.getMonth(), 1); picked = keyOf(today); render(); } }, icon('calendar', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Add an event', onclick: () => editEvent(null, picked) }, icon('plus', 'sm')),
       h('button', { class: `icon-btn ${showHolidays() ? 'active' : ''}`, 'data-tip': showHolidays() ? 'Hide holidays' : 'Show holidays', onclick: () => { app.saveSettings({ calendarHolidays: showHolidays() ? 'off' : 'on' }); render(); } }, icon('flag', 'sm')));
 
@@ -207,6 +208,21 @@ export function createCalendar(app) {
       for (const x of holidaysOn(d).filter((y) => y.off)) { if (n++ < 8) soon.append(h('div', { class: 'cal-item hol off' }, icon('flag', 'sm'), h('span', {}, x.name), h('span', { class: 'cal-when faint' }, relDay(d)))); }
     }
     if (!n) soon.append(h('div', { class: 'faint cal-empty' }, 'Nothing in the next few weeks.'));
+
+    // the wheel over the month turns the months (a touchpad's small steps add up to one month)
+    for (const el of [nav, grid]) {
+      el.addEventListener('wheel', (e) => {
+        if (e.ctrlKey) return;
+        e.preventDefault();
+        wheelSum += Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+        if (Math.abs(wheelSum) < 50 || Date.now() - wheelAt < 90) return;
+        const step = Math.sign(wheelSum);
+        wheelSum = 0;
+        wheelAt = Date.now();
+        month = new Date(month.getFullYear(), month.getMonth() + step, 1);
+        render();
+      }, { passive: false });
+    }
 
     clear(host).append(head, h('div', { class: 'panel-body cal-body' }, nav, grid, dayList, soon));
   }

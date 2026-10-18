@@ -280,7 +280,7 @@ export class PaintEditor extends BaseEditor {
     show(this.textBar, t === 'text');
     show(this.moveBar, t === 'move');
     this.xfDone.disabled = this.xfCancel.disabled = !this.xf;
-    this.cropBtn.disabled = !this.sel;
+    this.cropBtn.dataset.tip = this.sel ? 'Crop to selection (Ctrl+Shift+X)' : 'Crop to this layer (Ctrl+Shift+X)';
     this.syncText();
     const box = t === 'move' && (this.xf || this.moveBox());
     this.propLabel.textContent = t === 'fill' ? String(this.tolerance) : t === 'select' && this.sel ? `${Math.round(this.sel.w)}×${Math.round(this.sel.h)}`
@@ -1264,6 +1264,10 @@ export class PaintEditor extends BaseEditor {
       });
       row.addEventListener('click', () => { if (i === this.active) return; this.endXf(); this.active = i; this.renderLayers(); this.drawOverlay(); this.syncProps(); });
       row.addEventListener('dblclick', () => renameInline(row));
+      row.addEventListener('contextmenu', (e) => contextMenu(e, [
+        { label: 'Crop the picture to this layer', icon: 'crop', action: () => { this.endXf(); this.active = i; this.cropToLayer(L); } },
+        { label: 'Select what’s on this layer', action: () => { this.endXf(); this.active = i; const r = this.contentBounds(L); if (!r) return toast('This layer is empty.', { type: 'warn' }); this.sel = r; this.setTool('select'); } },
+      ]));
       this.layerList.append(row);
     });
     if (this.layer) this.layerOpacity.value = String(Math.round(this.layer.opacity * 100));
@@ -1339,6 +1343,7 @@ export class PaintEditor extends BaseEditor {
   imageMenu() {
     return [
       { label: 'Crop to selection', icon: 'crop', shortcut: 'Ctrl+Shift+X', disabled: !this.sel, action: () => this.cropToSel() },
+      { label: 'Crop to this layer', icon: 'crop', shortcut: this.sel ? null : 'Ctrl+Shift+X', action: () => this.cropToLayer() },
       { label: 'Resize image…', icon: 'maximize', action: () => this.resizeImage(true) },
       { label: 'Canvas size…', icon: 'layers', action: () => this.resizeImage(false) },
       { sep: true },
@@ -1416,10 +1421,20 @@ export class PaintEditor extends BaseEditor {
     this.after();
   }
 
+  /** Crops to the selection; with nothing selected, to what's on the active layer. */
   cropToSel() {
-    const s = this.sel;
-    if (!s) return toast('Draw a selection first (S).', { type: 'warn' });
-    this.cropRect(s);
+    if (!this.sel) return this.cropToLayer();
+    this.cropRect(this.sel);
+  }
+
+  /** The picture becomes the size of what's on a layer (a pasted picture, say), its part off the picture included. */
+  cropToLayer(L = this.layer) {
+    if (!L) return;
+    this.endXf();
+    const r = this.contentBounds(L, true);
+    if (!r) return toast('This layer is empty.', { type: 'warn' });
+    if (r.x === 0 && r.y === 0 && r.w === this.W && r.h === this.H) return toast('This layer already fills the picture.', { timeout: 1600 });
+    this.cropRect(r);
   }
 
   /** Cut off the empty border: see-through edges, or (on a solid picture) edges the same colour as the corner. */
@@ -1451,7 +1466,15 @@ export class PaintEditor extends BaseEditor {
     this.checkpoint('all');
     const full = this.allLayers().map((L) => [L, this.fullOf(L)]);
     this.W = s.w; this.H = s.h;
-    for (const [L, f] of full) this.setFull(L, f.canvas, f.x + s.x, f.y + s.y);
+    for (const [L, f] of full) {
+      // the new picture may reach past a layer's canvas (cropping to a layer that hangs off the edge): pad it
+      const x = f.x + s.x, y = f.y + s.y;
+      const x0 = Math.min(0, x), y0 = Math.min(0, y), x1 = Math.max(f.canvas.width, x + s.w), y1 = Math.max(f.canvas.height, y + s.h);
+      if (x0 === 0 && y0 === 0 && x1 === f.canvas.width && y1 === f.canvas.height) { this.setFull(L, f.canvas, x, y); continue; }
+      const big = mkCanvas(x1 - x0, y1 - y0);
+      big.getContext('2d').drawImage(f.canvas, -x0, -y0);
+      this.setFull(L, big, x - x0, y - y0);
+    }
     this.sel = null;
     this.fitStage();
     this.after();

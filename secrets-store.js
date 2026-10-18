@@ -10,14 +10,15 @@ module.exports = function createSecrets({ APP_NAME, DATA, IS_WIN, readJSON, writ
   // data/secrets.json holds the API keys, tokens and email app passwords. On Windows it's sealed with DPAPI under this
   // Windows account ({ "dpapi": "…" }), so the file is useless copied anywhere else. Read once, then kept in memory.
   const SECRETS_FILE = path.join(DATA, 'secrets.json');
-  const SECRETS_ENTROPY = 'Box-DocSpitter secrets v1';
+  const SECRETS_ENTROPY = 'Box-Deckspitter secrets v1';
+  const OLD_SECRETS_ENTROPY = 'Box-DocSpitter secrets v1'; // sealed before 1.1.1 ("v" missing): read once, then sealed again
   let secretsCache = null;
   let secretsUnreadable = false; // sealed on another PC or Windows account: left alone until new ones are saved
 
   /** Windows DPAPI (current user) through PowerShell. Data goes over stdin/stdout, never on the command line. */
-  function dpapi(op, buf) {
+  function dpapi(op, buf, entropy = SECRETS_ENTROPY) {
     const fn = op === 'protect' ? 'Protect' : 'Unprotect';
-    const script = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; $in=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); $e=[Text.Encoding]::UTF8.GetBytes('${SECRETS_ENTROPY}'); $o=[Security.Cryptography.ProtectedData]::${fn}($in,$e,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($o))`;
+    const script = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; $in=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); $e=[Text.Encoding]::UTF8.GetBytes('${entropy}'); $o=[Security.Cryptography.ProtectedData]::${fn}($in,$e,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($o))`;
     return new Promise((resolve, reject) => {
       const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       let out = '', err = '';
@@ -32,11 +33,14 @@ module.exports = function createSecrets({ APP_NAME, DATA, IS_WIN, readJSON, writ
   async function loadSecrets() {
     const raw = readJSON(SECRETS_FILE, {});
     if (typeof raw.dpapi === 'string') {
-      try { secretsCache = JSON.parse((await dpapi('unprotect', Buffer.from(raw.dpapi, 'base64'))).toString('utf8')); } catch (e) {
+      const old = raw.v !== 2;
+      try { secretsCache = JSON.parse((await dpapi('unprotect', Buffer.from(raw.dpapi, 'base64'), old ? OLD_SECRETS_ENTROPY : SECRETS_ENTROPY)).toString('utf8')); } catch (e) {
         console.error(`[${APP_NAME}] secrets.json was sealed on another PC or Windows account; keys and passwords need entering again (${e.message})`);
         secretsCache = {};
         secretsUnreadable = true;
+        return;
       }
+      if (old) await saveSecrets(secretsCache).catch((e) => console.error(`[${APP_NAME}] couldn't seal secrets.json again: ${e.message}`));
       return;
     }
     secretsCache = raw;
@@ -61,7 +65,7 @@ module.exports = function createSecrets({ APP_NAME, DATA, IS_WIN, readJSON, writ
       await fsp.copyFile(SECRETS_FILE, path.join(DATA, `secrets.unreadable-${Date.now()}.json`)).catch(() => {});
       secretsUnreadable = false;
     }
-    return writeJSON(SECRETS_FILE, { dpapi: sealed });
+    return writeJSON(SECRETS_FILE, { v: 2, dpapi: sealed });
   }
 
   return { secretsReady, secrets, saveSecrets };

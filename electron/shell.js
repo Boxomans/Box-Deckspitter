@@ -24,7 +24,9 @@ if (fs.existsSync(RESET_FLAG)) {
 app.setPath('userData', USER_DATA);
 // Each copy of the app (another folder, a USB stick…) gets its own Windows app id. With one shared id,
 // Windows treated every copy as the same app, so pinning one to the taskbar could launch another.
-const APP_ID = 'BoxDocSpitter.App.' + require('crypto').createHash('sha1').update(path.resolve(ROOT).toLowerCase()).digest('hex').slice(0, 10);
+const ROOT_HASH = require('crypto').createHash('sha1').update(path.resolve(ROOT).toLowerCase()).digest('hex').slice(0, 10);
+const APP_ID = 'BoxDeckspitter.App.' + ROOT_HASH;
+const OLD_APP_ID = 'BoxDocSpitter.App.' + ROOT_HASH; // before 1.1.1: shortcuts still carrying it are moved to APP_ID below
 app.setAppUserModelId(APP_ID);
 Menu.setApplicationMenu(null);
 // UI sounds (hover etc.) should work before the first click; this is our own app window, not a website.
@@ -363,10 +365,13 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   const studio = require('./studio.js')({ isAppSender: fromApp, pickArea: (cb) => snip.pickArea(cb), log: (msg) => console.log(`[studio] ${msg}`) });
 
   // The taskbar takes its icon from this copy's shortcuts (the ones Windows keeps for the app id, plus the
-  // Desktop and Start menu ones), not from the window. After the icon file changes, point them at the new one.
+  // Desktop and Start menu ones), not from the window. After the icon file changes, point them at the new one;
+  // shortcuts (taskbar pins too) still carrying the app id from before the rename get the new one.
   if (process.platform === 'win32') app.whenReady().then(() => setTimeout(() => {
     const dirs = [app.getPath('desktop'), path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')];
-    const implicit = path.join(app.getPath('appData'), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'ImplicitAppShortcuts');
+    const pinned = path.join(app.getPath('appData'), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned');
+    dirs.push(path.join(pinned, 'TaskBar'), path.join(pinned, 'StartMenu'));
+    const implicit = path.join(pinned, 'ImplicitAppShortcuts');
     try { for (const d of fs.readdirSync(implicit)) dirs.push(path.join(implicit, d)); } catch { /* none yet */ }
     for (const dir of dirs) {
       let names = [];
@@ -375,7 +380,8 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
         try {
           const lnk = path.join(dir, f);
           const l = shell.readShortcutLink(lnk);
-          if (l.appUserModelId === APP_ID && path.resolve(l.icon || '').toLowerCase() !== ICON.toLowerCase()) {
+          if (l.appUserModelId === OLD_APP_ID) shell.writeShortcutLink(lnk, 'update', { appUserModelId: APP_ID, icon: ICON, iconIndex: 0 });
+          else if (l.appUserModelId === APP_ID && path.resolve(l.icon || '').toLowerCase() !== ICON.toLowerCase()) {
             shell.writeShortcutLink(lnk, 'update', { icon: ICON, iconIndex: 0 });
           }
         } catch { /* not a shortcut we can read */ }

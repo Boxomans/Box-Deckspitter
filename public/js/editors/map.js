@@ -12,6 +12,13 @@ import { tbButton, tbSep, toast, errorToast, showMenu, contextMenu, modal, promp
 import { decodeTile } from '../core/mvt.js';
 
 const WORLD_URL = new URL('../../assets/map/world.json', import.meta.url).href;
+/** Where a country's name goes when the data's own spot is a poor one: [lon, lat]. */
+const LABEL_AT = { Russia: [96, 62] };
+// the city list spells some countries differently from the country names
+const COUNTRY_AS = { 'Congo (Kinshasa)': 'Dem. Rep. Congo', 'Congo (Brazzaville)': 'Congo', 'Bosnia and Herzegovina': 'Bosnia and Herz.',
+  'Dominican Republic': 'Dominican Rep.', 'Central African Republic': 'Central African Rep.', 'Ivory Coast': "Côte d'Ivoire",
+  'The Bahamas': 'Bahamas', 'The Gambia': 'Gambia', 'East Timor': 'Timor-Leste', 'Equatorial Guinea': 'Eq. Guinea',
+  'Guinea Bissau': 'Guinea-Bissau', 'Solomon Islands': 'Solomon Is.' };
 const MAX_Z = 19;
 const TILE_LRU = 360;
 const DETAIL = [
@@ -24,7 +31,9 @@ const DETAIL = [
 // web mercator in world units (0..1 both ways)
 const mx = (lon) => (lon + 180) / 360;
 const my = (lat) => { const s = Math.sin((clamp(lat, -85.0511, 85.0511) * Math.PI) / 180); return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI); };
-const lonOf = (x) => x * 360 - 180;
+/** A world x brought back into 0–1 (the map repeats east and west). */
+const wrap1 = (x) => x - Math.floor(x);
+const lonOf = (x) => wrap1(x) * 360 - 180;
 const latOf = (y) => (Math.atan(Math.sinh(Math.PI * (1 - 2 * y))) * 180) / Math.PI;
 function haversine(a, b) {
   const R = 6371008.8, r = Math.PI / 180;
@@ -104,17 +113,27 @@ export class MapEditor extends BaseEditor {
       const borders = new Path2D(), lakes = new Path2D(), states = new Path2D();
       const countries = [];
       for (const c of w.countries) {
-        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, land = 0;
         for (const poly of c.p) {
           for (const d of poly) { ring(tint[(c.c - 1 + 7) % 7], d); ring(borders, d); }
           let x = 0, y = 0;
-          for (let i = 0; i < poly[0].length; i += 2) { x += poly[0][i]; y += poly[0][i + 1]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+          let a = 0, px = 0, py = 0;
+          for (let i = 0; i < poly[0].length; i += 2) {
+            x += poly[0][i]; y += poly[0][i + 1]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+            if (i) a += px * y - x * py;
+            px = x; py = y;
+          }
+          land += Math.abs(a) / 2;
         }
-        countries.push({ n: c.n, r: c.r, x: mx(c.l[0]), y: my(c.l[1]), box: [x0 / Q, y0 / Q, x1 / Q, y1 / Q] });
+        // Natural Earth puts this name in its far west, in among Europe's names; further east has the room
+        const [lx, ly] = LABEL_AT[c.n] || c.l;
+        countries.push({ n: c.n, r: c.r, x: mx(lx), y: my(ly), box: [x0 / Q, y0 / Q, x1 / Q, y1 / Q], land: land / Q / Q });
       }
       for (const l of w.lakes) for (const poly of l.p) for (const d of poly) ring(lakes, d);
+      const named = new Set(countries.map((c) => c.n));
       for (const d of w.states) ring(states, d);
-      const places = w.places.map(([n, lon, lat, rank, pop, cap, country]) => ({ n, x: mx(lon), y: my(lat), rank, pop, cap, country }))
+      const places = w.places.map(([n, lon, lat, rank, pop, cap, country]) => ({ n, x: mx(lon), y: my(lat), rank, pop, cap,
+        country: named.has(COUNTRY_AS[country] || country) ? COUNTRY_AS[country] || country : null }))
         .sort((a, b) => (b.cap - a.cap) || (a.rank - b.rank) || (b.pop - a.pop));
       this.world = { Q, tint, borders, lakes, states, countries, places };
     } catch (e) { errorToast(e, 'The world map didn’t load'); }
@@ -191,15 +210,31 @@ export class MapEditor extends BaseEditor {
   scale(z = this.view.z) { return 256 * 2 ** z; }
   toScreen(x, y) { const S = this.scale(); return [(x - this.view.cx) * S + this.W / 2, (y - this.view.cy) * S + this.H / 2]; }
   toWorld(px, py) { const S = this.scale(); return [this.view.cx + (px - this.W / 2) / S, this.view.cy + (py - this.H / 2) / S]; }
+  /** The copy of world x nearest the middle of the screen. */
+  nearX(x) { return x + Math.round(this.view.cx - x); }
+  /** Which copies of the world the screen shows (…, -1, 0, 1, …: the map repeats east and west). */
+  copies() {
+    const x0 = this.toWorld(0, 0)[0], x1 = this.toWorld(this.W, 0)[0];
+    const out = [];
+    for (let c = Math.floor(x0); c <= Math.floor(x1) && out.length < 8; c++) out.push(c);
+    return out;
+  }
+  /** Run fn with the view moved so that copy c of the world is where the screen shows it. */
+  inCopy(c, fn) {
+    const v = this.view;
+    this.view = { ...v, cx: v.cx - c };
+    try { fn(); } finally { this.view = v; }
+  }
   fitZoom() { return Math.max(0, Math.log2(Math.min(this.W, this.H * 1.2) / 256)); }
   minZoom() { return Math.max(0, Math.log2(Math.min(this.W, this.H) / 256) - 0.5); }
 
   setView(cx, cy, z) {
     z = clamp(z, this.minZoom(), MAX_Z);
     const S = this.scale(z);
-    const halfW = this.W / 2 / S, halfH = this.H / 2 / S;
+    const halfH = this.H / 2 / S;
     this.view = {
-      cx: halfW >= 0.5 ? 0.5 : clamp(cx, halfW, 1 - halfW),
+      // east–west the world goes round (kept within one turn of it); north–south it stops at the edges
+      cx: wrap1(cx),
       cy: halfH >= 0.5 ? 0.5 : clamp(cy, halfH, 1 - halfH),
       z,
     };
@@ -217,6 +252,7 @@ export class MapEditor extends BaseEditor {
     cancelAnimationFrame(this.anim);
     const a = { ...this.view }, t0 = performance.now();
     z = clamp(z, this.minZoom(), MAX_Z);
+    cx = this.nearX(cx); // the short way round
     // zoom out a little on long trips so it reads as a move, not a cut
     const far = Math.hypot(cx - a.cx, cy - a.cy) * 2 ** Math.min(a.z, z);
     const dip = far > 2 ? Math.min(4, Math.log2(far)) : 0;
@@ -362,44 +398,48 @@ export class MapEditor extends BaseEditor {
     const cv = this.cv, dpr = window.devicePixelRatio || 1;
     const W = this.W, H = this.H;
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
-    // keep the view legal after a resize
     const S = this.scale();
-    if (W / 2 / S < 0.5 && (this.view.cx < W / 2 / S || this.view.cx > 1 - W / 2 / S)) { this.view.cx = clamp(this.view.cx, W / 2 / S, 1 - W / 2 / S); }
     const ctx = cv.getContext('2d');
     const P = this.pal;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = P.sea;
     ctx.fillRect(0, 0, W, H);
-    const ox = W / 2 - this.view.cx * S, oy = H / 2 - this.view.cy * S;
+    const oy = H / 2 - this.view.cy * S;
     const z = this.view.z;
     this.labels = [];
-
-    // 1. the built-in world
+    this.wantTiles = [];
+    this.rasterShown = false;
     const w = this.world;
-    if (w) {
-      const k = S / w.Q;
-      ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, dpr * oy);
-      w.tint.forEach((p, i) => { ctx.fillStyle = P.tints[i]; ctx.fill(p); });
-      ctx.fillStyle = P.water; ctx.fill(w.lakes);
-      ctx.lineJoin = 'round';
-      if (z > 3) { ctx.strokeStyle = P.state; ctx.lineWidth = 0.7 / k; ctx.setLineDash([3 / k, 2.5 / k]); ctx.stroke(w.states); ctx.setLineDash([]); }
-      ctx.strokeStyle = P.border; ctx.lineWidth = (z < 3 ? 0.6 : 0.9) / k; ctx.stroke(w.borders);
-    }
-
-    // 2. OpenStreetMap tiles while online (where nothing is downloaded)
-    if (this.settings.osm !== false) this.paintRaster(ctx, dpr, ox, oy, S);
-
-    // 3. the downloaded regions' vector tiles
-    this.paintVector(ctx, dpr, ox, oy, S);
-
-    // 4. labels: world places where no region covers, then whatever tiles offered, best first
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (w) this.worldLabels(w);
+    // the world repeats left and right (across the date line the land runs on): each copy on screen is drawn in turn
+    const copies = this.copies();
+    for (const c of copies) this.inCopy(c, () => {
+      const ox = W / 2 - this.view.cx * S;
+      // 1. the built-in world
+      if (w) {
+        const k = S / w.Q;
+        ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * ox, dpr * oy);
+        w.tint.forEach((p, i) => { ctx.fillStyle = P.tints[i]; ctx.fill(p); });
+        ctx.fillStyle = P.water; ctx.fill(w.lakes);
+        ctx.lineJoin = 'round';
+        if (z > 3) { ctx.strokeStyle = P.state; ctx.lineWidth = 0.7 / k; ctx.setLineDash([3 / k, 2.5 / k]); ctx.stroke(w.states); ctx.setLineDash([]); }
+        ctx.strokeStyle = P.border; ctx.lineWidth = (z < 3 ? 0.6 : 0.9) / k; ctx.stroke(w.borders);
+      }
+      // 2. OpenStreetMap tiles while online (where nothing is downloaded)
+      if (this.settings.osm !== false) this.paintRaster(ctx, dpr, ox, oy, S);
+      // 3. the downloaded regions' vector tiles
+      this.paintVector(ctx, dpr, ox, oy, S);
+      // 4. label candidates: world places where no region covers (the tiles added theirs as they drew)
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (w) this.worldLabels(w);
+    });
+    // the labels of every copy, best first
     this.paintLabels(ctx);
 
     // 5. overlays
-    if (this.settings.outlines || this.mode === 'area') this.paintRegionOutlines(ctx);
-    this.paintPins(ctx);
+    for (const c of copies) this.inCopy(c, () => {
+      if (this.settings.outlines || this.mode === 'area') this.paintRegionOutlines(ctx);
+      this.paintPins(ctx);
+    });
     this.paintMeasure(ctx);
     if (this.mode === 'area' && this.areaBox) this.paintAreaBox(ctx);
     this.paintScale(ctx);
@@ -447,7 +487,7 @@ export class MapEditor extends BaseEditor {
 
   paintVector(ctx, dpr, ox, oy, S) {
     const want = this.wantedVector();
-    this.wantTiles = want;
+    this.wantTiles.push(...want);
     for (const t of want) {
       const e = this.tiles.get(t.k);
       if (e?.state === 'ok') { e.used = performance.now(); this.paintTile(ctx, dpr, ox, oy, S, t, e.data, null); continue; }
@@ -599,17 +639,27 @@ export class MapEditor extends BaseEditor {
         if (this.covered(c.x, c.y) && z >= 4) continue;
         // islands too small to see yet don't get a name
         if (Math.max(c.box[2] - c.box[0], c.box[3] - c.box[1]) * this.scale() < 14) continue;
+        // nor do scattered specks of islands whose box is big but whose land isn't (zoomed out)
+        if (z < 4 && Math.sqrt(c.land) * this.scale() < 12) continue;
         const [x, y] = this.toScreen(c.x, c.y);
-        this.labels.push({ name: c.n, x, y, kind: 'country', size: clamp(10 + z * 1.4, 11, 16), pri: 120 - c.r * 5, minZ: 0 });
+        // the more land, the stronger the claim to the space: the biggest countries keep their names, and
+        // a big island country's isn't lost to a scatter of small islands'
+        const land = Math.max(1e-12, c.land);
+        this.labels.push({ name: c.n, x, y, kind: 'country', size: clamp(10 + z * 1.4, 11, 16), pri: 120 - c.r * 3 + clamp(20 + Math.log2(land), 0, 20) * 1.2, minZ: 0 });
       }
     }
     const lim = z * 1.55 - 0.6;
     for (const p of w.places) {
-      if (p.rank > lim && !(p.cap && z >= 2.6)) continue;
-      if (z >= 9 && this.covered(p.x, p.y)) continue;
+      // the whole world names no cities; zoomed out to continents the capitals and the giant cities all come in
+      // together, none ahead of the others; closer in, the rest by rank
+      if (z < 3) break;
+      if (z < 4 ? !(p.pop >= 10e6 || p.cap) : p.rank > lim && !p.cap) continue;
+      // a downloaded region, or OpenStreetMap's own streets, name the places there (and in the right spot: the world
+      // list's points can be a few km off)
+      if (z >= 9 && (this.covered(p.x, p.y) || this.rasterShown)) continue;
       const [x, y] = this.toScreen(p.x, p.y);
       if (x < -50 || y < -20 || x > this.W + 50 || y > this.H + 20) continue;
-      this.labels.push({ name: p.n, x, y, kind: 'city', size: p.cap ? 12.5 : clamp(12.5 - p.rank * 0.25, 10.5, 12), pri: 70 - p.rank * 4 + (p.cap ? 10 : 0), dot: true, cap: p.cap, minZ: 0 });
+      this.labels.push({ name: p.n, x, y, kind: 'city', size: clamp(12.5 - p.rank * 0.25, 10.5, 12), pri: 70 - p.rank * 4 + (p.cap ? 10 : 0), dot: true, cap: p.cap, country: z < 4 ? p.country || '?' : null, minZ: 0 });
     }
   }
 
@@ -620,27 +670,54 @@ export class MapEditor extends BaseEditor {
     const list = this.labels.filter((l) => z >= (l.minZ || 0)).sort((a, b) => b.pri - a.pri);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
     let drawn = 0;
-    const seen = new Set();
+    const seen = new Set(), named = new Set();
+    const capDots = this.labels.filter((l) => l.cap && l.dot).map((l) => [l.x - 5, l.y - 5, l.x + 5, l.y + 5]);
     for (const l of list) {
+      // zoomed out, a city is named only when its country's name is there too
+      if (l.country && !named.has(l.country)) continue;
       if (drawn > 600) break;
       if (l.x < -100 || l.y < -40 || l.x > this.W + 100 || l.y > this.H + 40) continue;
       const key = `${l.name}|${Math.round(l.x / 40)}|${Math.round(l.y / 40)}`;
       if (seen.has(key)) continue;
-      const weight = l.kind === 'country' || l.cap ? 600 : l.kind === 'region' ? 500 : l.kind === 'city' || (l.kind === 'place' && l.size > 13) ? 500 : 400;
+      const weight = l.kind === 'country' ? 600 : l.kind === 'region' ? 500 : l.kind === 'city' || (l.kind === 'place' && l.size > 13) ? 500 : 400;
       ctx.font = `${l.kind === 'water' || l.kind === 'region' ? 'italic ' : ''}${weight} ${l.size || 12}px ${this.font}`;
       const text = l.kind === 'country' && z < 3.5 ? l.name.toUpperCase() : l.name;
       ctx.letterSpacing = l.kind === 'country' && z < 3.5 ? '1px' : '0px';
       const tw = ctx.measureText(text).width, th = (l.size || 12) + 2;
       if (l.kind === 'road' && tw > l.seg * (this.scale() / 2 ** l.t.z / 4096) * 0.95) continue;
-      const ly = l.dot ? l.y - th / 2 - 3 : l.y;
       const half = l.kind === 'road' ? Math.max(tw, th) / 2 : tw / 2;
-      const b = l.kind === 'road' ? [l.x - half, l.y - half, l.x + half, l.y + half] : [l.x - tw / 2 - 3, ly - th / 2 - 1, l.x + tw / 2 + 3, ly + th / 2 + 1];
+      // a country's box keeps a margin, so no city sits on a country's name
+      const pad = l.kind === 'country' ? 6 : 0;
+      let lx = l.x, ly = l.y, b;
+      if (l.kind === 'road') b = [l.x - half, l.y - half, l.x + half, l.y + half];
+      else if (l.kind === 'country') {
+        // a country's name steps up or down off its capital's dot, so the capital has room beside it
+        b = null;
+        for (const dy of [0, th + 6, -th - 6]) {
+          const c = [l.x - tw / 2 - 3 - pad, l.y + dy - th / 2 - 1 - pad, l.x + tw / 2 + 3 + pad, l.y + dy + th / 2 + 1 + pad];
+          if (!hit(c) && !capDots.some((o) => c[0] < o[2] && c[2] > o[0] && c[1] < o[3] && c[3] > o[1])) { b = c; ly = l.y + dy; break; }
+        }
+        if (!b) b = [l.x - tw / 2 - 3 - pad, l.y - th / 2 - 1 - pad, l.x + tw / 2 + 3 + pad, l.y + th / 2 + 1 + pad];
+      }
+      else if (!l.dot) b = [l.x - tw / 2 - 3 - pad, l.y - th / 2 - 1 - pad, l.x + tw / 2 + 3 + pad, l.y + th / 2 + 1 + pad];
+      else {
+        // a city's name goes above its dot, or below, right or left of it when that's taken (the box takes in the dot)
+        const spots = [[0, -th / 2 - 3], [0, th / 2 + 3], [tw / 2 + 6, 0], [-tw / 2 - 6, 0]];
+        b = null;
+        for (const [dx, dy] of spots) {
+          const c = [l.x + dx - tw / 2 - 3, l.y + dy - th / 2 - 1, l.x + dx + tw / 2 + 3, l.y + dy + th / 2 + 1];
+          const t = [Math.min(c[0], l.x - 4), Math.min(c[1], l.y - 4), Math.max(c[2], l.x + 4), Math.max(c[3], l.y + 4)];
+          if (!hit(t)) { b = t; lx = l.x + dx; ly = l.y + dy; break; }
+        }
+        if (!b) continue;
+      }
       if (hit(b)) continue;
       boxes.push(b);
       seen.add(key);
+      if (l.kind === 'country') named.add(l.name);
       drawn++;
       ctx.save();
-      ctx.translate(l.x, ly);
+      ctx.translate(lx, ly);
       if (l.ang) ctx.rotate(l.ang);
       ctx.strokeStyle = P.halo; ctx.lineWidth = 3;
       ctx.fillStyle = l.kind === 'water' ? P.waterText : l.kind === 'region' ? P.region : l.kind === 'hood' || l.kind === 'poi' || l.kind === 'soft' || l.kind === 'road' ? P.textSoft : P.text;
@@ -673,7 +750,7 @@ export class MapEditor extends BaseEditor {
       if (this.regionCoversTile(tz, x, y)) continue;
       const k = `${tz}/${x}/${y}`;
       const e = this.raster.get(k);
-      if (e?.state === 'ok') { e.used = performance.now(); ctx.drawImage(e.img, ox + x * size, oy + y * size, size + 0.5, size + 0.5); continue; }
+      if (e?.state === 'ok') { e.used = performance.now(); this.rasterShown = true; ctx.drawImage(e.img, ox + x * size, oy + y * size, size + 0.5, size + 0.5); continue; }
       if (!e) this.enqueue({ z: tz, x, y, k, raster: true });
       for (let up = 1; up <= 5 && tz - up >= 0; up++) {
         const pz = tz - up, px = x >> up, py = y >> up;
@@ -756,7 +833,7 @@ export class MapEditor extends BaseEditor {
   pinAt(px, py) {
     for (let i = this.pins.length - 1; i >= 0; i--) {
       const p = this.pins[i];
-      const [x, y] = this.toScreen(mx(p.lon), my(p.lat));
+      const [x, y] = this.toScreen(this.nearX(mx(p.lon)), my(p.lat));
       if (Math.hypot(px - x, py - (y - 16)) < 12) return p;
     }
     return null;
@@ -833,8 +910,11 @@ export class MapEditor extends BaseEditor {
     }
   }
   tileOnScreen(t) {
-    const r = this.visibleRange(t.z);
-    return t.x >= r.x0 && t.x <= r.x1 && t.y >= r.y0 && t.y <= r.y1;
+    return this.copies().some((c) => {
+      let r;
+      this.inCopy(c, () => { r = this.visibleRange(t.z); });
+      return t.x >= r.x0 && t.x <= r.x1 && t.y >= r.y0 && t.y <= r.y1;
+    });
   }
 
   async fetchTile(t) {
@@ -963,7 +1043,7 @@ export class MapEditor extends BaseEditor {
   placePop() {
     const p = this.popPin;
     if (!p || this.popEl.hidden) return;
-    const [x, y] = this.toScreen(mx(p.lon), my(p.lat));
+    const [x, y] = this.toScreen(this.nearX(mx(p.lon)), my(p.lat));
     const w = this.popEl.offsetWidth || 260, hh = this.popEl.offsetHeight || 140;
     this.popEl.style.left = `${clamp(x - w / 2, 8, this.W - w - 8)}px`;
     this.popEl.style.top = `${y - 40 - hh < 8 ? y + 10 : y - 40 - hh}px`;
@@ -1005,13 +1085,15 @@ export class MapEditor extends BaseEditor {
   async finishArea() {
     const b = this.areaBox;
     if (!b) return;
-    const x0 = clamp(Math.min(b[0], b[2]), 0, 1), x1 = clamp(Math.max(b[0], b[2]), 0, 1), y0 = clamp(Math.min(b[1], b[3]), 0, 1), y1 = clamp(Math.max(b[1], b[3]), 0, 1);
+    // into the copy of the world the box mostly sits in (a download stops at the date line)
+    const c = Math.floor((b[0] + b[2]) / 2);
+    const x0 = clamp(Math.min(b[0], b[2]) - c, 0, 1), x1 = clamp(Math.max(b[0], b[2]) - c, 0, 1), y0 = clamp(Math.min(b[1], b[3]), 0, 1), y1 = clamp(Math.max(b[1], b[3]), 0, 1);
     const [sa, sb] = this.toScreen(x0, y0), [sc, sd] = this.toScreen(x1, y1);
     if (sc - sa < 6 || sd - sb < 6) { this.areaBox = null; this.draw(); return; }
     this.mode = 'area';
-    this.areaBox = [x0, y0, x1, y1];
+    this.areaBox = [x0 + c, y0, x1 + c, y1];
     this.draw();
-    const bbox = [lonOf(x0), latOf(y1), lonOf(x1), latOf(y0)].map((v) => +v.toFixed(5));
+    const bbox = [x0 * 360 - 180, latOf(y1), x1 * 360 - 180, latOf(y0)].map((v) => +v.toFixed(5));
     // a name: the biggest city in the box, else the country
     const inBox = (p) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
     const city = (this.world?.places || []).filter(inBox).sort((a, b2) => (b2.pop || 0) - (a.pop || 0))[0];

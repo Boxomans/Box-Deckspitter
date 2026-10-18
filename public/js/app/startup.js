@@ -4,7 +4,7 @@
 import { $, h } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
-import { modal, toast } from '../core/ui.js';
+import { modal, modalOpen, toast } from '../core/ui.js';
 
 export class StartupPart {
   /** After the app is up: say how an update/rollback went, then the first-run welcome or "what's new". */
@@ -23,6 +23,7 @@ export class StartupPart {
         else if (!r.ok) toast(`The update to ${r.version} didn’t work (${r.reason}), so Box-Deckspitter is still on ${r.from || 'the previous version'}. Nothing of yours was touched.`, { type: 'warn', timeout: 14000 });
       }
     } catch { /* browser mode or old server */ }
+    this.fileTypesNotice();
     this.launchUpdateCheck();
     const last = this.settings.lastSeenVersion;
     if (!this.settings.welcomed) {
@@ -32,6 +33,26 @@ export class StartupPart {
     if (last !== version) {
       this.saveSettings({ lastSeenVersion: version });
       if (last) this.showWhatsNew(last);
+    }
+  }
+
+  /** Once, after the file types were registered again under the app's new name: Windows needs the defaults chosen again. */
+  async fileTypesNotice() {
+    for (let i = 0; i < 90; i++) {
+      await new Promise((r) => setTimeout(r, i ? 2000 : 6000)); // the server does it a few seconds after starting
+      if (modalOpen()) continue; // what's new, the welcome…: after those
+      const r = await api.get('/api/system/associations/renamed').catch(() => null);
+      if (!r?.show) { if (r?.pending) continue; return; }
+      await api.post('/api/system/associations/renamed/seen').catch(() => {});
+      const go = await modal({
+        title: 'Choose your default apps again',
+        body: h('div', {},
+          h('p', {}, 'Box-Deckspitter registered its file types under its new name, so Windows no longer has it as the default app for them.'),
+          h('p', {}, 'Only you can choose a default app in Windows: in Settings → Default apps, pick Box-Deckspitter for the file types it should open.')),
+        buttons: [{ label: 'Later', value: false, ghost: true }, { label: 'Open Default apps', value: true, primary: true }],
+      });
+      if (go) api.post('/api/system/default-apps').catch(() => {});
+      return;
     }
   }
 
