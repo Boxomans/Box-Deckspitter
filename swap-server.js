@@ -361,7 +361,7 @@ module.exports = function createSwap({ readJSONBody, requirePath, dataDir, appRo
       const target = requirePath(body.target);
       if (path.parse(target).root === target) throw err(400, 'Pick a folder, not a whole drive.');
       if (same(target, store) || inside(target, store) || inside(store, target)) throw err(400, 'The folder and the master folder can’t be inside one another.');
-      if (same(target, appRoot) || inside(target, appRoot)) throw err(400, 'That’s Box-DocSpitter’s own folder.');
+      if (same(target, appRoot) || inside(target, appRoot)) throw err(400, 'That’s Box-Deckspitter’s own folder.');
       const win = process.env.SystemRoot;
       if (win && (same(target, win) || inside(target, win))) throw err(400, 'Not the Windows folder.');
       if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw err(404, 'That folder isn’t there.');

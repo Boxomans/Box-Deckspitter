@@ -10,10 +10,10 @@ const fsp = fs.promises;
 const path = require('path');
 const { spawn } = require('child_process');
 
-const DEFAULT_REPO = 'Boxomans/Box-Docspitter';
+const DEFAULT_REPO = 'Boxomans/Box-Deckspitter';
 const BRANCH = 'main';
 const MAX_ZIP = 300 * 1024 * 1024;
-const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-docspitter\.exe$/i];
+const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-(docspitter|deckspitter)\.exe$/i];
 // Files that must be in any real release.
 const REQUIRED = ['package.json', 'server.js', 'update-server.js', 'electron/shell.js', 'electron/preload.js', 'public/index.html', 'public/js/app.js'];
 
@@ -53,7 +53,7 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
     const res = await fetch(`https://api.github.com/repos/${repo()}${p}`, {
       headers: {
         Accept: raw ? 'application/vnd.github.raw' : 'application/vnd.github+json',
-        'User-Agent': 'Box-DocSpitter-updater',
+        'User-Agent': 'Box-Deckspitter-updater',
         'X-GitHub-Api-Version': '2022-11-28',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
@@ -74,7 +74,7 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
   // internet connection, shared by every copy and program on it. The branch's newest commit comes from git's
   // own list of branches, files from raw.githubusercontent.com, and the zip from codeload.github.com.
   async function plain(url, what) {
-    const res = await fetch(url, { headers: { 'User-Agent': 'Box-DocSpitter-updater' }, signal: AbortSignal.timeout(20000) });
+    const res = await fetch(url, { headers: { 'User-Agent': 'Box-Deckspitter-updater' }, signal: AbortSignal.timeout(20000) });
     if (res.status === 404 || res.status === 401) throw err(502, 'Can’t see the repo on GitHub. If it’s private, add a GitHub token in Settings → Updates.');
     if (res.status === 429) throw err(502, 'GitHub is busy right now. Try again in a few minutes.');
     if (!res.ok) throw err(502, `GitHub answered ${res.status} for ${what}.`);
@@ -167,14 +167,14 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
     const token = secrets().githubToken;
     let res = await fetch(url, {
       redirect: 'manual',
-      headers: { 'User-Agent': 'Box-DocSpitter-updater', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { 'User-Agent': 'Box-Deckspitter-updater', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       signal: AbortSignal.timeout(30000),
     });
     // the zip lives on codeload.github.com behind a short-lived signed link: follow it without the token
     for (let hops = 0; res.status >= 300 && res.status < 400 && hops < 4; hops++) {
       const next = new URL(res.headers.get('location'), url);
       if (next.protocol !== 'https:' || !/(^|\.)github(usercontent)?\.com$/i.test(next.hostname)) throw err(502, 'The download pointed somewhere other than GitHub; stopped.');
-      res = await fetch(next, { redirect: 'manual', headers: { 'User-Agent': 'Box-DocSpitter-updater' }, signal: AbortSignal.timeout(30000) });
+      res = await fetch(next, { redirect: 'manual', headers: { 'User-Agent': 'Box-Deckspitter-updater' }, signal: AbortSignal.timeout(30000) });
     }
     if (!res.ok) throw err(502, `Download failed (${res.status}).`);
     const chunks = [];
@@ -271,7 +271,7 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
   }
 
   function blockReason() {
-    if (!shellMode) return 'Updates install from the Box-DocSpitter app window, not a browser tab.';
+    if (!shellMode) return 'Updates install from the Box-Deckspitter app window, not a browser tab.';
     if (isGitCheckout()) return 'This copy is a git checkout (your development copy). Update it with git pull instead.';
     return null;
   }

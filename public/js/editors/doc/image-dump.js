@@ -79,14 +79,14 @@ export class ImageDump {
 
     this.count = h('span', { class: 'dump-count' }, '0');
     this.chev = h('span', { class: 'dump-chev' }, icon('chevron-up', 'sm'));
-    this.tabBtn = h('button', { class: 'dump-tab', title: `${this.cfg.label} — files saved in Box-DocSpitter\\${this.cfg.folder}` },
+    this.tabBtn = h('button', { class: 'dump-tab', title: `${this.cfg.label} — files saved in Box-Deckspitter\\${this.cfg.folder}` },
       icon(this.cfg.icon, 'sm'), h('span', {}, this.cfg.label), this.count, this.chev);
     this.tabBtn.addEventListener('click', () => this.toggle());
 
     this.grid = h('div', { class: `dump-grid ${kind}` });
     this.empty = h('div', { class: 'dump-empty' },
       h('div', {}, `nothing in the ${this.cfg.label} yet`),
-      h('div', { class: 'faint' }, `${this.cfg.emptyHint} They live in Box-DocSpitter\\${this.cfg.folder}.`));
+      h('div', { class: 'faint' }, `${this.cfg.emptyHint} They live in Box-Deckspitter\\${this.cfg.folder}.`));
     const slider = h('input', { type: 'range', min: '64', max: '160', value: String(this.size), title: 'Thumbnail size' });
     slider.addEventListener('input', () => { this.size = Number(slider.value); this.grid.style.setProperty('--thumb', this.size + 'px'); });
     slider.addEventListener('change', () => app.saveSettings({ dumpThumb: this.size }));

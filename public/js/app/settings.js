@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the Settings screen: fonts, backgrounds, the custom theme, moving your setup, factory reset.
+// Box-Deckspitter app shell, the Settings screen: fonts, backgrounds, the custom theme, moving your setup, factory reset.
 // Methods of App (app.js mixes this class into it).
 
 import { $, h, clear } from '../core/dom.js';
@@ -7,7 +7,7 @@ import { api } from '../core/api.js';
 import { modal, toast, errorToast } from '../core/ui.js';
 import { normalizeCustom, CUSTOM_PRESETS } from '../core/custom-theme.js';
 import { pickOpen, pickSave } from '../core/files.js';
-import { DISCORD_INVITE } from './shared.js';
+import { DISCORD_INVITE, THEMES, HIDDEN_THEMES } from './shared.js';
 
 // Appearance → Interface font. 'theme' keeps whatever the theme uses (each hidden theme has its own).
 const UI_FONTS = [
@@ -39,7 +39,7 @@ export class SettingsPart {
 
   async exportSetup() {
     const day = new Date().toISOString().slice(0, 10);
-    const out = await pickSave({ title: 'Export your setup', defaultName: `Box-DocSpitter setup ${day}.zip`, filters: [{ name: 'Zip file', extensions: ['zip'] }] });
+    const out = await pickSave({ title: 'Export your setup', defaultName: `Box-Deckspitter setup ${day}.zip`, filters: [{ name: 'Zip file', extensions: ['zip'] }] });
     if (!out?.path) return;
     try {
       await this.saveGames();
@@ -96,7 +96,15 @@ export class SettingsPart {
       h('div', { class: 'panel-head' }, 'Settings', h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
       h('div', { class: 'panel-body' }, h('div', { class: 'settings-panel' },
         h('div', { class: 'settings-group' }, h('h4', {}, 'Appearance'),
-          Object.assign(sel('theme', this.themeList().map(([id, , label]) => [id, label]), (v) => this.applyTheme(v)), { className: 'set-theme' }),
+          (() => {
+            // the hidden themes sit under their own heading, apart from the everyday ones
+            const el = Object.assign(sel('theme', THEMES.map(([id, , label]) => [id, label]), (v) => this.applyTheme(v)), { className: 'set-theme' });
+            if (s.hiddenThemes) {
+              el.append(h('optgroup', { class: 'opt-hidden', label: 'Hidden themes' }, HIDDEN_THEMES.map(([id, , label]) => h('option', { value: id }, label))));
+              el.value = String(s.theme);
+            }
+            return el;
+          })(),
           customBox,
           h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Interface font'),
           sel('uiFont', this.uiFontList().map(([id, label]) => [id, label]), () => this.applyLook()),
@@ -144,9 +152,9 @@ export class SettingsPart {
         this.aiSettings(),
         this.easterEggSettings(),
         h('div', { class: 'settings-group' }, h('h4', {}, 'About'),
-          h('span', { class: 'dim mono', style: { fontSize: '11px' } }, `v${window.BDS?.version} · data folder: Box-DocSpitter\\data`)),
+          h('span', { class: 'dim mono', style: { fontSize: '11px' } }, `v${window.BDS?.version} · data folder: Box-Deckspitter\\data`)),
         h('div', { class: 'settings-group danger-zone' }, h('h4', {}, 'Reset'),
-          h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Erase everything Box-DocSpitter has stored and start fresh, like a new copy.'),
+          h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Erase everything Box-Deckspitter has stored and start fresh, like a new copy.'),
           h('button', { class: 'btn sm danger', onclick: () => this.factoryReset() }, icon('trash', 'sm'), 'Reset to clean state…')),
         h('div', { class: 'settings-group' }, h('h4', {}, 'Community'),
           h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Questions, ideas or bugs? Come say hi.'),
@@ -367,7 +375,7 @@ export class SettingsPart {
           h('li', {}, 'caches (app window cache, compiled StoragePeek scanner)')),
         ...dumpBoxes.map((b) => b.row),
         h('label', { class: 'check' }, notesBox, 'Also delete Secure notes (can’t be undone — without this they’re kept)'),
-        h('p', { class: 'faint' }, 'Your own documents and files saved anywhere else are not touched. Box-DocSpitter restarts when it’s done.')),
+        h('p', { class: 'faint' }, 'Your own documents and files saved anywhere else are not touched. Box-Deckspitter restarts when it’s done.')),
       buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Erase everything', value: 'ok', danger: true }],
     });
     if (ok !== 'ok') return;
@@ -379,7 +387,7 @@ export class SettingsPart {
     } catch (e) { return errorToast(e, 'Reset failed'); }
     try { localStorage.clear(); sessionStorage.clear(); } catch { /* ignore */ }
     this.resetting = true;
-    document.body.innerHTML = `<div class="loading-pane">${res.relaunch ? 'Reset complete — restarting Box-DocSpitter…' : 'Reset complete. Box-DocSpitter has stopped — start it again for a fresh copy.'}</div>`;
+    document.body.innerHTML = `<div class="loading-pane">${res.relaunch ? 'Reset complete — restarting Box-Deckspitter…' : 'Reset complete. Box-Deckspitter has stopped — start it again for a fresh copy.'}</div>`;
   }
 
   // ======================================================================= Windows file types

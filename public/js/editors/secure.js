@@ -82,7 +82,7 @@ export class SecureNotesEditor extends BaseEditor {
   }
 
   renderUnavailable(why) {
-    this.screen('Secure notes', h('p', { class: 'dim' }, why || 'Secure notes only open in the Box-DocSpitter app window, not in a browser tab. They’re encrypted by the app itself and never pass through the browser.'));
+    this.screen('Secure notes', h('p', { class: 'dim' }, why || 'Secure notes only open in the Box-Deckspitter app window, not in a browser tab. They’re encrypted by the app itself and never pass through the browser.'));
   }
 
   busy(btn, text, fn) {

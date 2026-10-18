@@ -105,9 +105,14 @@ export function createMusic(app) {
   }
 
   // A steep-ish slope (Q 0.9) so cutting really removes the lows / highs; at the ends they're bypassed.
+  // Low cut off is a flat shelf (an exact pass-through): a high-pass parked at 1 Hz drifts once a song stops,
+  // feeding a slowly growing rumble to the speakers and the visualizer.
   function applyCuts() {
     if (!lowCut) return;
-    lowCut.frequency.value = state.low <= MIN_HZ + 1 ? 1 : state.low;
+    const lowOff = state.low <= MIN_HZ + 1;
+    lowCut.type = lowOff ? 'lowshelf' : 'highpass';
+    lowCut.gain.value = 0;
+    lowCut.frequency.value = lowOff ? MIN_HZ : state.low;
     lowCut.Q.value = 0.9;
     highCut.frequency.value = state.high >= MAX_HZ - 50 ? 24000 : state.high;
     highCut.Q.value = 0.9;
@@ -299,7 +304,7 @@ export function createMusic(app) {
 
   function setSource(t) {
     audio.src = `/api/stream?token=${encodeURIComponent(api.token)}&path=${encodeURIComponent(t.path)}`;
-    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: songTitle(t.name), artist: plOf(t.name) || 'audio-dump', album: 'Box-DocSpitter' });
+    if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: songTitle(t.name), artist: plOf(t.name) || 'audio-dump', album: 'Box-Deckspitter' });
   }
 
   /** fromQueue: a queued song doesn't move the library's place, so the library carries on where it was after. */
@@ -586,6 +591,18 @@ export function createMusic(app) {
   }
   // leaving the window's full screen (Esc, F11) leaves the full-screen player too
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && full) setFull(false); });
+  /** The current theme's colours for the visualizer and the EQ curve (custom themes included). */
+  function vizColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name, fb) => cs.getPropertyValue(name).trim() || fb;
+    return { a: v('--accent-3', '#6ee7e0'), b: v('--accent', '#b48cff'), c: v('--accent-2', '#ff7ac6'), grid: v('--text-3', '#8d84a0') };
+  }
+  const themeGradient = (g, W) => {
+    const k = vizColors(), grad = g.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, k.a); grad.addColorStop(0.5, k.b); grad.addColorStop(1, k.c);
+    return grad;
+  };
+
   function drawViz() {
     if (!wide) return;
     wide.raf = requestAnimationFrame(drawViz);
@@ -602,9 +619,7 @@ export function createMusic(app) {
     const bars = 72;
     const used = Math.floor(n * 0.72);
     const bw = W / bars;
-    const grad = g.createLinearGradient(0, 0, W, 0);
-    grad.addColorStop(0, '#6ee7e0'); grad.addColorStop(0.5, '#b48cff'); grad.addColorStop(1, '#ff7ac6');
-    g.fillStyle = grad;
+    g.fillStyle = themeGradient(g, W);
     let bass = 0;
     for (let i = 0; i < bars; i++) {
       // low notes get more room (spaced roughly like pitch, not like raw frequency)
@@ -659,13 +674,17 @@ export function createMusic(app) {
       const W = curve.width, H = curve.height;
       c.clearRect(0, 0, W, H);
       const yOf = (db) => H / 2 - (db / 24) * (H / 2 - 8);
-      c.strokeStyle = 'rgba(180,160,255,0.12)';
+      const k = vizColors();
+      c.strokeStyle = k.grid;
       c.lineWidth = 1;
+      c.globalAlpha = 0.2;
       for (const db of [-18, -12, -6, 0, 6, 12, 18]) { c.beginPath(); c.moveTo(0, yOf(db)); c.lineTo(W, yOf(db)); c.stroke(); }
       for (const hz of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) { const x = (hzToPos(hz) / 1000) * W; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
-      c.fillStyle = 'rgba(180,160,255,0.45)';
+      c.globalAlpha = 0.8;
+      c.fillStyle = k.grid;
       c.font = '9px IBM Plex Mono, monospace';
       for (const hz of [100, 1000, 10000]) c.fillText(hzLabel(hz), (hzToPos(hz) / 1000) * W + 3, H - 4);
+      c.globalAlpha = 1;
       // combined response of every filter (uses the real filters when audio has started; otherwise a scratch graph)
       const N = 200;
       const freqs = new Float32Array(N);
@@ -680,21 +699,24 @@ export function createMusic(app) {
       ];
       const mag = new Float32Array(N), ph = new Float32Array(N);
       for (const f of chain) { f.getFrequencyResponse(freqs, mag, ph); for (let i = 0; i < N; i++) total[i] *= mag[i]; }
-      const grad = c.createLinearGradient(0, 0, W, 0);
-      grad.addColorStop(0, '#6ee7e0'); grad.addColorStop(0.5, '#b48cff'); grad.addColorStop(1, '#ff7ac6');
       c.beginPath();
       for (let i = 0; i < N; i++) {
         const db = Math.max(-24, Math.min(24, 20 * Math.log10(Math.max(total[i], 1e-6))));
         const x = (i / (N - 1)) * W, y = yOf(db);
         if (i) c.lineTo(x, y); else c.moveTo(x, y);
       }
-      c.strokeStyle = grad;
+      c.strokeStyle = themeGradient(c, W);
       c.lineWidth = 2.5;
       c.stroke();
       c.lineTo(W, H); c.lineTo(0, H); c.closePath();
-      c.fillStyle = 'rgba(180,140,255,0.08)';
+      c.fillStyle = k.b;
+      c.globalAlpha = 0.08;
       c.fill();
+      c.globalAlpha = 1;
     };
+    // switching theme redraws the curve in the new colours
+    new MutationObserver(() => { if (curve.isConnected) drawCurve(); })
+      .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
     const lowR = h('input', { type: 'range', min: '0', max: '1000', value: String(hzToPos(state.low)), class: 'music-cut' });
     const highR = h('input', { type: 'range', min: '0', max: '1000', value: String(hzToPos(state.high)), class: 'music-cut' });
     const lowV = h('span', { class: 'mono music-cut-val' });
@@ -812,14 +834,15 @@ export function createMusic(app) {
       h('button', { class: 'icon-btn music-tab-btn', 'data-tip': 'Open as a tab', onclick: () => { setOpen(false); app.newDocument('music'); } }, icon('window', 'sm')),
       fullB,
       h('button', { class: 'icon-btn', 'data-tip': 'Close (music keeps playing)', onclick: () => setOpen(false) }, icon('x', 'sm')));
-    const nowEl = h('div', { class: 'music-now' }, title, sub);
+    const tagsEl = h('div', { class: 'music-tags mono', hidden: true });
+    const nowEl = h('div', { class: 'music-now' }, title, tagsEl, sub);
     const timeEl = h('div', { class: 'music-time' }, cur, seek, dur);
     const controlsEl = h('div', { class: 'music-controls' }, shuffleB, btn('skip-back', 'Previous', () => prev()), playB, btn('skip-forward', 'Next', () => next()), loopB);
     const volEl = h('div', { class: 'music-volrow' }, icon('volume', 'sm'), vol, mixerB);
     const parts = [head, nowEl, timeEl, controlsEl, volEl, eqWrap, tabs, pls, list];
     el.append(...parts);
     document.body.append(el);
-    ui = { el, title, sub, seek, cur, dur, playB, shuffleB, loopB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
+    ui = { el, title, tagsEl, sub, seek, cur, dur, playB, shuffleB, loopB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
     document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && !wide && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music, .music-opener')) setOpen(false); }, true);
     document.addEventListener('keydown', (e) => {
       if (full && e.key === 'Escape' && !document.querySelector('.modal-backdrop, .menu')) { e.preventDefault(); setFull(false); return; }
@@ -838,26 +861,49 @@ export function createMusic(app) {
     if (!ui.isSeeking()) ui.seek.value = String(audio.duration ? Math.round((audio.currentTime / audio.duration) * 1000) : 0);
   }
 
+  /** The playing song's genre and BPM under its title, from its tags (BoxTape writes them); hidden when it has neither. */
+  const songTags = new Map();
+  async function showTags(t) {
+    const el = ui.tagsEl;
+    const paint = (tags) => {
+      if (state.tracks[state.idx] !== t) return; // moved on to another song meanwhile
+      const bits = [tags?.genre, tags?.bpm && `${tags.bpm} BPM`].filter(Boolean);
+      el.hidden = !bits.length;
+      clear(el).append(...bits.flatMap((b, i) => (i ? [h('span', { class: 'faint' }, ' · '), b] : [b])));
+    };
+    if (!t?.path || !/.mp3$/i.test(t.path)) return paint(null);
+    if (songTags.has(t.path)) return paint(songTags.get(t.path));
+    paint(null);
+    const tags = await api.get(`/api/audio/tags?path=${encodeURIComponent(t.path)}`).catch(() => null);
+    songTags.set(t.path, tags);
+    paint(tags);
+  }
+
   function render() {
     if (!ui) return;
     const t = state.tracks[state.idx];
     const vis = visible();
     const plName = state.playlist == null ? '' : state.playlist || 'no playlist';
     ui.title.textContent = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
+    showTags(t);
     const upNext = state.queue[0] ? ` · up next: ${songTitle(state.queue[0])}` : '';
     const at = vis.indexOf(state.idx);
     ui.sub.textContent = t ? `${at >= 0 ? `${at + 1} of ${vis.length}` : plOf(t.name) ? `from “${plOf(t.name)}”` : 'not in this playlist'}${plName ? ` · ${plName}` : ''}${upNext}`
-      : state.tracks.length ? `${vis.length} song${vis.length === 1 ? '' : 's'}${plName ? ` in ${plName}` : ' in the audio dump'}` : 'drop mp3s here or put them in Box-DocSpitter\\audio-dump';
+      : state.tracks.length ? `${vis.length} song${vis.length === 1 ? '' : 's'}${plName ? ` in ${plName}` : ' in the audio dump'}` : 'drop mp3s here or put them in Box-Deckspitter\\audio-dump';
     clear(ui.libTab).append(state.playlist ? 'Playlist ' : 'Library ', h('span', { class: 'mono faint' }, String(vis.length)));
     ui.pls.hidden = state.view !== 'library' || !state.tracks.length && !state.playlists.length;
     if (!ui.pls.hidden) renderPlaylists();
     ui.fullB.dataset.tip = full ? 'Leave full screen (Esc)' : 'Full screen';
     clear(ui.fullB).append(icon(full ? 'x' : 'maximize', 'sm'));
     if (wide) {
-      // a cover colour of its own for each song
+      // each song gets its own cover from the theme's three accents: its own order, angle and a small hue nudge
       let hsh = 0;
       for (const ch of t?.name || '') hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
-      wide.art.style.setProperty('--hue', String(hsh % 360));
+      const order = [['--accent', '--accent-2', '--accent-3'], ['--accent-2', '--accent', '--accent-3'], ['--accent-3', '--accent', '--accent-2'],
+        ['--accent', '--accent-3', '--accent-2'], ['--accent-2', '--accent-3', '--accent'], ['--accent-3', '--accent-2', '--accent']][hsh % 6];
+      order.forEach((v, i) => wide.art.style.setProperty('--c' + (i + 1), `var(${v})`));
+      wide.art.style.setProperty('--angle', (90 + ((hsh >>> 3) % 180)) + 'deg');
+      wide.art.style.setProperty('--shift', (((hsh >>> 11) % 25) - 12) + 'deg');
     }
     clear(ui.queueTab).append('Queue ', h('span', { class: 'mono faint' }, String(state.queue.length)));
     ui.libTab.classList.toggle('on', state.view === 'library');

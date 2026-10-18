@@ -1,4 +1,4 @@
-// Box-DocSpitter desktop shell: runs server.js as a child process and shows the UI in its own window
+// Box-Deckspitter desktop shell: runs server.js as a child process and shows the UI in its own window
 // (own icon, own taskbar entry, no browser chrome). Everything still talks to 127.0.0.1 with the per-launch token.
 // Loaded by electron/main.js (the boot file), which applies updates and rolls them back if this doesn't start.
 
@@ -8,10 +8,11 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const ICON = path.join(ROOT, 'public', 'assets', 'icon.ico');
-const BG = { dark: '#0b0910', light: '#f6f3fb', pbj: '#3a1e3e' };
+// Windows caches icons by file path, so a redesigned icon gets a new file name or the old one keeps showing
+const ICON = path.join(ROOT, 'public', 'assets', 'icon-lavender.ico');
+const BG = { dark: '#111214', light: '#f5f5f8', dusk: '#0b0910', bluehour: '#090b12', pbj: '#3a1e3e' };
 
-app.setName('Box-DocSpitter');
+app.setName('Box-Deckspitter');
 // Keep Electron's own cache and window state inside the app folder (portable: nothing left in %APPDATA%).
 const USER_DATA = path.join(ROOT, 'data', 'electron');
 // A factory reset can't delete the cache while the window is using it, so it's finished here, before startup.
@@ -49,7 +50,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   let server = null;
   let origin = null;
   let quitting = false;
-  let attached = false; // another Box-DocSpitter server was already running; we just use it
+  let attached = false; // another Box-Deckspitter server was already running; we just use it
 
   const urlFor = (files) => {
     const qs = files.map((p) => 'open=' + encodeURIComponent(p)).join('&');
@@ -97,7 +98,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
       if (quitting || (attached && origin)) return;
       if (!origin && boot?.fail?.('the local server stopped while starting')) return; // update trial: boot rolls back
       if (!origin) {
-        dialog.showErrorBox('Box-DocSpitter', `The local server failed to start (exit code ${code}).\n\nTry "Box-DocSpitter (with console).bat" to see the error.`);
+        dialog.showErrorBox('Box-Deckspitter', `The local server failed to start (exit code ${code}).\n\nTry "Box-Deckspitter (with console).bat" to see the error.`);
       }
       quitting = true;
       app.quit();
@@ -144,7 +145,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
       width: 1480, height: 940, minWidth: 720, minHeight: 460,
       ...(bounds || {}),
       show: false,
-      title: 'Box-DocSpitter',
+      title: 'Box-Deckspitter',
       icon: nativeImage.createFromPath(ICON),
       backgroundColor: BG.dark,
       titleBarStyle: 'hidden',
@@ -158,7 +159,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
         webviewTag: true, // the built-in browser (electron/browser.js locks each one down)
       },
     });
-    // Pinning the window to the taskbar should pin Box-DocSpitter, not bare electron.exe: tell Windows how
+    // Pinning the window to the taskbar should pin Box-Deckspitter, not bare electron.exe: tell Windows how
     // to relaunch it (same app id as the shortcuts, so the pinned button and the open window are one icon).
     if (process.platform === 'win32') {
       try {
@@ -167,7 +168,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
           appIconPath: ICON,
           appIconIndex: 0,
           relaunchCommand: `"${process.execPath}" "${path.join(__dirname, 'main.js')}"`,
-          relaunchDisplayName: 'Box-DocSpitter',
+          relaunchDisplayName: 'Box-Deckspitter',
         });
       } catch { /* older Windows: pinning just won't carry the details */ }
     }
@@ -202,7 +203,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     // The page asks before closing with unsaved tabs; Electron needs us to show that question ourselves.
     win.webContents.on('will-prevent-unload', (e) => {
       const choice = dialog.showMessageBoxSync(win, {
-        type: 'warning', title: 'Box-DocSpitter', buttons: ['Close anyway', 'Keep editing'], defaultId: 1, cancelId: 1,
+        type: 'warning', title: 'Box-Deckspitter', buttons: ['Close anyway', 'Keep editing'], defaultId: 1, cancelId: 1,
         message: 'You have unsaved changes.', detail: 'Close this window and lose them?',
       });
       if (choice === 0) e.preventDefault();
@@ -300,13 +301,15 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     const dirs = [app.getPath('desktop'), path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')];
     // a shortcut that already belongs to another copy of the app is left alone: this copy gets its own name
     const mine = (lnk) => { try { const l = shell.readShortcutLink(lnk); return path.resolve(l.cwd || path.dirname(l.target)).toLowerCase() === path.resolve(ROOT).toLowerCase() || (l.args || '').toLowerCase().includes(path.resolve(ROOT).toLowerCase()); } catch { return true; } };
-    // "Box-DocSpitter (E drive)" for a copy on another drive, else "Box-DocSpitter (<parent folder>)"
+    // "Box-Deckspitter (E drive)" for a copy on another drive, else "Box-Deckspitter (<parent folder>)"
     const drive = path.parse(path.resolve(ROOT)).root.slice(0, 2).toUpperCase();
     const where = drive !== 'C:' && /^[A-Z]:$/.test(drive) ? `${drive[0]} drive` : path.basename(path.dirname(path.resolve(ROOT))) || drive;
     const targets = dirs.map((d) => {
-      const plain = path.join(d, 'Box-DocSpitter.lnk');
-      return !fs.existsSync(plain) || mine(plain) ? plain : path.join(d, `Box-DocSpitter (${where.replace(/[\\/:*?"<>|]/g, '')}).lnk`);
+      const plain = path.join(d, 'Box-Deckspitter.lnk');
+      return !fs.existsSync(plain) || mine(plain) ? plain : path.join(d, `Box-Deckspitter (${where.replace(/[\\/:*?"<>|]/g, '')}).lnk`);
     });
+    // the shortcut from before the rename ("Box-DocSpitter") is replaced by the new one, not left beside it
+    for (const d of dirs) { const old = path.join(d, 'Box-DocSpitter.lnk'); try { if (fs.existsSync(old) && mine(old)) fs.unlinkSync(old); } catch { /* in use: leave it */ } }
     for (const lnk of targets) {
       const ok = shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', {
         target: process.execPath,
@@ -315,7 +318,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
         icon: ICON,
         iconIndex: 0,
         appUserModelId: APP_ID,
-        description: 'Box-DocSpitter - local docs, PDFs, forms, text and code',
+        description: 'Box-Deckspitter - local docs, PDFs, forms, text and code',
       });
       if (ok) made.push(lnk);
     }
@@ -356,6 +359,29 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     },
   });
   app.whenReady().then(() => snip.register());
+  // ---- BoxStudio: capture sources, global hotkeys, full speed while recording (electron/studio.js)
+  const studio = require('./studio.js')({ isAppSender: fromApp, pickArea: (cb) => snip.pickArea(cb), log: (msg) => console.log(`[studio] ${msg}`) });
+
+  // The taskbar takes its icon from this copy's shortcuts (the ones Windows keeps for the app id, plus the
+  // Desktop and Start menu ones), not from the window. After the icon file changes, point them at the new one.
+  if (process.platform === 'win32') app.whenReady().then(() => setTimeout(() => {
+    const dirs = [app.getPath('desktop'), path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')];
+    const implicit = path.join(app.getPath('appData'), 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'ImplicitAppShortcuts');
+    try { for (const d of fs.readdirSync(implicit)) dirs.push(path.join(implicit, d)); } catch { /* none yet */ }
+    for (const dir of dirs) {
+      let names = [];
+      try { names = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.lnk')); } catch { continue; }
+      for (const f of names) {
+        try {
+          const lnk = path.join(dir, f);
+          const l = shell.readShortcutLink(lnk);
+          if (l.appUserModelId === APP_ID && path.resolve(l.icon || '').toLowerCase() !== ICON.toLowerCase()) {
+            shell.writeShortcutLink(lnk, 'update', { icon: ICON, iconIndex: 0 });
+          }
+        } catch { /* not a shortcut we can read */ }
+      }
+    }
+  }, 3000));
 
   // Windows locked, the PC going to sleep: lock the notes (and tell the page, for the app's PIN lock)
   app.whenReady().then(() => {
@@ -410,6 +436,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     quitting = true;
     notes.lock({ hard: true, reason: 'quit' });
     snip.dispose();
+    studio.dispose();
     if (server) { try { server.disconnect(); } catch { /* gone */ } try { server.kill(); } catch { /* gone */ } }
   });
 }

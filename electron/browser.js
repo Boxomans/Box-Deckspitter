@@ -212,7 +212,7 @@ ${again}`;
       const key = `${origin}|${permission}`;
       if (remembered.has(key)) return cb(remembered.get(key));
       const { response } = await dialog.showMessageBox(winFor(wc), {
-        type: 'question', title: 'Box-DocSpitter browser', buttons: ['Allow', 'Block'], defaultId: 1, cancelId: 1,
+        type: 'question', title: 'Box-Deckspitter browser', buttons: ['Allow', 'Block'], defaultId: 1, cancelId: 1,
         message: `${siteName(origin)} wants to ${what}.`, detail: 'Remembered until the app closes.',
       });
       remembered.set(key, response === 0);

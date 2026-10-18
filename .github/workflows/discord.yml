@@ -23,7 +23,7 @@ jobs:
             const log = JSON.parse(require("fs").readFileSync("public/changelog.json", "utf8"));
             const entry = log.find((e) => e.version === version);
             const notes = (entry?.notes || []).map((n) => "• " + n);
-            let body = `**Box-DocSpitter v${version} is out**\n${notes.join("\n")}`;
+            let body = `**Box-Deckspitter v${version} is out**\n${notes.join("\n")}`;
             const link = `\n${process.env.REPO_URL}`;
             if (body.length + link.length > 2000) body = body.slice(0, 1990 - link.length) + "…";
             require("fs").writeFileSync("payload.json", JSON.stringify({ content: body + link, allowed_mentions: { parse: [] } }));

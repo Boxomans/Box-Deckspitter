@@ -50,7 +50,7 @@ export class TapeEditor extends BaseEditor {
         h('div', { class: 'klep-bar' }, this.input, this.goBtn),
         need.length
           ? this.needNote(need)
-          : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, 'Saves to Box-DocSpitter\\audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.')),
+          : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, 'Saves to Box-Deckspitter\\audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.')),
       this.progress,
       this.results)));
     setTimeout(() => this.input.focus(), 50);
@@ -180,7 +180,7 @@ export class TapeEditor extends BaseEditor {
           h('li', {}, 'Create app → any name, Redirect URI http://127.0.0.1, tick “Web API”.'),
           h('li', {}, 'Open the app’s Settings and copy the Client ID and Client Secret here.')),
         id, secret,
-        h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Kept in Box-DocSpitter\\data\\secrets.json on this PC; it’s only ever sent to Spotify.')),
+        h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Kept in Box-Deckspitter\\data\\secrets.json on this PC; it’s only ever sent to Spotify.')),
       buttons: [{ label: 'Remove key', value: 'remove', ghost: true }, { label: 'Cancel', value: null, ghost: true }, { label: 'Save', value: 'save', primary: true }],
     });
     if (!ok) return;

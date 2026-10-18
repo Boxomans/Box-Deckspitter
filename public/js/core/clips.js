@@ -1,4 +1,4 @@
-// Clipboard history + snippets for the ✂ clip tab. Records what you copy inside Box-DocSpitter: text
+// Clipboard history + snippets for the ✂ clip tab. Records what you copy inside Box-Deckspitter: text
 // (Ctrl+C anywhere, "Copy path", characters, emails…), pictures and files from the dumps. Saved in
 // data/clips.json so it survives restarts; the factory reset erases it.
 
@@ -54,7 +54,7 @@ export function createClips(app) {
       let text = '';
       try { text = e.clipboardData?.getData('text/plain') || ''; } catch { /* ignore */ }
       if (!text) text = String(getSelection() || '');
-      if (text && text !== lastProgrammatic) add({ type: 'text', text, source: app.active?.title || 'Box-DocSpitter' });
+      if (text && text !== lastProgrammatic) add({ type: 'text', text, source: app.active?.title || 'Box-Deckspitter' });
     }, 0);
   });
   // … and copies made by buttons (navigator.clipboard.writeText)
@@ -63,7 +63,7 @@ export function createClips(app) {
     navigator.clipboard.writeText = (text) => {
       lastProgrammatic = text;
       setTimeout(() => { if (lastProgrammatic === text) lastProgrammatic = ''; }, 200);
-      if (!state.silent) add({ type: 'text', text: String(text), source: app.active?.title || 'Box-DocSpitter' });
+      if (!state.silent) add({ type: 'text', text: String(text), source: app.active?.title || 'Box-Deckspitter' });
       return orig(text);
     };
   }

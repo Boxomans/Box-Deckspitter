@@ -348,6 +348,7 @@ addEventListener('pointerup', (e) => {
 });
 window.snip.onData((d) => {
   wins = d.windows || [];
+  if (d.hint) document.getElementById('hint').textContent = d.hint;
   if (d.img) { const i = new Image(); i.onload = () => { img = i; fit(); }; i.src = d.img; }
   else draw();
 });
@@ -464,10 +465,18 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
     if (!o || !o.shot) return;
     const shot = o.shot;
     const back = o.refocus;
+    const pick = o.pick;
     // the covered fullscreen app goes back in front while this app still has the foreground (Windows allows it then)
     (back ? refocus(back).then((res) => { if (!res?.ok) log('could not put the fullscreen app back in front'); }) : Promise.resolve()).finally(closeOverlays);
     busy = false;
     if (!r) return;
+    if (pick) {
+      // BoxStudio wants the area, not a picture: as fractions of that display, so any capture size fits
+      const vw = r.vw || shot.display.bounds.width, vh = r.vh || shot.display.bounds.height;
+      const fx = Math.max(0, r.x / vw), fy = Math.max(0, r.y / vh);
+      pick({ displayId: String(shot.display.id), kind: r.kind, title: String(r.title || ''), x: fx, y: fy, w: Math.min(1 - fx, r.w / vw), h: Math.min(1 - fy, r.h / vh) });
+      return;
+    }
     const img = crop(shot, r);
     if (img) save(img, r.kind === 'window' ? String(r.title || '') : '');
   });
@@ -503,7 +512,7 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
     notify({ error: why });
   }
 
-  async function start() {
+  async function start({ pick = null, hint = '' } = {}) {
     // a press while one is open does nothing, unless that one got stuck
     if (busy && Date.now() - busySince < 20000) return;
     closeOverlays();
@@ -531,12 +540,13 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
         if (!shot) { win.destroy(); continue; }
         win.shot = shot;
         win.refocus = back;
+        win.pick = pick;
         const b = shot.display.bounds;
         const local = wins.map((w) => ({ x: w.x - b.x, y: w.y - b.y, w: w.w, h: w.h, t: w.t }));
         win.loaded.then(() => {
           if (win.isDestroyed()) return;
           // shown as a JPEG (quick to make); the saved file is cut from the full PNG-quality picture
-          win.webContents.send('bds:snip-data', { img: 'data:image/jpeg;base64,' + shot.image.toJPEG(88).toString('base64'), windows: local });
+          win.webContents.send('bds:snip-data', { img: 'data:image/jpeg;base64,' + shot.image.toJPEG(88).toString('base64'), windows: local, hint });
           win.showInactive();
           if (cursor.x >= b.x && cursor.y >= b.y && cursor.x < b.x + b.width && cursor.y < b.y + b.height) win.focus();
         });
@@ -549,6 +559,8 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
   }
 
   return {
+    /** The same overlay, but the chosen area goes to cb (BoxStudio's record-this-area key) instead of a file. */
+    pickArea(cb) { start({ pick: cb, hint: 'Drag the area to record · click a window · click the desktop for the whole screen · Esc to cancel' }); },
     /** Claim the key; false if something else on the PC has it. */
     register() {
       let ok = false;

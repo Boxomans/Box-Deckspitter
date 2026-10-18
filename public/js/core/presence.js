@@ -30,12 +30,20 @@ const LINES = {
   swap: { plain: ['Swapping files'], silly: ['shuffling file profiles', 'hot-swapping a folder', 'swapping loadouts'] },
   ticker: { plain: ['Checking the markets'], silly: ['watching numbers go up (hopefully)', 'staring at a stock chart', 'pretending to understand the market'] },
   weather: { plain: ['Checking the weather'], silly: ['checking if it’s raining', 'looking out a digital window', 'reading the forecast'] },
+  todo: { plain: ['Making a to-do list'], silly: ['writing a to-do list', 'ticking things off', 'putting it on the list', 'procrastinating productively'] },
   tunnel: { plain: ['Routing audio'], silly: ['plumbing some audio', 'running sound through a tunnel', 'patching cables'] },
+  convert: { plain: ['Converting files'], silly: ['turning files into other files', 'changing a file’s outfit', 'translating file formats'] },
+  studio: { plain: ['Recording the screen'], silly: ['rolling tape', 'setting up the shot', 'lights, camera'] },
+  terminal: { plain: ['In the terminal'], silly: ['typing very confidently', 'running commands', 'asking the shell nicely'] },
+  log: { plain: ['Reading logs'], silly: ['reading the fine print', 'following the paper trail', 'combing through logs'] },
+  map: { plain: ['Looking at a map'], silly: ['folding a map the wrong way', 'asking the map for directions', 'finding somewhere on the map'] },
+  wave: { plain: ['Editing audio'], silly: ['trimming some waveforms', 'sanding down a sound', 'nudging samples about'] },
+  beat: { plain: ['Making a beat'], silly: ['cooking up a beat', 'tapping out a rhythm', 'four on the floor', 'nodding along to a loop'] },
   music: { plain: ['Listening to music'], silly: ['vibing', 'DJing for an audience of one', 'shuffling the audio dump', 'skipping to the good part'] },
   browser: { plain: ['Browsing the web'], silly: ['surfing the information superhighway', 'reading the whole internet', 'opening one more tab'] },
   tomcat: { plain: ['Flying an F-14'], silly: ['flying a Tomcat at FL300', 'calling FOX-3', 'splashing bandits', 'dodging a PL-15', 'going Mach 1 between documents'] },
   // never anything about what's in them
-  secure: { plain: ['Box-DocSpitter'], silly: ['Box-DocSpitter'] },
+  secure: { plain: ['Box-Deckspitter'], silly: ['Box-Deckspitter'] },
   home: { plain: ['On the home screen'], silly: ['deciding what to spit out', 'idling on the home screen', 'thinking about documents'] },
 };
 
@@ -91,7 +99,7 @@ export function presenceActivity(tab, tabCount, s, since, song = null) {
     state: state.slice(0, 120) || undefined,
     start: showTime ? since : undefined,
     largeImage: 'logo',
-    largeText: 'Box-DocSpitter',
+    largeText: 'Box-Deckspitter',
   };
 }
 

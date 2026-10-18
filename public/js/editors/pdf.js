@@ -111,7 +111,7 @@ export class PdfEditor extends BaseEditor {
       if (!r.ok) return bytes; // needs a real password: pdf.js will ask for it
       const out = new Uint8Array(await r.arrayBuffer());
       this.unlocked = true;
-      setTimeout(() => toast(`“${name}” was locked against editing, so Box-DocSpitter opened an unlocked copy — its fields can be filled and saved.`, { timeout: 6500 }), 600);
+      setTimeout(() => toast(`“${name}” was locked against editing, so Box-Deckspitter opened an unlocked copy — its fields can be filled and saved.`, { timeout: 6500 }), 600);
       return out;
     } catch { return bytes; }
   }

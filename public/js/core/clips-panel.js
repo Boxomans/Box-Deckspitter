@@ -1,4 +1,4 @@
-// ✂ clip — right-side tab: History (what you've copied in Box-DocSpitter) and Snippets (saved texts).
+// ✂ clip — right-side tab: History (what you've copied in Box-Deckspitter) and Snippets (saved texts).
 // Click = put it into what you're working on · right-click = copy · shift+right-click = more.
 
 import { h, clear, debounce, timeAgo, blobToDataURL, basename, formatBytes } from './dom.js';
@@ -58,7 +58,7 @@ export class ClipsPanel {
       } }, icon('trash', 'sm'), 'Clear'));
     }
     if (!items.length) {
-      this.list.append(h('div', { class: 'clip-empty' }, this.query ? 'Nothing matches.' : 'Nothing copied yet. Text you copy in Box-DocSpitter (Ctrl+C, Copy buttons, characters) and pictures or files you copy from the dumps show up here.'));
+      this.list.append(h('div', { class: 'clip-empty' }, this.query ? 'Nothing matches.' : 'Nothing copied yet. Text you copy in Box-Deckspitter (Ctrl+C, Copy buttons, characters) and pictures or files you copy from the dumps show up here.'));
       return;
     }
     const pinned = items.filter((x) => x.pinned);
@@ -176,7 +176,7 @@ export class ClipsPanel {
     upd();
     const res = await modal({
       title: s ? 'Edit snippet' : 'New snippet', wide: true,
-      body: h('div', { class: 'clip-edit' }, title, body, count, h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Stored only on this PC (Box-DocSpitter\\data). Settings → Reset erases it.')),
+      body: h('div', { class: 'clip-edit' }, title, body, count, h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Stored only on this PC (Box-Deckspitter\\data). Settings → Reset erases it.')),
       buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Save', value: 'ok', primary: true }],
       onOpen: () => setTimeout(() => (s || text ? title : body).focus(), 40),
     });

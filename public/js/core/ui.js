@@ -362,7 +362,7 @@ export function colorPopover(anchor, { onPick, allowNone = true, noneLabel = 'No
       }));
     }
   }
-  const custom = h('input', { type: 'color', value: current || '#b48cff' });
+  const custom = h('input', { type: 'color', value: current || '#b3a1f2' });
   custom.addEventListener('change', () => { closePopover(); onPick(custom.value); });
   const row = h('div', { class: 'popover-row' },
     allowNone ? h('button', { class: 'btn sm', onmousedown: (e) => e.preventDefault(), onclick: () => { closePopover(); onPick(null); } }, h('span', { class: 'swatch none', style: { width: '14px', height: '14px', display: 'inline-block' } }), noneLabel) : null,

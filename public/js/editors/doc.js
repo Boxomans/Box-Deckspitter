@@ -1660,7 +1660,7 @@ export class DocEditor extends BaseEditor {
     const m = this.pageSetup.margins;
     const screen = forPrint ? '' : `@media screen { body { background: #ece9f1; } .doc-body { max-width: ${d.w - m.left - m.right}in; margin: 32px auto; background: #fff; padding: ${m.top}in ${m.right}in ${m.bottom}in ${m.left}in; box-shadow: 0 2px 14px rgba(0,0,0,.12); } .page-break { border-top: 1px dashed #c9c3d6; margin: 18px 0; } }`;
     return `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="generator" content="Box-DocSpitter"><title>${title}</title>
+<html><head><meta charset="utf-8"><meta name="generator" content="Box-Deckspitter"><title>${title}</title>
 <style>${docContentCss('.doc-body')}
 ${printCss(this.pageSetup)}
 ${screen}</style></head>

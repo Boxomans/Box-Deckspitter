@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the file explorer panel and what you can do to files in it.
+// Box-Deckspitter app shell, the file explorer panel and what you can do to files in it.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear, basename, dirname, extOf, formatBytes, formatDate, joinPath } from '../core/dom.js';
@@ -84,6 +84,7 @@ export class ExplorerPart {
     if (e.isDir) {
       return [
         { label: 'Open folder', icon: 'folder-open', action: () => this.renderExplorer(e.path) },
+        { label: `Open in ${this.toolName('BoxTerminal')}`, icon: 'terminal', action: () => this.newDocument('terminal', { another: true, cwd: e.path }) },
         { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
         { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
         { label: 'Rename…', shortcut: 'F2', action: () => this.explorerRename(e) },
@@ -115,14 +116,22 @@ export class ExplorerPart {
     const one = paths.length === 1 && detectMode(paths[0]).mode === 'video' ? paths[0] : null;
     const trimFirst = this.settings.videoOpen === 'trim';
     const pic = paths.length === 1 && PAINT_EXT.includes(extOf(paths[0])) ? paths[0] : null;
+    const snd = paths.length === 1 && /\.(mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|wma|aiff?)$/i.test(paths[0]) ? paths[0] : null;
     const paintFirst = pic && (detectMode(pic).mode === 'paint' || this.settings.imageOpen === 'paint');
     return [
       ...(pic && !paintFirst ? [{ label: 'Open in the image editor', icon: 'brush', action: () => this.openPath(pic, { mode: 'paint' }) }] : []),
       ...(pic && paintFirst ? [{ label: 'Open in the image viewer', icon: 'image', action: () => this.openPath(pic, { mode: 'image' }) }] : []),
       ...(one && !trimFirst ? [{ label: 'Open in the video trimmer', icon: 'crop', action: () => this.openPath(one, { mode: 'video' }) }] : []),
       ...(one && trimFirst ? [{ label: 'Play in the video player', icon: 'play', action: () => this.openPath(one, { mode: 'player' }) }] : []),
+      ...(snd ? [{ label: `Open in ${this.toolName('BoxWave')}`, icon: 'wave', action: () => this.openInWave(snd) }] : []),
       { label, icon: 'video', action: () => this.sendToVideoEditor(media) },
     ];
+  }
+
+  /** A sound into a new BoxWave tab. */
+  async openInWave(path) {
+    const tab = await this.newDocument('wave', { another: true });
+    await tab?.editor?.openFile?.(path);
   }
 
   /** Into the media list of the open video editor (the one showing, else the last one used), or a new one. */

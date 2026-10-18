@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the window chrome: the left rail, the top bar's buttons and moving them between bars.
+// Box-Deckspitter app shell, the window chrome: the left rail, the top bar's buttons and moving them between bars.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h } from '../core/dom.js';
@@ -135,7 +135,7 @@ export class RailPart {
     this.syncFullScreen();
     $('#btn-shortcuts').append(icon('keyboard'));
     $('#btn-shortcuts').addEventListener('click', () => this.showShortcuts());
-    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'history', calendar: 'calendar', mediadump: 'image', docdump: 'file-pdf', tools: 'toolbox', settings: 'settings' };
+    const railIcons = { explorer: 'folder', spaces: 'spaces', recent: 'history', calendar: 'calendar', mediadump: 'image', docdump: 'file-pdf', alerts: 'bell', tools: 'toolbox', settings: 'settings' };
     for (const b of $$('.rail-btn[data-panel]')) {
       b.append(icon(railIcons[b.dataset.panel], 'lg'));
       b.addEventListener('click', () => this.togglePanel(b.dataset.panel));

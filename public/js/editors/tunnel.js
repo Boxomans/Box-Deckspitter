@@ -4,8 +4,9 @@
 import { BaseEditor } from './base.js';
 import { h, clear } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { contextMenu, confirmDialog, promptDialog } from '../core/ui.js';
+import { contextMenu, confirmDialog, promptDialog, showMenu, toast } from '../core/ui.js';
 import { tunnel, deviceName, isVirtual } from '../core/tunnel.js';
+import { FX, VOICES, newFx } from '../core/tunnel-fx.js';
 
 const opt = (value, label, selected) => h('option', { value, selected: !!selected }, label);
 /** -72..0 dB → 0..100% of an input meter. */
@@ -158,9 +159,66 @@ export class TunnelEditor extends BaseEditor {
     const gate = h('button', { class: `btn sm tn-gate ${i.gate ? 'on' : ''}`, title: 'Noise gate: cuts the background hiss and keyboard between words', onclick: () => { this.t.updateInput(l.id, i.key, { gate: !i.gate }); this.render(); } }, 'Gate');
     const del = h('button', { class: 'icon-btn', 'data-tip': 'Remove this input', onclick: () => { this.t.removeInput(l.id, i.key); this.render(); } }, icon('x', 'sm'));
     const err = h('span', { class: 'tn-err tn-inerr' });
-    const el = h('div', { class: `tn-in ${i.mute ? 'muted' : ''}` },
-      h('span', { class: 'tn-tag' }, 'in'), sel, meter, h('div', { class: 'tn-volbox' }, vol, pct), mute, gate, thr, thrLbl, h('div', { class: 'grow' }), err, del);
+    const nfx = i.fx.filter((f) => f.on).length;
+    const fxBtn = h('button', { class: `btn sm tn-fxbtn ${nfx ? 'on' : ''}`, title: 'Voice changers and effects', onclick: (e) => showMenu(this.fxMenu(l, i), { anchor: e.currentTarget }) },
+      icon('wand', 'sm'), nfx ? `Effects · ${nfx}` : 'Effects');
+    const row = h('div', { class: `tn-in ${i.mute ? 'muted' : ''}` },
+      h('span', { class: 'tn-tag' }, 'in'), sel, meter, h('div', { class: 'tn-volbox' }, vol, pct), mute, gate, thr, thrLbl, fxBtn, h('div', { class: 'grow' }), err, del);
+    row.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('select, input')) return;
+      e.preventDefault(); e.stopPropagation();
+      contextMenu(e, this.fxMenu(l, i));
+    });
+    const el = h('div', { class: 'tn-inwrap' }, row, i.fx.length ? this.fxStrip(l, i) : null);
     return { el, fill, err, gateOn: i.gate, threshold: i.threshold, thr };
+  }
+
+  // ---- effects on an input
+
+  setFx(l, i, fx) { this.t.updateInput(l.id, i.key, { fx }); this.render(); }
+
+  /** Voice changers (a ready-made set) and single effects; both add to what's there. */
+  fxMenu(l, i) {
+    const fresh = !i.fx.length;
+    const add = (list, replace = false) => {
+      this.setFx(l, i, replace ? list : [...i.fx, ...list]);
+      if (fresh && !l.listen) toast('Effects are on. Listen to hear yourself through the line.', { timeout: 6000, action: { label: 'Listen', fn: () => { this.t.update(l.id, { listen: true }); this.render(); } } });
+    };
+    return [
+      // a voice replaces the effects already there; single effects add on
+      { label: 'Voice changer', icon: 'wand', submenu: VOICES.map((v) => ({ label: v.name, action: () => add(v.fx.map(([t, x]) => newFx(t, x)), true) })) },
+      { label: 'Add an effect', icon: 'plus', submenu: Object.entries(FX).map(([t, d]) => ({ label: d.name, action: () => add([newFx(t)]) })) },
+      { sep: true },
+      { label: l.listen ? 'Stop listening' : 'Listen to this line', icon: 'headphones', action: () => { this.t.update(l.id, { listen: !l.listen }); this.render(); } },
+      { label: i.fx.some((f) => f.on) ? 'Bypass all effects' : 'Turn the effects back on', icon: 'power', disabled: !i.fx.length, action: () => { const off = i.fx.some((f) => f.on); this.setFx(l, i, i.fx.map((f) => ({ ...f, on: !off }))); } },
+      { label: 'Remove all effects', icon: 'trash', disabled: !i.fx.length, action: () => this.setFx(l, i, []) },
+    ];
+  }
+
+  /** The effects on an input, in order: click a name to bypass it, drag its knob, ‹ › to reorder, × to remove. */
+  fxStrip(l, i) {
+    const strip = h('div', { class: 'tn-fx' });
+    i.fx.forEach((f, n) => {
+      const d = FX[f.type];
+      if (!d) return;
+      const val = h('span', { class: 'tn-fx-val mono' });
+      const show = (v) => { val.textContent = `${+(+v).toFixed(d.step < 1 ? 1 : 0)}${d.unit === '%' ? '%' : ` ${d.unit}`}`; };
+      show(f.v);
+      const knob = h('input', { type: 'range', min: d.min, max: d.max, step: d.step, value: f.v, class: 'tn-fx-knob', title: `${d.name} (double-click: default)` });
+      const put = (v) => { show(v); this.t.updateInput(l.id, i.key, { fx: this.t.line(l.id).inputs.find((x) => x.key === i.key).fx.map((x) => (x.key === f.key ? { ...x, v } : x)) }); };
+      knob.oninput = () => put(+knob.value);
+      knob.ondblclick = () => { knob.value = d.def; put(d.def); };
+      const move = (dir) => { const fx = [...i.fx]; const j = n + dir; if (j < 0 || j >= fx.length) return; [fx[n], fx[j]] = [fx[j], fx[n]]; this.setFx(l, i, fx); };
+      strip.append(h('div', { class: `tn-fx-chip ${f.on ? '' : 'off'}` },
+        h('button', { class: 'tn-fx-name', title: f.on ? 'Click to bypass' : 'Bypassed — click to turn on', onclick: () => this.setFx(l, i, i.fx.map((x) => (x.key === f.key ? { ...x, on: !x.on } : x))) }, d.name),
+        knob, val,
+        i.fx.length > 1 ? h('button', { class: 'icon-btn tiny', 'data-tip': 'Earlier', disabled: n === 0, onclick: () => move(-1) }, icon('chevron-left', 'sm')) : null,
+        i.fx.length > 1 ? h('button', { class: 'icon-btn tiny', 'data-tip': 'Later', disabled: n === i.fx.length - 1, onclick: () => move(1) }, icon('chevron-right', 'sm')) : null,
+        h('button', { class: 'icon-btn tiny', 'data-tip': 'Remove', onclick: () => this.setFx(l, i, i.fx.filter((x) => x.key !== f.key)) }, icon('x', 'sm'))));
+    });
+    strip.append(h('button', { class: `btn sm tn-listen ${l.listen ? 'on' : ''}`, title: 'Hear this line (with the effects) on the Listen on device', onclick: () => { this.t.update(l.id, { listen: !l.listen }); this.render(); } },
+      icon('headphones', 'sm'), l.listen ? 'Listening' : 'Listen'));
+    return strip;
   }
 
   /** Running / error / warning under each line (cheap: called on every engine change). */

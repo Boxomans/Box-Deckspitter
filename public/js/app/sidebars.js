@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the side panels that move between the right sidebar and the top bar, and the sound button.
+// Box-Deckspitter app shell, the side panels that move between the right sidebar and the top bar, and the sound button.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear } from '../core/dom.js';

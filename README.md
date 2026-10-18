@@ -1,10 +1,10 @@
-# BOX//DOCSPITTER
+# BOX//DECKSPITTER
 
 https://discord.gg/3qxNWFErAV
 
 > local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to
 
-![Box-DocSpitter home screen](docs/screenshot.png)
+![Box-Deckspitter home screen](docs/screenshot.png)
 
 A self-hosted document workstation that runs entirely on your PC: a Word-style editor, a PDF editor and
 form filler, a notepad, a code/config editor, spreadsheets, a layered image editor, offline OCR, a file
@@ -18,9 +18,9 @@ downloads, update checks).
 
 | | |
 |---|---|
-| **Box-DocSpitter.exe** | Starts the app in its own window, with no console. Drag files onto it to open them. On a fresh copy it sets up `node_modules` first. |
-| **Create Shortcuts.bat** | Adds Box-DocSpitter to your Desktop and Start menu, with its icon. Run it again after moving the folder. |
-| **Box-DocSpitter (with console).bat** | Same as the `.exe`, but shows the server log. |
+| **Box-Deckspitter.exe** | Starts the app in its own window, with no console. Drag files onto it to open them. On a fresh copy it sets up `node_modules` first. |
+| **Create Shortcuts.bat** | Adds Box-Deckspitter to your Desktop and Start menu, with its icon. Run it again after moving the folder. |
+| **Box-Deckspitter (with console).bat** | Same as the `.exe`, but shows the server log. |
 | **Restore previous version.bat** | Puts back the version from before the last in-app update. Works even if the app won't start. |
 
 The app opens in its own window (built on Electron, in `node_modules/electron`), with its own taskbar icon
@@ -29,16 +29,16 @@ http://127.0.0.1:7717 if you'd rather use a browser tab.
 
 ## Pin it to the taskbar
 
-Start Box-DocSpitter, right-click its button on the taskbar, and choose **Pin to taskbar**. If you pinned it
+Start Box-Deckspitter, right-click its button on the taskbar, and choose **Pin to taskbar**. If you pinned it
 before this update, unpin the old one first, because it launches bare Electron. Settings → Windows → **Add to
 Start menu & Desktop** makes shortcuts that group with the open window under one icon.
 
-## Open files with Box-DocSpitter
+## Open files with Box-Deckspitter
 
 Settings → **Windows** → **Choose file types**: tick PDFs, Word docs, text, config files, spreadsheets and
-so on. Box-DocSpitter registers itself for them, just for your Windows account with no admin needed, so it
+so on. Box-Deckspitter registers itself for them, just for your Windows account with no admin needed, so it
 shows up in "Open with". Windows doesn't let apps make themselves the default, so the next step opens
-Settings → Default apps on Box-DocSpitter's page, where you click **Set default**. **Remove** undoes all of
+Settings → Default apps on Box-Deckspitter's page, where you click **Set default**. **Remove** undoes all of
 it. If you move the folder, choose the file types again to update the paths.
 
 ## Updates
@@ -73,7 +73,7 @@ new. **Download** fetches it and checks every file for errors first; **Restart &
 The repo holds only the source (about 2 MB). The libraries and the Electron runtime come from npm:
 
 1. Download or clone this repo.
-2. Double-click `Box-DocSpitter.exe`. On first run it does `npm install` (a few hundred MB), then opens the
+2. Double-click `Box-Deckspitter.exe`. On first run it does `npm install` (a few hundred MB), then opens the
    app. If Node.js 18+ isn't installed, it asks first and installs it with `winget install OpenJS.NodeJS.LTS`
    (or points you to nodejs.org if winget isn't there). Or install Node.js and run `npm install` yourself.
 3. Optional: yt-dlp and ffmpeg, for BoxKlep, BoxTape and faster video exports. BoxTape's **Install them for
@@ -84,9 +84,9 @@ Your personal data (`data/`) and the dumps are never part of the repo. They're l
 ## Portable: copy it to another PC
 
 The folder is self-contained. Nothing needs installing, not even Node.js, because Electron brings its own.
-1. Copy the whole `Box-DocSpitter` folder, including `node_modules`, anywhere: another PC, a USB stick or `C:\Apps`.
+1. Copy the whole `Box-Deckspitter` folder, including `node_modules`, anywhere: another PC, a USB stick or `C:\Apps`.
    Keep the path reasonably short. Windows can't start programs more than about 260 characters deep.
-2. On the new PC, double-click `Create Shortcuts.bat`, or just `Box-DocSpitter.exe`.
+2. On the new PC, double-click `Create Shortcuts.bat`, or just `Box-Deckspitter.exe`.
 
 Everything the app stores lives in `data\`, including Electron's cache. Nothing goes into `%APPDATA%`.
 Before handing a copy to someone else, use **Settings → Reset → Reset to clean state**. It erases settings,
@@ -172,7 +172,7 @@ seconds. The treemap fills in live while it runs. Space it can't open shows as a
 **Rescan as admin** asks Windows for permission, then also reads protected folders (restore points,
 other users, WindowsApps) and counts the NTFS file table.
 
-**BoxMail** Gmail inside Box-DocSpitter, with as many accounts as you like. The inbox is split into
+**BoxMail** Gmail inside Box-Deckspitter, with as many accounts as you like. The inbox is split into
 Gmail's tabs (Primary, Updates, Promotions, Social, Forums), plus Starred, Sent, Drafts, All mail, Spam and
 Trash, and Gmail search works (`from:`, `has:attachment`, ...). Compose, reply and forward, with
 attachments in one click from the media dump, the doc dump, any open document or your disk. Drop files on
@@ -185,13 +185,16 @@ Emails display with no scripts and remote images (tracking pixels) blocked until
 `.eml` files open in BoxMail too, no account needed.
 
 **BoxTape** Paste a YouTube playlist (or an album, or a single video), search for a song, or paste a list of
-songs, and pick the tracks. They're saved as MP3s, with title, artist and cover art, into `audio-dump/` for
+songs, and pick the tracks. They're saved as MP3s, with title, artist, genre, BPM and cover art, into `audio-dump/` for
 the ♪ player, 1–6 at a time with per-track progress. Songs already in your audio dump start unticked, and
 **Only new songs** ticks just the rest. BoxKlep also has an **MP3** button on every video, and a bulk
 **→ MP3** button, for the same thing. Only download music you have the right to keep.
 - **Retries:** YouTube sometimes turns a download down when several run at once. A song that fails is tried
   again a few seconds later, up to the number of retries you pick next to *at a time* (none to 10, default 3).
   Songs that can't work (a removed, private or age-locked video) fail straight away and are listed with why.
+- **Genre and BPM:** the genre is taken from the site when it gives one, otherwise looked up on the iTunes song
+  search; the BPM comes from Deezer, or is measured from the song when Deezer doesn't have it (only the artist and
+  title are sent to either). A song with no clear match gets no genre rather than a guessed one.
 - **Needs yt-dlp and ffmpeg.** If either is missing, BoxTape says so and **Install them for me** installs them
   with winget (Windows' own package manager). They work straight away, no restart.
 - **Spotify links** (playlist, album or song) work too. Spotify's audio is copy-protected, so BoxTape reads
@@ -253,6 +256,28 @@ hold a username, a password, a website and free text. Passwords show only while 
 copying one clears it from the clipboard after 20 seconds. Opening Secure notes always asks for your PIN. See
 [Secure notes: encryption and safeguards](#secure-notes-encryption-and-safeguards) below.
 
+**Todo** (Toolbox → Todo) To-do lists. Type a task and press Enter, with a due date if you like. Each task
+has a star and a due date (overdue ones show in red). Drag a task by its grip to reorder it, or onto another
+list at the side to move it. Done tasks drop into a Done section, and **Clear done** empties it. Right-click a
+task or a list for more. Deleting can be undone. Saved in `data/todos.json`.
+
+**BoxConvert** (home page → BoxConvert) Drop files in (or **Add files**), pick what each becomes, press
+**Convert**. Pictures (PNG, JPG, WebP, GIF, BMP, ICO, SVG, AVIF) become PNG, JPG, WebP, GIF, BMP, a Windows icon with
+every size from 16 to 256 px, or a one-page PDF. Videos become MP4, WebM, MKV, MOV or a GIF, or just their sound as
+MP3, WAV or M4A. Sounds become MP3, WAV, M4A, OGG, Opus or FLAC. Documents (Word, OpenDocument, RTF, HTML, Markdown,
+text) become Word, PDF, a web page, Markdown, RTF or text, through the document editor's own import and export.
+Spreadsheets become Excel, OpenDocument, CSV or TSV (one CSV per sheet). PDFs become page pictures at 150 dpi, in a
+folder of their own, or text. **Set all to** changes every file at once. The results go next to the originals or
+into a folder you pick (**Save to**), get a new name instead of overwriting anything, and open with a click. Videos
+and sounds need ffmpeg.
+
+**BoxBeat** (Toolbox → BoxBeat) A drum machine. Click or drag across the steps to make a beat (Shift+click
+for a softer hit) and press Space to play it. The drums are made on the fly: kick, snare, clap, closed and
+open hats, tom, rim, cowbell, 808, shaker and blip. Any row can play a sample instead: pick one from the audio
+dump, or drop a sound file on the row. Each row has mute, solo, volume, pan and pitch; each beat has its tempo
+(type it or tap it), swing and 8 to 64 steps. **Export** renders the loop as many times as you like into the
+audio dump as an MP3 (with ffmpeg) or WAV. Beats are saved in `data/beats.json`.
+
 **Binary files** A fast hex viewer that identifies the file type.
 
 ## Side tabs (right edge)
@@ -267,7 +292,7 @@ copying one clears it from the clipboard after 20 seconds. Opening Secure notes 
   button. Perplexity answers list their sources. Default model for Claude: Opus 5.5.
 
 - **✂ clip**: two sub-tabs.
-  - **History** keeps what you copy inside Box-DocSpitter: text (Ctrl+C, Copy buttons, characters, paths),
+  - **History** keeps what you copy inside Box-Deckspitter: text (Ctrl+C, Copy buttons, characters, paths),
     pictures copied from the media dump, and files copied from the dumps.
   - **Snippets** are texts you save and reuse (addresses, sign-offs, stock replies, form answers).
   - Click to put an item into what you're working on, right-click to copy it again, and Shift+right-click
@@ -278,7 +303,7 @@ copying one clears it from the clipboard after 20 seconds. Opening Secure notes 
 
 Everything below happens inside the app window's own process (`electron/secure-notes.js`). The local server
 never sees your notes, the page only gets what's on screen, and nothing is ever written to disk unencrypted.
-Secure notes don't open in a browser tab at all — only in the Box-DocSpitter window.
+Secure notes don't open in a browser tab at all — only in the Box-Deckspitter window.
 
 **What you set up once**
 

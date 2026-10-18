@@ -1,7 +1,7 @@
 @echo off
-title Box-DocSpitter
+title Box-Deckspitter
 cd /d "%~dp0"
-echo Starting Box-DocSpitter. Close the app window to stop it. The server log appears here.
+echo Starting Box-Deckspitter. Close the app window to stop it. The server log appears here.
 if exist node_modules\electron\dist\electron.exe (
   node_modules\electron\dist\electron.exe electron\main.js %*
   exit /b

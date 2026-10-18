@@ -65,7 +65,7 @@ export class BrowserEditor extends BaseEditor {
     this.bar = h('div', { class: 'bw-bar' }, this.backBtn, this.fwdBtn, this.reloadBtn, h('div', { class: 'bw-addr-wrap' }, this.lock, this.addr), this.adBtn, save, more);
     this.views = h('div', { class: 'bw-views' });
     this.note = this.persistent ? null : h('div', { class: 'bw-note' },
-      icon('lock', 'sm'), 'Logins aren’t kept yet: Box-DocSpitter turns on encrypted storage for them the next time it closes. Until then nothing from the web is written to disk.');
+      icon('lock', 'sm'), 'Logins aren’t kept yet: Box-Deckspitter turns on encrypted storage for them the next time it closes. Until then nothing from the web is written to disk.');
     this.root = h('div', { class: 'bw-root' }, h('div', { class: 'bw-top' }, this.strip, plus), this.bar, this.note, this.views);
     this.pane.append(this.root);
     this.root.addEventListener('keydown', (e) => { if (this.key(e)) { e.preventDefault(); e.stopPropagation(); } });

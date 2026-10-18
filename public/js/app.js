@@ -1,4 +1,4 @@
-// Box-DocSpitter — application shell. App is spread over app/*.js, a part per file.
+// Box-Deckspitter — application shell. App is spread over app/*.js, a part per file.
 
 import { $, h, uid } from './core/dom.js';
 import { toast } from './core/ui.js';
@@ -12,6 +12,7 @@ import { createClock } from './core/clock.js';
 import { createWeather } from './core/weather.js';
 import { createTranslate } from './core/translate.js';
 import { createCalendar } from './core/calendar.js';
+import { createMailAlerts } from './core/mail-alerts.js';
 import { LockPart } from './app/lock.js';
 import { EasterEggsPart } from './app/easter-eggs.js';
 import { RailPart } from './app/rail.js';
@@ -63,7 +64,7 @@ class App {
       this.settings = { ...DEFAULT_SETTINGS, ...settings };
       this.renameToolKey('BoxVidKlep', 'BoxKlep');
     } catch (e) {
-      document.body.append(h('div', { class: 'loading-pane' }, 'Could not reach the local server. Restart Box-DocSpitter.'));
+      document.body.append(h('div', { class: 'loading-pane' }, 'Could not reach the local server. Restart Box-Deckspitter.'));
       throw e;
     }
     configureFiles({ info: this.info, settings: this.settings });
@@ -87,6 +88,7 @@ class App {
       ? toast(`Screenshot didn't work: ${s.error}`, { type: 'warn', timeout: 8000 })
       : toast(`Screenshot saved to the media dump: ${s.name}`, { type: 'ok', timeout: 5000, action: { label: 'Open', fn: () => this.openPath(s.path) } })));
     this.calendar = createCalendar(this);
+    this.mailAlerts = createMailAlerts(this);
 
     this.decorateChrome();
     this.renderMenubar();

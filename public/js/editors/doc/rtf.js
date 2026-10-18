@@ -345,5 +345,5 @@ export async function exportRtf(body, defaults) {
   const content = await blocksRtf(body);
   const fonttbl = '{\\fonttbl' + fonts.map((f, k) => `{\\f${k}\\fnil ${f};}`).join('') + '}';
   const colortbl = '{\\colortbl;' + colors.map((c) => `\\red${parseInt(c.slice(1, 3), 16)}\\green${parseInt(c.slice(3, 5), 16)}\\blue${parseInt(c.slice(5, 7), 16)};`).join('') + '}';
-  return `{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1${fonttbl}${colortbl}{\\*\\generator Box-DocSpitter;}\\viewkind4\\fs${Math.round(baseSize * 2)}\n${content}}`;
+  return `{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1${fonttbl}${colortbl}{\\*\\generator Box-Deckspitter;}\\viewkind4\\fs${Math.round(baseSize * 2)}\n${content}}`;
 }

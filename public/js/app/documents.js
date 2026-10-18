@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, opening, creating and saving documents, versions and drafts.
+// Box-Deckspitter app shell, opening, creating and saving documents, versions and drafts.
 // Methods of App (app.js mixes this class into it).
 
 import {
@@ -167,7 +167,7 @@ export class DocumentsPart {
     this.activate(tab);
     try {
       const bytes = spec.content ? new TextEncoder().encode(spec.content) : null;
-      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images, diff: opts.diff, pickRight: opts.pickRight, media: opts.media, place: opts.place });
+      await this.mountEditor(tab, bytes, { lang: spec.lang, isNew: true, images, diff: opts.diff, pickRight: opts.pickRight, media: opts.media, place: opts.place, cwd: opts.cwd });
       if (images) this.setDirty(tab, true);
     } catch (e) {
       this.failOpen(tab, e, null);

@@ -275,6 +275,7 @@ module.exports = function createMedia({
       const child = spawn(exe, args, { windowsHide: true });
       job.cancel = () => child.kill();
       let last = '';
+      let meta = { artist: '', title: '', genre: '' };
       let err = '';
       child.stdout.on('data', (d) => {
         for (const line of String(d).split(/\r?\n/)) {
@@ -298,7 +299,8 @@ module.exports = function createMedia({
 
   // ---- audio grabbing: links → MP3s in the audio dump (BoxKlep's "MP3 → audio dump" and BoxTape)
 
-  /** One link (YouTube, SoundCloud, any yt-dlp site) → MP3 with title/artist/cover art. Resolves to the file path. */
+  /** One link (YouTube, SoundCloud, any yt-dlp site) → MP3 with title/artist/cover art. Resolves to { file, meta }, meta
+   *  being the artist, title and genre the site gave (blank where it gave none). */
   function ytdlpToMp3(track, url, dir, onProgress, onChild, outName = null) {
     return new Promise((resolve, reject) => {
       const t = tools();
@@ -306,7 +308,7 @@ module.exports = function createMedia({
       if (!t.ffmpeg) return reject(new Error('Making MP3s needs ffmpeg (winget install Gyan.FFmpeg)'));
       const args = ['-f', 'ba/b', '-x', '--audio-format', 'mp3', '--audio-quality', '0', '--embed-metadata', '--embed-thumbnail', '--convert-thumbnails', 'jpg',
         '--no-playlist', '--newline', '--no-warnings', '--no-mtime', '--windows-filenames', '--ffmpeg-location', t.ffmpeg,
-        '-o', path.join(dir, outName ? outName.replace(/%/g, '%%') + '.%(ext)s' : '%(title).120B.%(ext)s'), '--print', 'after_move:filepath', '--', url];
+        '-o', path.join(dir, outName ? outName.replace(/%/g, '%%') + '.%(ext)s' : '%(title).120B.%(ext)s'), '--print', 'after_move:BDSMETA%(artist,creator,uploader)s	%(track,title)s	%(genre)s', '--print', 'after_move:filepath', '--', url];
       const child = spawn(t.ytdlp, args, { windowsHide: true });
       onChild(child);
       let last = '';
@@ -314,7 +316,10 @@ module.exports = function createMedia({
       child.stdout.on('data', (d) => {
         for (const line of String(d).split(/\r?\n/)) {
           const m = /\[download\]\s+([\d.]+)%/.exec(line);
-          if (m) onProgress(Number(m[1]) / 100 * 0.9);
+          if (line.startsWith('BDSMETA')) {
+            const [artist, title, genre] = line.slice(7).split('	').map((v) => (v && v !== 'NA' ? v.trim() : ''));
+            meta = { artist, title, genre };
+          } else if (m) onProgress(Number(m[1]) / 100 * 0.9);
           else if (/\[ExtractAudio\]|\[EmbedThumbnail\]|\[Metadata\]/.test(line)) onProgress(0.95);
           else if (line.trim() && !line.startsWith('[')) last = line.trim();
         }
@@ -322,7 +327,7 @@ module.exports = function createMedia({
       child.stderr.on('data', (d) => { err += d; });
       child.on('error', reject);
       child.on('close', (code) => {
-        if (code === 0 && last && fs.existsSync(last)) resolve(last);
+        if (code === 0 && last && fs.existsSync(last)) resolve({ file: last, meta });
         else reject(new Error((err.split('\n').filter((l) => /ERROR/.test(l)).pop() || err.slice(-300) || `yt-dlp exited ${code}`).replace(/^ERROR:\s*/, '').trim()));
       });
     });
@@ -363,8 +368,8 @@ module.exports = function createMedia({
     });
   }
 
-  /** Rewrite an MP3's title/artist tags in place (cover art and audio are copied untouched). */
-  function retagMp3(file, { title, artist }) {
+  /** Rewrite an MP3's title/artist/genre/BPM tags in place (cover art and audio are copied untouched). */
+  function retagMp3(file, { title, artist, genre, bpm }) {
     return new Promise((resolve, reject) => {
       const ff = tools().ffmpeg;
       if (!ff) return resolve();
@@ -372,6 +377,8 @@ module.exports = function createMedia({
       const args = ['-hide_banner', '-y', '-i', file, '-map', '0', '-c', 'copy', '-id3v2_version', '3'];
       if (title) args.push('-metadata', `title=${title}`);
       if (artist) args.push('-metadata', `artist=${artist}`);
+      if (genre != null) args.push('-metadata', `genre=${genre}`); // '' clears it
+      if (bpm) args.push('-metadata', `TBPM=${bpm}`);
       args.push(tmp);
       const child = spawn(ff, args, { windowsHide: true });
       child.on('error', reject);
@@ -380,6 +387,116 @@ module.exports = function createMedia({
         try { await fsp.rename(tmp, file); resolve(); } catch (e) { reject(e); }
       });
     });
+  }
+
+  // ---- a downloaded song's genre and tempo, for its tags
+
+  /** YouTube's video categories, which yt-dlp writes as the genre (every song is "Music"): not a real genre. */
+  const YT_CATEGORY = /^(music|entertainment|people & blogs|film & animation|gaming|comedy|education|howto & style|news & politics|nonprofits & activism|science & technology|sports|travel & events|autos & vehicles|pets & animals)$/i;
+  const norm = (v) => String(v || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const same = (x, y) => !!(x && y && (x.includes(y) || y.includes(x)));
+
+  /** Upload names tidied into a plain artist and title: "Artist - Topic" and VEVO channels, "(Official Video)" and the
+   *  like, and "Artist - Song" titles (but not "Song - Remastered 2011"). */
+  function tidySong(artist, title) {
+    artist = String(artist || '').split(',')[0].replace(/\s*-\s*topic$/i, '').replace(/vevo$/i, '').trim();
+    title = String(title || '').replace(/\s*[([][^)\]]*(official|video|audio|lyric|visuali[sz]er|hd|4k|mv|m\/v)[^)\]]*[)\]]/gi, '').trim();
+    const dash = /^(.+?)\s+[-–—]\s+(.+)$/.exec(title);
+    if (dash && !/remaster|live|version|mix|edit|mono|stereo|acoustic|demo/i.test(dash[2])) { artist = dash[1]; title = dash[2]; }
+    return { artist, title };
+  }
+
+  /** The best match in a song search: artist and title both matching, or failing that the artist; with no artist, the
+   *  title. null when nothing fits, so an unknown song gets nothing rather than a wrong answer. */
+  function pickSong(results, artist, title, artistOf, titleOf) {
+    const a = norm(artist), t = norm(title);
+    return results.find((x) => same(norm(artistOf(x)), a) && same(norm(titleOf(x)), t))
+      || results.find((x) => same(norm(artistOf(x)), a))
+      || (!a && results.find((x) => same(norm(titleOf(x)), t)))
+      || null;
+  }
+
+  /** Genre from the iTunes song search (free, no key; only the artist and title are sent). null when nothing fits. */
+  const genreCache = new Map();
+  async function findGenre(artist, title) {
+    ({ artist, title } = tidySong(artist, title));
+    if (!title) return null;
+    const key = norm(artist) + '|' + norm(title);
+    if (genreCache.has(key)) return genreCache.get(key);
+    const q = new URLSearchParams({ term: `${artist} ${title}`.trim(), media: 'music', entity: 'song', limit: '10' });
+    const r = await fetch(`https://itunes.apple.com/search?${q}`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return null;
+    const hit = pickSong((await r.json()).results || [], artist, title, (x) => x.artistName, (x) => x.trackName);
+    const genre = hit?.primaryGenreName || null;
+    genreCache.set(key, genre);
+    return genre;
+  }
+
+  /** BPM from Deezer's song search (free, no key; only the artist and title are sent). Deezer has it for many songs but
+   *  not all (it says 0); null then, or when nothing fits. */
+  async function deezerBpm(artist, title) {
+    ({ artist, title } = tidySong(artist, title));
+    if (!title) return null;
+    const q = new URLSearchParams({ q: `${artist} ${title}`.trim(), limit: '10' });
+    const r = await fetch(`https://api.deezer.com/search?${q}`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return null;
+    const hit = pickSong((await r.json()).data || [], artist, title, (x) => x.artist?.name, (x) => x.title);
+    if (!hit?.id) return null;
+    const t = await fetch(`https://api.deezer.com/track/${hit.id}`, { signal: AbortSignal.timeout(8000) }).then((x) => (x.ok ? x.json() : null));
+    return t?.bpm > 0 ? Math.round(t.bpm) : null;
+  }
+
+  /** The tempo measured from the song itself: 90 s from past its intro, decoded small and mono; how much louder each
+   *  ~12 ms gets than the last (where the beats land); and which beat spacing between 70 and 180 BPM lines up with
+   *  itself best. Like most beat counters it can land on half or double the tempo. null if it can't tell. */
+  function measureBpm(file) {
+    return new Promise((resolve) => {
+      const ff = tools().ffmpeg;
+      if (!ff) return resolve(null);
+      const RATE = 11025, HOP = 128;
+      const child = spawn(ff, ['-hide_banner', '-v', 'error', '-ss', '30', '-t', '90', '-i', file, '-ac', '1', '-ar', String(RATE), '-f', 'f32le', '-'], { windowsHide: true });
+      const chunks = [];
+      child.stdout.on('data', (d) => chunks.push(d));
+      child.on('error', () => resolve(null));
+      child.on('close', () => {
+        const buf = Buffer.concat(chunks);
+        const pcm = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 4));
+        const frames = Math.floor(pcm.length / HOP);
+        if (frames < 400) return resolve(null);
+        // onset strength: the rise in log energy from one hop to the next
+        const flux = new Float32Array(frames);
+        let prev = 0;
+        for (let f = 0; f < frames; f++) {
+          let e = 0;
+          for (let i = f * HOP, n = i + HOP; i < n; i++) e += pcm[i] * pcm[i];
+          const le = Math.log(1e-9 + e);
+          flux[f] = f ? Math.max(0, le - prev) : 0;
+          prev = le;
+        }
+        let mean = 0;
+        for (const v of flux) mean += v;
+        mean /= frames;
+        for (let f = 0; f < frames; f++) flux[f] -= mean;
+        const fps = RATE / HOP;
+        const score = (lag) => { let s = 0; for (let f = lag; f < frames; f++) s += flux[f] * flux[f - lag]; return s / (frames - lag); };
+        let best = 0, bestLag = 0;
+        for (let lag = Math.floor(fps * 60 / 180); lag <= Math.ceil(fps * 60 / 70); lag++) {
+          // a real beat also lines up at twice its spacing, which keeps off-beat flukes down
+          const s = score(lag) + 0.5 * score(lag * 2);
+          if (s > best) { best = s; bestLag = lag; }
+        }
+        if (!bestLag) return resolve(null);
+        // between whole hops: a parabola through the peak and its neighbours
+        const a = score(bestLag - 1), b = score(bestLag), c = score(bestLag + 1);
+        const off = a - 2 * b + c ? (0.5 * (a - c)) / (a - 2 * b + c) : 0;
+        resolve(Math.round((60 * fps) / (bestLag + Math.max(-0.5, Math.min(0.5, off)))));
+      });
+    });
+  }
+
+  /** BPM for a downloaded song: Deezer's figure when it has one, otherwise measured from the file. */
+  async function findBpm(file, artist, title) {
+    return (await deezerBpm(artist, title).catch(() => null)) || measureBpm(file);
   }
 
   async function grabAudio(job, items, parallel = 3, folder = '', retries = 3) {
@@ -438,8 +555,16 @@ module.exports = function createMedia({
             const tmp = path.join(AUDIO_DUMP, '.incoming', crypto.randomBytes(6).toString('hex'));
             await fsp.mkdir(tmp, { recursive: true });
             try {
-              const made = await retrying(tr, 'downloading', () => ytdlpToMp3(tr, it.url, tmp, onProgress, onChild, it.outName));
-              if (it.tags) await retagMp3(made, it.tags).catch(() => {}); // Spotify's title/artist, not the YouTube upload's
+              const { file: made, meta } = await retrying(tr, 'downloading', () => ytdlpToMp3(tr, it.url, tmp, onProgress, onChild, it.outName));
+              // Spotify's title/artist, not the YouTube upload's; a genre (from the site, or looked up) and the BPM
+              const tags = { ...(it.tags || {}) };
+              const [genre, bpm] = await Promise.all([
+                (!YT_CATEGORY.test(meta.genre) && meta.genre) || findGenre(tags.artist || meta.artist, tags.title || meta.title).catch(() => null),
+                findBpm(made, tags.artist || meta.artist, tags.title || meta.title).catch(() => null),
+              ]);
+              // no genre found: clear the one yt-dlp wrote, which is only YouTube's category ("Music")
+              Object.assign(tags, { genre: genre || '', bpm });
+              if (tags.title || tags.artist || tags.genre || tags.bpm) await retagMp3(made, tags).catch(() => {});
               const dest = await uniquePath(destDir, path.basename(made));
               await fsp.rename(made, dest);
               tr.file = dest;
@@ -535,7 +660,7 @@ module.exports = function createMedia({
             // winget also exits non-zero for "already installed" / "no newer version": only a missing tool afterwards is a failure
             if (!findExe(name)) throw new Error(`Couldn’t install ${name}: ${String(e.message || e).split('\n').filter(Boolean).pop()}`);
           }
-          if (!findExe(name)) throw new Error(`winget finished, but ${name} still can’t be found. Restart Box-DocSpitter and look again.`);
+          if (!findExe(name)) throw new Error(`winget finished, but ${name} still can’t be found. Restart Box-Deckspitter and look again.`);
         }
         job.current = null;
       });

@@ -3,12 +3,12 @@ UI sound effects (click.mp3, close.mp3, hover.mp3, open.mp3, type.mp3)
 Source: Pixabay (https://pixabay.com), used under the Pixabay Content License
 (https://pixabay.com/service/license-summary/).
 
-These sounds are NOT covered by the license of Box-DocSpitter's code. They're included only as part of
+These sounds are NOT covered by the license of Box-Deckspitter's code. They're included only as part of
 the app. Don't sell or redistribute them on their own (for example as a sound pack). Get them from
 Pixabay instead.
 
 Effect sounds (cm.mp3, missile.mp3, rwr.mp3)
 
 Source: free sound libraries, used under their terms. The same applies: they're included only as part of
-the app and are not covered by the license of Box-DocSpitter's code. Don't sell or redistribute them on
+the app and are not covered by the license of Box-Deckspitter's code. Don't sell or redistribute them on
 their own.

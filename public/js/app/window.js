@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the window: mouse and keys, drag and drop, the heartbeat, full screen, quitting, help.
+// Box-Deckspitter app shell, the window: mouse and keys, drag and drop, the heartbeat, full screen, quitting, help.
 // Methods of App (app.js mixes this class into it).
 
 import { $, h, vendor } from '../core/dom.js';
@@ -176,7 +176,7 @@ export class WindowPart {
     await this.saveGames().catch(() => {});
     if (!(await this.closeAll())) { this.quitting = false; return; }
     await api.quit().catch(() => {});
-    document.body.innerHTML = '<div class="loading-pane">Box-DocSpitter has stopped. You can close this window.</div>';
+    document.body.innerHTML = '<div class="loading-pane">Box-Deckspitter has stopped. You can close this window.</div>';
     setTimeout(() => window.close(), 300);
   }
 
@@ -227,7 +227,7 @@ export class WindowPart {
     const v = (n) => cs.getPropertyValue(n).trim();
     const d = w.document;
     d.open();
-    d.write(`<!doctype html><html><head><meta charset="utf-8"><title>Box-DocSpitter — README</title><style>
+    d.write(`<!doctype html><html><head><meta charset="utf-8"><title>Box-Deckspitter — README</title><style>
       :root { color-scheme: ${['light', 'temple', 'lubyanka'].includes(document.documentElement.dataset.theme) ? 'light' : 'dark'}; }
       body { margin: 0; background: ${v('--bg-0')}; color: ${v('--text')}; font: 14px/1.6 Inter, "Segoe UI", system-ui, sans-serif; }
       main { max-width: 860px; margin: 0 auto; padding: 28px 32px 60px; }
@@ -269,10 +269,10 @@ export class WindowPart {
     modal({
       title: 'About',
       body: h('div', { class: 'col' },
-        h('div', { class: 'row' }, h('img', { src: '/assets/icon.svg', style: { width: '44px' } }), h('div', {}, h('div', { class: 'brand-name', style: { fontSize: '15px' } }, 'BOX//DOCSPITTER'), h('div', { class: 'faint mono' }, 'v' + window.BDS?.version))),
+        h('div', { class: 'row' }, h('img', { src: '/assets/icon.svg', style: { width: '44px' } }), h('div', {}, h('div', { class: 'brand-name', style: { fontSize: '15px' } }, 'BOX//DECKSPITTER'), h('div', { class: 'faint mono' }, 'v' + window.BDS?.version))),
         h('p', {}, 'A self-hosted document workstation. Everything runs on this PC at 127.0.0.1. Your files never leave it.'),
         h('p', { class: 'dim' }, 'Built with pdf.js, pdf-lib, Monaco, SheetJS, docx and JSZip, all served from your own disk.'),
-        h('p', { class: 'dim mono', style: { fontSize: '11.5px' } }, 'Backups of every save: Box-DocSpitter\\data\\backups'),
+        h('p', { class: 'dim mono', style: { fontSize: '11.5px' } }, 'Backups of every save: Box-Deckspitter\\data\\backups'),
         h('p', { class: 'dim' }, 'Made by boxbind · Discord: @boxbind')),
     });
   }

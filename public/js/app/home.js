@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the home page: its cards, their order and names.
+// Box-Deckspitter app shell, the home page: its cards, their order and names.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear, dirname, timeAgo } from '../core/dom.js';
@@ -9,7 +9,7 @@ import { LANGUAGES, iconForName } from '../core/filetypes.js';
 import { pickOpen } from '../core/files.js';
 import { TOOLS, TOOL_OF_MODE, offered } from '../core/tools.js';
 
-const HOME_TITLE = 'BOX//DOCSPITTER';
+const HOME_TITLE = 'BOX//DECKSPITTER';
 
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
 

@@ -118,7 +118,7 @@ module.exports = function createPresence({ IS_WIN, readJSONBody }) {
     const out = { details: clip(a.details), state: clip(a.state), instance: false };
     if (a.start) out.timestamps = { start: Math.floor(Number(a.start) / 1000) * 1000 };
     const assets = {};
-    if (a.largeImage) { assets.large_image = clip(a.largeImage, 256); assets.large_text = clip(a.largeText || 'Box-DocSpitter'); }
+    if (a.largeImage) { assets.large_image = clip(a.largeImage, 256); assets.large_text = clip(a.largeText || 'Box-Deckspitter'); }
     if (a.smallImage) { assets.small_image = clip(a.smallImage, 256); assets.small_text = clip(a.smallText); }
     if (Object.keys(assets).length) out.assets = assets;
     return out;

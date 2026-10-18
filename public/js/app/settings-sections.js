@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, Settings sections: sound, updates, Windows, file types, mail, AI assistant, Discord.
+// Box-Deckspitter app shell, Settings sections: sound, updates, Windows, file types, mail, AI assistant, Discord.
 // Methods of App (app.js mixes this class into it).
 
 import { $, h, clear, extOf, formatBytes, debounce } from '../core/dom.js';
@@ -26,7 +26,7 @@ export class SettingsSectionsPart {
           mine ? h('button', { class: 'btn sm ghost', onclick: async () => { await api.resetSound(name).catch(errorToast); await this.sounds.reload(name, false); render(); } }, 'Default') : null));
       }
       if (Object.keys(custom).length) list.append(h('button', { class: 'btn sm ghost sound-reset-all', onclick: async () => {
-        if (!(await confirmDialog('Back to the default sounds?', 'All the UI sounds go back to the ones Box-DocSpitter came with. Your own files are deleted from data\\sounds.', { okLabel: 'Use the defaults' }))) return;
+        if (!(await confirmDialog('Back to the default sounds?', 'All the UI sounds go back to the ones Box-Deckspitter came with. Your own files are deleted from data\\sounds.', { okLabel: 'Use the defaults' }))) return;
         await api.resetSound(null).catch(errorToast);
         for (const n of Object.keys(custom)) await this.sounds.reload(n, false);
         render();
@@ -130,7 +130,7 @@ export class SettingsSectionsPart {
       actions.append(h('button', { class: 'btn sm ghost', onclick: () => this.showWhatsNew() }, 'What’s new'));
       const last = st.backups?.[0];
       if (last && !st.blocked) actions.append(h('button', { class: 'btn sm ghost', 'data-tip': 'Puts back the version from before the last update', onclick: async () => {
-        if (!(await confirmDialog(`Go back to ${last.from}?`, `Box-DocSpitter restarts on ${last.from}, the version you had before updating to ${last.version}. Your files, settings and dumps aren’t touched.`, { okLabel: `Go back to ${last.from}` }))) return;
+        if (!(await confirmDialog(`Go back to ${last.from}?`, `Box-Deckspitter restarts on ${last.from}, the version you had before updating to ${last.version}. Your files, settings and dumps aren’t touched.`, { okLabel: `Go back to ${last.from}` }))) return;
         try { await call('POST', '/api/update/rollback'); toast('Restarting…', { timeout: 4000 }); } catch (e) { errorToast(e); }
       } }, icon('undo', 'sm'), `Go back to ${last.from}`));
       renderToken();
@@ -157,7 +157,7 @@ export class SettingsSectionsPart {
         h('button', { class: 'btn sm', onclick: () => this.fileTypesDialog(st.registered || {}, post).then(refresh) }, icon('file', 'sm'), st.count ? 'Change file types…' : 'Choose file types…'),
         st.count ? h('button', { class: 'btn sm primary', onclick: () => post('/api/system/default-apps').catch(errorToast) }, 'Set as default…') : null,
         st.count ? h('button', { class: 'btn sm ghost', onclick: async () => {
-          if (!(await confirmDialog('Remove from Windows?', 'Box-DocSpitter will disappear from “Open with” and Default apps. Files you had set to open with it go back to Windows asking which app to use.', { okLabel: 'Remove', danger: true }))) return;
+          if (!(await confirmDialog('Remove from Windows?', 'Box-Deckspitter will disappear from “Open with” and Default apps. Files you had set to open with it go back to Windows asking which app to use.', { okLabel: 'Remove', danger: true }))) return;
           try { await post('/api/system/associations/remove'); toast('Removed from Windows', { type: 'ok' }); } catch (e) { errorToast(e); }
           refresh();
         } }, 'Remove') : null].filter(Boolean));
@@ -170,10 +170,10 @@ export class SettingsSectionsPart {
       } catch (e) { errorToast(e); }
     } }, icon('pin', 'sm'), 'Add to Start menu & Desktop') : null;
     return h('div', { class: 'settings-group' }, h('h4', {}, 'Windows'),
-      h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Open PDFs, documents, text and config files with Box-DocSpitter when you double-click them.'),
+      h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Open PDFs, documents, text and config files with Box-Deckspitter when you double-click them.'),
       status, actions,
       shortcutBtn,
-      shortcutBtn ? h('span', { class: 'faint', style: { fontSize: '11px' } }, 'To pin it: right-click Box-DocSpitter’s button on the taskbar while it’s open → Pin to taskbar.') : null);
+      shortcutBtn ? h('span', { class: 'faint', style: { fontSize: '11px' } }, 'To pin it: right-click Box-Deckspitter’s button on the taskbar while it’s open → Pin to taskbar.') : null);
   }
 
   async fileTypesDialog(current, post) {
@@ -196,9 +196,9 @@ export class SettingsSectionsPart {
       return { id, exts, cb, row: h('label', { class: 'check filetype-row' }, cb, h('span', {}, label), h('span', { class: 'faint mono' }, exts.map((e) => '.' + e).join(' '))) };
     });
     const res = await modal({
-      title: 'Open these with Box-DocSpitter', wide: true,
+      title: 'Open these with Box-Deckspitter', wide: true,
       body: h('div', { class: 'filetypes' },
-        h('div', { class: 'faint', style: { fontSize: '12px', marginBottom: '10px' } }, 'Box-DocSpitter registers itself with Windows for these types (just for your account, no admin needed). Then Windows asks you to confirm it as the default — apps aren’t allowed to do that part by themselves.'),
+        h('div', { class: 'faint', style: { fontSize: '12px', marginBottom: '10px' } }, 'Box-Deckspitter registers itself with Windows for these types (just for your account, no admin needed). Then Windows asks you to confirm it as the default — apps aren’t allowed to do that part by themselves.'),
         ...boxes.map((b) => b.row)),
       buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Register', value: 'ok', primary: true }],
     });
@@ -216,8 +216,8 @@ export class SettingsSectionsPart {
       const next = await modal({
         title: 'One more step',
         body: h('div', {},
-          h('p', {}, `Box-DocSpitter is now registered for ${st.count} file types and shows up in “Open with”.`),
-          h('p', {}, 'To make it the default, Windows Settings will open on Box-DocSpitter’s page: click ', h('b', {}, 'Set default'), ' at the top (or pick it per file type).')),
+          h('p', {}, `Box-Deckspitter is now registered for ${st.count} file types and shows up in “Open with”.`),
+          h('p', {}, 'To make it the default, Windows Settings will open on Box-Deckspitter’s page: click ', h('b', {}, 'Set default'), ' at the top (or pick it per file type).')),
         buttons: [{ label: 'Later', value: null, ghost: true }, { label: 'Open Default apps', value: 'go', primary: true }],
       });
       if (next === 'go') await post('/api/system/default-apps');
@@ -346,7 +346,7 @@ export class SettingsSectionsPart {
     const preview = h('div', { class: 'discord-preview' },
       h('div', { class: 'dp-head' }, 'playing a game'),
       h('div', { class: 'dp-body' }, h('img', { src: '/assets/icon.svg', class: 'dp-img', alt: '' }),
-        h('div', { class: 'dp-text' }, h('div', { class: 'dp-line strong' }, 'Box-DocSpitter'), pvDetails, pvState, pvTime)));
+        h('div', { class: 'dp-text' }, h('div', { class: 'dp-line strong' }, 'Box-Deckspitter'), pvDetails, pvState, pvTime)));
     const statusEl = h('div', { class: 'dp-status mono' });
     const statusText = {
       off: 'off', connecting: 'connecting to Discord…', connected: '● connected — showing on your profile',
@@ -379,7 +379,7 @@ export class SettingsSectionsPart {
         const c = h('canvas', { width: 1024, height: 1024 });
         c.getContext('2d').drawImage(img, 0, 0, 1024, 1024);
         const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
-        this.saveBytesAs(blob, { defaultName: 'box-docspitter-logo.png', filters: [{ name: 'PNG image', extensions: ['png'] }], openAfter: false });
+        this.saveBytesAs(blob, { defaultName: 'box-deckspitter-logo.png', filters: [{ name: 'PNG image', extensions: ['png'] }], openAfter: false });
       },
     }, icon('download', 'sm'), 'Save logo PNG');
 
@@ -388,7 +388,7 @@ export class SettingsSectionsPart {
       h('details', { class: 'dp-help' }, h('summary', {}, 'how do I get one?'),
         h('ol', {},
           h('li', {}, 'Open discord.com/developers/applications'),
-          h('li', {}, 'New Application → name it “Box-DocSpitter” (that name shows as “Playing …”)'),
+          h('li', {}, 'New Application → name it “Box-Deckspitter” (that name shows as “Playing …”)'),
           h('li', {}, 'Copy the Application ID and paste it above'),
           h('li', {}, 'Optional: Rich Presence → Art Assets → upload the logo PNG named “logo”')),
         exportLogo),

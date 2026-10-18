@@ -17,7 +17,7 @@ const SPECIAL = { starred: '\\Flagged', important: '\\Important', sent: '\\Sent'
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-module.exports = function createMail({ secrets, saveSecrets, readBody, readJSONBody, requirePath, dumpFile, log }) {
+module.exports = function createMail({ secrets, saveSecrets, readBody, readJSONBody, requirePath, dumpFile, watchFile, readJSON, writeJSON, log }) {
   const { ImapFlow } = require('imapflow');
   const nodemailer = require('nodemailer');
   const { simpleParser } = require('mailparser');
@@ -152,10 +152,155 @@ module.exports = function createMail({ secrets, saveSecrets, readBody, readJSONB
     return list;
   }
 
+  // ------------------------------------------------------------------ alerts: watch the inbox for key words or senders
+  // data/mail-watch.json: { rules: [{ id, kind: 'word' | 'sender', value, acct (null = every account), on }],
+  //   last: { acctId: { v: uidValidity, uid } } (newest message already looked at), alerts: [...] (newest first)}.
+  // Only mail that arrives after a rule exists is matched; nothing here marks anything as read.
+
+  const WATCH_EVERY = 2 * 60 * 1000;
+  const MAX_ALERTS = 200;
+  let watch = null;
+  function loadWatch() {
+    if (watch) return watch;
+    const w = readJSON(watchFile, {}) || {};
+    watch = {
+      rules: Array.isArray(w.rules) ? w.rules : [],
+      last: w.last && typeof w.last === 'object' ? w.last : {},
+      alerts: Array.isArray(w.alerts) ? w.alerts : [],
+    };
+    return watch;
+  }
+  const saveWatch = () => writeJSON(watchFile, watch);
+  const quoted = (v) => '"' + String(v).replace(/"/g, '').trim() + '"';
+  const gmQuery = (r) => (r.kind === 'sender' ? 'from:(' + (/\s/.test(r.value) ? quoted(r.value) : r.value) + ')' : quoted(r.value));
+
+  let checking = null, lastCheck = 0, lastError = '';
+  function checkWatch() {
+    if (checking) return checking;
+    checking = (async () => {
+      const w = loadWatch();
+      const live = w.rules.filter((r) => r.on !== false);
+      const list = accounts();
+      let changed = false, found = 0, err = '';
+      for (const id of Object.keys(w.last)) if (!list.some((a) => a.id === id)) { delete w.last[id]; changed = true; }
+      for (const a of list) {
+        const rules = live.filter((r) => !r.acct || r.acct === a.id);
+        if (!rules.length) continue;
+        try {
+          await withBox(a, 'inbox', async (client) => {
+            await client.noop().catch(() => {});
+            const v = String(client.mailbox?.uidValidity || '');
+            const prev = w.last[a.id];
+            if (!prev || prev.v !== v) {
+              // first look (or the mailbox was rebuilt): start from what's there now
+              w.last[a.id] = { v, uid: Math.max(0, (Number(client.mailbox?.uidNext) || 1) - 1) };
+              changed = true;
+              return;
+            }
+            const fresh = ((await client.search({ uid: (prev.uid + 1) + ':*' }, { uid: true })) || []).filter((u) => u > prev.uid);
+            if (!fresh.length) return;
+            const range = (prev.uid + 1) + ':*';
+            const hits = new Map(); // uid -> ids of the rules it matched
+            for (const r of rules) {
+              const uids = await client.search({ uid: range, gmraw: gmQuery(r) }, { uid: true }).catch(() => []);
+              for (const u of uids || []) if (u > prev.uid) { if (!hits.has(u)) hits.set(u, []); hits.get(u).push(r.id); }
+            }
+            const uids = [...hits.keys()].sort((x, y) => y - x).slice(0, 25);
+            if (uids.length) {
+              for await (const msg of client.fetch(uids.join(','), { uid: true, envelope: true, internalDate: true }, { uid: true })) {
+                if (w.alerts.some((x) => x.acct === a.id && x.uid === msg.uid)) continue;
+                const env = msg.envelope || {};
+                const f = (env.from || [])[0] || {};
+                w.alerts.push({
+                  id: crypto.randomBytes(6).toString('hex'),
+                  rules: hits.get(msg.uid) || [],
+                  acct: a.id, uid: msg.uid,
+                  subject: String(env.subject || '(no subject)').slice(0, 300),
+                  from: { name: f.name || '', address: f.address || '' },
+                  date: (env.date || msg.internalDate)?.getTime?.() || Date.now(),
+                  at: Date.now(),
+                  seen: false,
+                });
+                found++;
+              }
+            }
+            w.last[a.id] = { v, uid: Math.max(...fresh) };
+            changed = true;
+          });
+        } catch (e) {
+          err = a.address + ': ' + e.message;
+        }
+      }
+      if (found) {
+        w.alerts.sort((x, y) => (y.date || y.at) - (x.date || x.at));
+        if (w.alerts.length > MAX_ALERTS) w.alerts.length = MAX_ALERTS;
+      }
+      lastCheck = Date.now();
+      lastError = err;
+      if (changed) await saveWatch();
+      return found;
+    })().finally(() => { checking = null; });
+    return checking;
+  }
+  function watchState() {
+    const w = loadWatch();
+    const addr = new Map(accounts().map((a) => [a.id, a.address]));
+    return {
+      rules: w.rules,
+      alerts: w.alerts.map((x) => ({ ...x, address: addr.get(x.acct) || '' })),
+      unseen: w.alerts.filter((x) => !x.seen).length,
+      accounts: accounts().map(publicAccount),
+      lastCheck, error: lastError,
+    };
+  }
+  // in the background: shortly after start, then every couple of minutes (only when there's something to watch)
+  const idle = () => !loadWatch().rules.some((r) => r.on !== false) || !accounts().length;
+  setTimeout(() => { if (!idle()) checkWatch().catch(() => {}); }, 20_000).unref?.();
+  setInterval(() => { if (!idle()) checkWatch().catch(() => {}); }, WATCH_EVERY).unref?.();
+
   // ------------------------------------------------------------------ routes
 
   return {
     'GET /api/mail/accounts': async () => ({ accounts: accounts().map(publicAccount) }),
+
+    // ---- alerts
+    'GET /api/mail/watch': async () => watchState(),
+
+    'POST /api/mail/watch': async (req) => {
+      const body = await readJSONBody(req);
+      const w = loadWatch();
+      const ids = new Set(accounts().map((a) => a.id));
+      const seen = new Set();
+      w.rules = (Array.isArray(body.rules) ? body.rules : []).slice(0, 50).map((r) => ({
+        id: /^[a-z0-9]{4,24}$/i.test(String(r?.id || '')) ? String(r.id) : crypto.randomBytes(6).toString('hex'),
+        kind: r?.kind === 'sender' ? 'sender' : 'word',
+        value: String(r?.value || '').replace(/[\r\n()]/g, ' ').trim().slice(0, 120),
+        acct: ids.has(r?.acct) ? r.acct : null,
+        on: r?.on !== false,
+      })).filter((r) => r.value && !seen.has(r.kind + ':' + r.value.toLowerCase() + ':' + r.acct) && seen.add(r.kind + ':' + r.value.toLowerCase() + ':' + r.acct));
+      await saveWatch();
+      checkWatch().catch(() => {}); // sets the starting point for accounts it hasn't looked at yet
+      return watchState();
+    },
+
+    'POST /api/mail/watch/check': async () => {
+      await checkWatch();
+      return watchState();
+    },
+
+    // { action: 'seen' | 'clear' | 'remove', ids?: [...] } (no ids = all of them)
+    'POST /api/mail/alerts': async (req) => {
+      const { action, ids } = await readJSONBody(req);
+      const w = loadWatch();
+      const pick = Array.isArray(ids) ? new Set(ids) : null;
+      const hit = (x) => !pick || pick.has(x.id);
+      if (action === 'seen') for (const x of w.alerts) { if (hit(x)) x.seen = true; }
+      else if (action === 'unseen') for (const x of w.alerts) { if (hit(x)) x.seen = false; }
+      else if (action === 'clear' || action === 'remove') w.alerts = w.alerts.filter((x) => !hit(x));
+      else throw fail(400, 'Unknown action');
+      await saveWatch();
+      return watchState();
+    },
 
     'POST /api/mail/accounts': async (req) => {
       const { address, appPassword, name } = await readJSONBody(req);

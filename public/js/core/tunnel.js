@@ -4,6 +4,8 @@
 // It lives on the app, not the tab, so lines keep running with the BoxTunnel tab closed (settings.tunnel.keep).
 // Other apps can only pick a line up through a virtual audio cable: set the line's output to the cable.
 
+import { PITCH_URL, chainFx, fxSig } from './tunnel-fx.js';
+
 const SYSTEM = 'system';
 const NONE = 'none';
 const VIRTUAL_RE = /virtual|cable|vb-audio|voicemeeter|vac\b/i;
@@ -33,7 +35,8 @@ function normalize(l) {
   return {
     ...rest,
     comp: COMP[l.comp] !== undefined ? l.comp : 'off',
-    inputs: inputs.map((i) => ({ key: i.key || newKey(), kind: i.kind || SYSTEM, id: i.id, label: i.label, volume: i.volume ?? 1, mute: !!i.mute, gate: !!i.gate, threshold: i.threshold ?? GATE_DEFAULT })),
+    inputs: inputs.map((i) => ({ key: i.key || newKey(), kind: i.kind || SYSTEM, id: i.id, label: i.label, volume: i.volume ?? 1, mute: !!i.mute, gate: !!i.gate, threshold: i.threshold ?? GATE_DEFAULT,
+      fx: (Array.isArray(i.fx) ? i.fx : []).map((f) => ({ key: f.key || newKey(), type: f.type, v: +f.v, on: f.on !== false })) })),
   };
 }
 
@@ -277,6 +280,7 @@ class Tunnel {
       Object.assign(r, { ctx });
       let gateOk = true;
       try { await ctx.audioWorklet.addModule(GATE_URL); } catch (e) { gateOk = false; console.warn('tunnel gate', e); }
+      try { await ctx.audioWorklet.addModule(PITCH_URL); r.pitchOk = true; } catch (e) { r.pitchOk = false; console.warn('tunnel pitch', e); }
       // inputs → mix → compressor → make-up → line volume → (meter, output, other lines / listen)
       r.mix = ctx.createGain();
       r.comp = ctx.createDynamicsCompressor();
@@ -301,7 +305,7 @@ class Tunnel {
     }
   }
 
-  /** One input: source → meter → gate → its volume → the line's mix. A failing input doesn't stop the others. */
+  /** One input: source → meter → gate → effects → its volume → the line's mix. A failing input doesn't stop the others. */
   async attachInput(l, r, i, gateOk) {
     const ctx = r.ctx;
     let streamKey = null;
@@ -325,10 +329,13 @@ class Tunnel {
       an.fftSize = 1024;
       const gain = ctx.createGain();
       const gate = gateOk ? new AudioWorkletNode(ctx, 'bds-gate', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] }) : null;
+      const pre = ctx.createGain();
       src.connect(an);
-      (gate ? src.connect(gate) : src).connect(gain);
+      (gate ? src.connect(gate) : src).connect(pre);
       gain.connect(r.mix);
-      r.ins.set(i.key, { src, an, gate, gain, streamKey, buf: new Float32Array(an.fftSize) });
+      const x = { src, an, gate, pre, gain, streamKey, buf: new Float32Array(an.fftSize) };
+      x.fx = chainFx(ctx, pre, gain, i.fx, r.pitchOk);
+      r.ins.set(i.key, x);
     } catch (e) {
       if (streamKey) this.dropStream(streamKey);
       this.inErrors.set(`${l.id}:${i.key}`, e.name === 'NotAllowedError' ? 'Audio access was refused' : e.message || String(e));
@@ -356,6 +363,9 @@ class Tunnel {
       const x = r.ins.get(i.key);
       if (!x) continue;
       set(x.gain.gain, i.mute ? 0 : Math.max(0, Math.min(2, +i.volume || 0)));
+      // effects added, removed, reordered or switched rebuild the chain; a knob just turns
+      if (x.fx.sig !== fxSig(i.fx)) { x.fx.stop(); x.fx = chainFx(r.ctx, x.pre, x.gain, i.fx, r.pitchOk); }
+      x.fx.set(i.fx);
       x.gate?.parameters.get('threshold').setValueAtTime(i.gate ? Math.max(-99, Math.min(0, +i.threshold)) : -100, t);
     }
     const c = COMP[l.comp];

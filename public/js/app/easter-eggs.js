@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the easter eggs: turning them on, their sortie, the splash count.
+// Box-Deckspitter app shell, the easter eggs: turning them on, their sortie, the splash count.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear } from '../core/dom.js';

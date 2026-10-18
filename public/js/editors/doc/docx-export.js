@@ -23,7 +23,7 @@ export async function exportDocx(editor) {
     const inTw = (v) => Math.round(v * 1440);
     const def = editor.defaults;
     const doc = new D.Document({
-      creator: 'Box-DocSpitter',
+      creator: 'Box-Deckspitter',
       title: editor.tab.title.replace(/\.[^.]+$/, ''),
       styles: ex.styles(def),
       numbering: { config: ex.numbering.length ? ex.numbering : [ex.placeholderNumbering()] },

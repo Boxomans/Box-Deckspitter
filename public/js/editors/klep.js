@@ -77,7 +77,7 @@ export class KlepEditor extends BaseEditor {
     clear(this.toolsEl).append(
       h('span', { class: `klep-tool ${t.ytdlp ? 'ok' : 'off'}`, title: t.ytdlpPath || 'not installed' }, t.ytdlp ? '● yt-dlp' : '○ yt-dlp'),
       h('span', { class: `klep-tool ${t.ffmpeg ? 'ok' : 'off'}`, title: t.ffmpegPath || 'not installed (optional)' }, t.ffmpeg ? '● ffmpeg' : '○ ffmpeg'),
-      h('button', { class: 'icon-btn', 'data-tip': 'Re-check tools', onclick: async () => { this.tools = await get('/api/tools'); this.renderTools(); toast(this.tools.ytdlp ? 'yt-dlp found' : 'yt-dlp still not found — restart Box-DocSpitter after installing', { timeout: 2500 }); } }, icon('refresh', 'sm')));
+      h('button', { class: 'icon-btn', 'data-tip': 'Re-check tools', onclick: async () => { this.tools = await get('/api/tools'); this.renderTools(); toast(this.tools.ytdlp ? 'yt-dlp found' : 'yt-dlp still not found — restart Box-Deckspitter after installing', { timeout: 2500 }); } }, icon('refresh', 'sm')));
   }
 
   renderHistory() {
@@ -161,7 +161,7 @@ export class KlepEditor extends BaseEditor {
       h('div', {}, 'YouTube and most social sites don’t expose a plain video file. yt-dlp is the free, open-source tool that reads them — BoxKlep uses it automatically once it’s installed.'),
       h('div', { class: 'row' }, h('code', { class: 'klep-cmd' }, cmd),
         h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(cmd); toast('Copied — paste it into a terminal', { type: 'ok' }); } }, icon('copy', 'sm'), 'Copy')),
-      h('div', { class: 'faint' }, 'Optional, for best quality (merging HD video + audio): ', h('code', {}, 'winget install Gyan.FFmpeg'), '. Then restart Box-DocSpitter.'));
+      h('div', { class: 'faint' }, 'Optional, for best quality (merging HD video + audio): ', h('code', {}, 'winget install Gyan.FFmpeg'), '. Then restart Box-Deckspitter.'));
   }
 
   card(it, res) {
@@ -240,7 +240,7 @@ export class KlepEditor extends BaseEditor {
 
   /** Convert to MP3 into the audio dump (one job for the whole batch). */
   async toMp3(list) {
-    if (!this.tools?.ffmpeg) return toast('Making MP3s needs ffmpeg: winget install Gyan.FFmpeg, then restart Box-DocSpitter.', { type: 'warn', timeout: 6000 });
+    if (!this.tools?.ffmpeg) return toast('Making MP3s needs ffmpeg: winget install Gyan.FFmpeg, then restart Box-Deckspitter.', { type: 'warn', timeout: 6000 });
     const label = list.length === 1 ? `♪ ${list[0].name || list[0].title || 'audio'}` : `♪ ${list.length} tracks → MP3`;
     const row = this.addJobRow(label);
     try {

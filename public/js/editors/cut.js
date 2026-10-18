@@ -2,7 +2,7 @@
 // change how long they show), keyframes for position / scale / rotation / opacity / volume, chroma key, a
 // properties panel for the selected clip, and frame-exact MP4 export through the PC's ffmpeg.
 // Projects are saved as .boxcut (JSON) and use media files where they are on disk.
-// The media panel has a second tab, the media dump (Box-DocSpitter\media-dump): drag between it, the media
+// The media panel has a second tab, the media dump (Box-Deckspitter\media-dump): drag between it, the media
 // list and the timeline; files from the Files / BoxSpaces / recents panels come in by Shift+drag.
 
 import { BaseEditor } from './base.js';
@@ -705,7 +705,7 @@ export class CutEditor extends BaseEditor {
     this.dumpDir = '';
     this.dumpCount = h('span', { class: 'cut-dump-count' });
     this.tabProject = h('button', { class: 'cut-bin-tab on', onclick: () => this.showBin('project') }, 'Media');
-    this.tabDump = h('button', { class: 'cut-bin-tab cut-dump-target', title: 'The media dump (Box-DocSpitter\\media-dump) — drop things here to keep them', onclick: () => this.showBin('dump') }, 'Media dump', this.dumpCount);
+    this.tabDump = h('button', { class: 'cut-bin-tab cut-dump-target', title: 'The media dump (Box-Deckspitter\\media-dump) — drop things here to keep them', onclick: () => this.showBin('dump') }, 'Media dump', this.dumpCount);
     this.projActions = h('span', { class: 'cut-bin-actions' },
       h('button', { class: 'icon-btn', 'data-tip': 'Add video, audio or images', onclick: () => this.importDialog() }, icon('plus', 'sm')));
     this.dumpActions = h('span', { class: 'cut-bin-actions', hidden: true },
@@ -1593,7 +1593,7 @@ export class CutEditor extends BaseEditor {
     if (this.exporting) return;
     if (!this.allClips().length) return toast('Put something on the timeline first.', { type: 'warn' });
     const tools = await fetch('/api/tools', { headers: { 'X-BDS-Token': api.token } }).then((r) => r.json()).catch(() => ({}));
-    if (!tools.ffmpeg) return toast('Exporting needs ffmpeg: run "winget install Gyan.FFmpeg", then restart Box-DocSpitter.', { type: 'warn', timeout: 8000 });
+    if (!tools.ffmpeg) return toast('Exporting needs ffmpeg: run "winget install Gyan.FFmpeg", then restart Box-Deckspitter.', { type: 'warn', timeout: 8000 });
     const base = this.tab.path ? stripExt(basename(this.tab.path)) : stripExt(this.tab.title);
     if (toDump) {
       try { target = (await api.dumpReserve(`${base.replace(/^\.+/, '') || 'video'}.mp4`, 'media')).path; } catch (e) { return errorToast(e, 'Export failed'); }

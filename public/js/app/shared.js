@@ -1,12 +1,13 @@
-// Box-DocSpitter app shell: constants and helpers more than one part of App uses.
+// Box-Deckspitter app shell: constants and helpers more than one part of App uses.
 
 
 export const DISCORD_INVITE = 'https://discord.gg/3qxNWFErAV';
 
 // themes in the order the top-bar button cycles them: [id, short name, settings label, icon]
 export const THEMES = [
-  ['dark', 'Dark', 'Dark — neon dusk', 'moon'],
-  ['light', 'Light', 'Light — lavender', 'sun'],
+  ['dark', 'Dark', 'Dark — charcoal & lavender', 'moon'],
+  ['light', 'Light', 'Light — lilac & violet', 'sun'],
+  ['dusk', 'Neon dusk', 'Neon dusk — purple, pink & cyan', 'star'],
   ['pbj', 'PB&J', 'PB&J — grape & peanut butter', 'star'],
   ['custom', 'Custom', 'Custom — your own palette', 'palette'],
 ];
@@ -21,6 +22,7 @@ export const HIDDEN_THEMES = [
   ['temple', 'TEMPLE', 'TEMPLE — 16-colour VGA', 'star'],
   ['lubyanka', 'Lubyanka', 'Lubyanka — ministry terminal', 'file-text'],
   ['miami', 'Miami Hotline', 'Miami Hotline — 80s retrowave', 'sun'],
+  ['bluehour', 'Blue hour', 'Blue hour — navy & sunset coral', 'moon'],
 ];
 
 // side panels that can move between the right sidebar and the top bar

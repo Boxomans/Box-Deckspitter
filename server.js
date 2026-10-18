@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Box-DocSpitter — local server.
+ * Box-Deckspitter — local server.
  * Zero runtime dependencies: serves the UI, vendor libraries from node_modules,
  * and a small token-protected API for reading/writing files on this PC.
  * Binds to 127.0.0.1 only.
@@ -17,7 +17,7 @@ const { spawn, execFile, execFileSync } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const { pathToFileURL } = require('url');
 
-const APP_NAME = 'Box-DocSpitter';
+const APP_NAME = 'Box-Deckspitter';
 // Which copy of the app this is (from its folder, same as the taskbar app id): a starting copy only joins a
 // running server that is the same install, never another copy's (which would show that copy's files and music).
 const VERSION = require('./package.json').version;
@@ -39,7 +39,7 @@ function moveDumpFolder(from, to) {
     if (!fs.existsSync(to)) { fs.renameSync(from, to); return; }
     for (const n of fs.readdirSync(from)) if (!fs.existsSync(path.join(to, n))) fs.renameSync(path.join(from, n), path.join(to, n));
     if (!fs.readdirSync(from).length) fs.rmdirSync(from);
-  } catch (e) { console.error(`[Box-DocSpitter] couldn't move ${path.basename(from)} to ${path.basename(to)}: ${e.message}`); }
+  } catch (e) { console.error(`[Box-Deckspitter] couldn't move ${path.basename(from)} to ${path.basename(to)}: ${e.message}`); }
 }
 moveDumpFolder(path.join(ROOT, 'pdf-dump'), DOC_DUMP);
 moveDumpFolder(path.join(ROOT, 'image-dump'), DUMP);
@@ -269,6 +269,53 @@ async function listVersions(p) {
     out.push({ id: f, size: st.size, at: Date.parse(iso) || st.mtimeMs });
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+/** A song's genre and BPM from its ID3v2 tag (what BoxTape writes), reading only the frame headers and those two frames,
+ *  so a big cover picture is skipped over rather than read. Remembered per file until it changes. */
+const songTagCache = new Map();
+/** YouTube's video categories, which yt-dlp writes as the genre (every song is "Music"): not a real genre. */
+const YT_CATEGORY = /^(music|entertainment|people & blogs|film & animation|gaming|comedy|education|howto & style|news & politics|nonprofits & activism|science & technology|sports|travel & events|autos & vehicles|pets & animals)$/i;
+async function readSongTags(file) {
+  const st = await fsp.stat(file);
+  const hit = songTagCache.get(file);
+  if (hit && hit.mtime === st.mtimeMs) return hit.tags;
+  const tags = { genre: null, bpm: null };
+  const fh = await fsp.open(file, 'r');
+  try {
+    const read = async (pos, n) => { const b = Buffer.alloc(n); const { bytesRead } = await fh.read(b, 0, n, pos); return b.subarray(0, bytesRead); };
+    const head = await read(0, 10);
+    if (head.length === 10 && head.toString('latin1', 0, 3) === 'ID3' && (head[3] === 3 || head[3] === 4)) {
+      const v4 = head[3] === 4;
+      const syncsafe = (b, o) => (b[o] << 21) | (b[o + 1] << 14) | (b[o + 2] << 7) | b[o + 3];
+      const end = 10 + syncsafe(head, 6);
+      let pos = 10;
+      if (head[5] & 0x40) { const x = await read(10, 4); pos += v4 ? syncsafe(x, 0) : 4 + x.readUInt32BE(0); } // an extended header
+      const text = (b) => {
+        const body = b.subarray(1);
+        const s = b[0] === 1 || b[0] === 2 ? (b[0] === 2 || (body[0] === 0xfe && body[1] === 0xff)
+          ? Buffer.from(body.subarray(body[0] === 0xfe ? 2 : 0)).swap16().toString('utf16le') : body.subarray(body[0] === 0xff ? 2 : 0).toString('utf16le'))
+          : body.toString(b[0] === 3 ? 'utf8' : 'latin1');
+        return s.replace(/\0+$/, '').split('\0')[0].trim();
+      };
+      while (pos + 10 <= end && (tags.genre == null || tags.bpm == null)) {
+        const fr = await read(pos, 10);
+        if (fr.length < 10 || fr[0] === 0) break; // padding
+        const id = fr.toString('latin1', 0, 4);
+        const size = v4 ? syncsafe(fr, 4) : fr.readUInt32BE(4);
+        if (size <= 0 || pos + 10 + size > end) break;
+        if ((id === 'TCON' || id === 'TBPM') && size < 512) {
+          const v = text(await read(pos + 10, size));
+          if (id === 'TBPM') tags.bpm = Math.round(parseFloat(v)) || null;
+          // old-style "(17)" genre numbers are left off; so is YouTube's video category, which older downloads have
+          else tags.genre = v.replace(/^\(\d+\)/, '').trim().replace(YT_CATEGORY, '') || null;
+        }
+        pos += 10 + size;
+      }
+    }
+  } finally { await fh.close(); }
+  songTagCache.set(file, { mtime: st.mtimeMs, tags });
+  return tags;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +554,8 @@ function checkUrl(u) {
 const SOUNDS_DIR = path.join(DATA, 'sounds');
 const UI_SOUNDS = ['hover', 'click', 'type', 'open', 'close'];
 const CLIPS_FILE = path.join(DATA, 'clips.json');
+const TODOS_FILE = path.join(DATA, 'todos.json');
+const BEATS_FILE = path.join(DATA, 'beats.json');
 
 // ---------------------------------------------------------------------------
 // Client tracking (for auto-exit when the app window closes)
@@ -578,7 +627,7 @@ const { routes: mediaRoutes, findExe, tools, streamFile, runCapture, newJob, run
   readJSONBody, requirePath, spotify: { findOnYouTube: (it) => spotify.findOnYouTube(it) },
 });
 const { routes: spacesRoutes } = require('./spaces-server')({ IS_WIN, findExe, ok, psQuote, readJSONBody, requirePath, runCapture });
-const { routes: storageRoutes, drives, buildLauncher } = require('./storage-server')({
+const { routes: storageRoutes, drives, buildLauncher, migrateLauncher } = require('./storage-server')({
   APP_NAME, DATA, IS_WIN, PUBLIC, ROOT, listDrives, newJob, readJSONBody, requirePath, runCapture, startJob,
 });
 const { secretsReady, secrets, saveSecrets } = require('./secrets-store')({ APP_NAME, DATA, IS_WIN, readJSON, writeJSON });
@@ -801,6 +850,72 @@ const routes = {
     await writeJSON(CLIPS_FILE, next);
     return { ok: true };
   },
+  // ---- Todo: the lists (data/todos.json; erased by the factory reset)
+  'GET /api/todos': async () => {
+    const t = readJSON(TODOS_FILE, {});
+    return { lists: Array.isArray(t.lists) ? t.lists : [], active: typeof t.active === 'string' ? t.active : null };
+  },
+  'POST /api/todos': async (req) => {
+    const body = await readJSONBody(req);
+    const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+    const item = (x) => ({ id: str(x.id, 40), text: str(x.text, 2000), done: !!x.done, star: !!x.star,
+      due: /^\d{4}-\d{2}-\d{2}$/.test(x.due) ? x.due : null, created: +x.created || Date.now(), doneAt: +x.doneAt || null });
+    const lists = (Array.isArray(body.lists) ? body.lists : []).slice(0, 200).map((l) => ({
+      id: str(l.id, 40), name: str(l.name, 120) || 'List', items: (Array.isArray(l.items) ? l.items : []).slice(0, 5000).map(item),
+    }));
+    await writeJSON(TODOS_FILE, { lists, active: str(body.active, 40) || null });
+    return { ok: true };
+  },
+  // ---- BoxBeat: the beats (data/beats.json; erased by the factory reset)
+  'GET /api/beats': async () => {
+    const b = readJSON(BEATS_FILE, {});
+    return { beats: Array.isArray(b.beats) ? b.beats : [], active: typeof b.active === 'string' ? b.active : null, lines: Array.isArray(b.lines) ? b.lines : [] };
+  },
+  'POST /api/beats': async (req) => {
+    const body = await readJSONBody(req);
+    const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+    const num = (v, lo, hi, def) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : def);
+    const STEP_COUNTS = [8, 12, 16, 24, 32, 48, 64];
+    const hits = (a) => (Array.isArray(a) ? a : []).slice(0, 64).map((v) => num(v, 0, 1, 0));
+    // per pattern id: a drum row's hits, or a synth row's notes (start step, MIDI note, length in steps, velocity)
+    const perPattern = (o, each) => Object.fromEntries(Object.entries(o && typeof o === 'object' ? o : {}).slice(0, 16).map(([k, v]) => [str(k, 40), each(v)]));
+    const notes = (a) => (Array.isArray(a) ? a : []).slice(0, 512).filter((n) => n && typeof n === 'object')
+      .map((n) => ({ s: Math.round(num(n.s, 0, 63, 0)), n: Math.round(num(n.n, 0, 127, 60)), l: Math.round(num(n.l, 1, 64, 1)), v: num(n.v, 0, 1, 1) }));
+    const row = (r) => ({ id: str(r.id, 40), name: str(r.name, 80) || 'Sound', kind: r.kind === 'synth' ? 'synth' : 'drum',
+      sound: str(r.sound, 20) || null, synth: str(r.synth, 20) || null, view: Math.round(num(r.view, 12, 96, 48)),
+      sample: r.sample && typeof r.sample.path === 'string' ? { path: str(r.sample.path, 1024), name: str(r.sample.name, 200) } : null,
+      vol: num(r.vol, 0, 1.5, 0.8), pan: num(r.pan, -1, 1, 0), pitch: num(r.pitch, -24, 24, 0), mute: !!r.mute, solo: !!r.solo,
+      fx: { rev: num(r.fx?.rev, 0, 1, 0), dly: num(r.fx?.dly, 0, 1, 0), drive: num(r.fx?.drive, 0, 1, 0), tone: num(r.fx?.tone, -1, 1, 0) },
+      pats: perPattern(r.pats, hits), notes: perPattern(r.notes, notes),
+      ...(Array.isArray(r.steps) ? { steps: hits(r.steps) } : {}) });
+    const beats = (Array.isArray(body.beats) ? body.beats : []).slice(0, 500).map((b) => {
+      const patterns = (Array.isArray(b.patterns) ? b.patterns : []).slice(0, 16).map((p) => ({ id: str(p?.id, 40), name: str(p?.name, 12) || 'A',
+        steps: STEP_COUNTS.includes(+p?.steps) ? +p.steps : 16 }));
+      return {
+        id: str(b.id, 40), name: str(b.name, 120) || 'Beat', bpm: num(b.bpm, 40, 300, 120), swing: num(b.swing, 0, 0.75, 0),
+        steps: STEP_COUNTS.includes(+b.steps) ? +b.steps : 16, master: num(b.master, 0, 1.5, 0.8),
+        humanize: num(b.humanize, 0, 1, 0), comp: num(b.comp, 0, 1, 0), key: Math.round(num(b.key, 0, 11, 9)), scale: str(b.scale, 24) || 'minor',
+        patterns, pat: str(b.pat, 40), song: (Array.isArray(b.song) ? b.song : []).slice(0, 256).map((id) => str(id, 40)), songMode: !!b.songMode,
+        rows: (Array.isArray(b.rows) ? b.rows : []).slice(0, 64).map(row),
+      };
+    });
+    // saved lines: one row's worth of a pattern (hits, or notes relative to the key), kept to add to any pattern later
+    const lines = Array.isArray(body.lines) ? body.lines.slice(0, 500).map((l) => ({
+      id: str(l.id, 40), name: str(l.name, 80) || 'Line', kind: l.kind === 'synth' ? 'synth' : 'drum', sound: str(l.sound, 20) || null, synth: str(l.synth, 20) || null,
+      view: Math.round(num(l.view, 12, 96, 48)), steps: STEP_COUNTS.includes(+l.steps) ? +l.steps : 16, saved: num(l.saved, 0, 4e12, 0),
+      sample: l.sample && typeof l.sample.path === 'string' ? { path: str(l.sample.path, 1024), name: str(l.sample.name, 200) } : null,
+      vol: num(l.vol, 0, 1.5, 0.8), pan: num(l.pan, -1, 1, 0), pitch: num(l.pitch, -24, 24, 0),
+      fx: { rev: num(l.fx?.rev, 0, 1, 0), dly: num(l.fx?.dly, 0, 1, 0), drive: num(l.fx?.drive, 0, 1, 0), tone: num(l.fx?.tone, -1, 1, 0) },
+      hits: hits(l.hits),
+      // notes are stored as semitones above the key's root, so a line fits whatever key it's added to
+      notes: (Array.isArray(l.notes) ? l.notes : []).slice(0, 512).filter((n) => n && typeof n === 'object')
+        .map((n) => ({ s: Math.round(num(n.s, 0, 63, 0)), n: Math.round(num(n.n, -48, 72, 0)), l: Math.round(num(n.l, 1, 64, 1)), v: num(n.v, 0, 1, 1) })),
+    })) : (readJSON(BEATS_FILE, {}).lines || []);
+    await writeJSON(BEATS_FILE, { beats, active: str(body.active, 40) || null, lines });
+    return { ok: true };
+  },
+  // ---- the music player: a song's genre and BPM, from its MP3 tag
+  'GET /api/audio/tags': async (req, q) => readSongTags(requirePath(q.get('path'))),
   // Any file → Windows clipboard as a file (used by the clip tab to re-copy files).
   'POST /api/clip-file': async (req) => {
     const { path: p } = await readJSONBody(req);
@@ -863,7 +978,7 @@ const routes = {
       removed.push(path.basename(d.dir));
     }
     // Cache left behind by early versions that kept Electron's data in %APPDATA%.
-    if (IS_WIN && process.env.APPDATA) await fsp.rm(path.join(process.env.APPDATA, APP_NAME), { recursive: true, force: true }).catch(() => {});
+    if (IS_WIN && process.env.APPDATA) for (const name of [APP_NAME, 'Box-DocSpitter']) await fsp.rm(path.join(process.env.APPDATA, name), { recursive: true, force: true }).catch(() => {});
     console.log(`[${APP_NAME}] reset to clean state: ${removed.join(', ')}`);
     setTimeout(() => {
       if (SHELL_MODE) process.send({ type: 'relaunch' });
@@ -881,7 +996,7 @@ const routes = {
 // their routes
 Object.assign(routes, marketRoutes, weatherRoutes, translateRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, storageRoutes, aiRoutes);
 
-// Windows file associations ("open .pdf with Box-DocSpitter").
+// Windows file associations ("open .pdf with Box-Deckspitter").
 Object.assign(routes, require('./file-assoc')({ root: ROOT, isWin: IS_WIN, readJSONBody }));
 
 // Settings export / import (.zip: settings + the still-encrypted Secure notes) and the app PIN lock.
@@ -894,6 +1009,18 @@ Object.assign(routes, require('./settings-transfer')({
 
 // BoxSwap: profiles of files to hot-swap in a folder (kept in data/boxswap unless you pick another master folder).
 Object.assign(routes, require('./swap-server')({ readJSONBody, requirePath, dataDir: DATA, appRoot: ROOT }));
+
+// BoxStudio: scenes + recordings (MediaRecorder pieces streamed to disk, rewrapped by ffmpeg).
+Object.assign(routes, require('./studio-server')({ readBody, readJSONBody, requirePath, tools, dumpDir: DUMP, dataFile: path.join(DATA, 'studio.json'), readJSON, writeJSON, log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
+
+// BoxMap: offline map regions (PMTiles cut from the free OpenStreetMap build), search, pins.
+Object.assign(routes, require('./map-server')({ readJSONBody, newJob, startJob, dataDir: DATA, cacheDir: path.join(DATA, 'cache'), worldFile: path.join(PUBLIC, 'assets', 'map', 'world.json'), readJSON, writeJSON, version: VERSION, log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
+
+// BoxLog: log files (Windows, apps, games) and Windows event logs, read-only.
+Object.assign(routes, require('./log-server')({ requirePath, readJSONBody, readJSON, writeJSON, dataFile: path.join(DATA, 'log-sources.json'), extraDirs: [path.join(DATA, 'logs')] }));
+
+// BoxTerminal: shell sessions (PowerShell etc.) started in a folder you pick.
+Object.assign(routes, require('./terminal-server')({ requirePath, readJSONBody, findExe }));
 
 // Video editor export (frames from the page → ffmpeg).
 Object.assign(routes, require('./render-server')({ tools, readBody, readJSONBody, requirePath, newJob, startJob, runFfmpegJob, cacheDir: path.join(DATA, 'cache', 'video'), log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
@@ -921,6 +1048,7 @@ Object.assign(routes, require('./mail-server')({
   secrets,
   saveSecrets,
   readBody, readJSONBody, requirePath,
+  watchFile: path.join(DATA, 'mail-watch.json'), readJSON, writeJSON,
   dumpFile: (kind, name) => {
     if (!DUMPS[kind]) throw Object.assign(new Error('Unknown dump'), { status: 400 });
     const file = path.join(DUMPS[kind].dir, dumpName(name, kind));
@@ -991,7 +1119,7 @@ async function handleApi(req, res, urlObj) {
   const handler = routes[key];
   if (!handler) return fail(res, 404, 'Unknown endpoint');
   const result = await handler(req, q);
-  if (result && result.raw) return send(res, 200, result.raw, { 'Content-Type': result.type });
+  if (result && result.raw) return send(res, result.status || 200, result.raw, { 'Content-Type': result.type, ...(result.headers || {}) });
   if (result && result.httpStatus) return send(res, result.httpStatus, result.body);
   return ok(res, result);
 }
@@ -1090,7 +1218,7 @@ function ping(port) {
       let data = '';
       res.on('data', (c) => (data += c));
       // the same install with the same data folder; anything else (another copy, a test run) isn't ours to join
-      res.on('end', () => { try { const j = JSON.parse(data); resolve(j.app === APP_NAME && j.install === INSTALL_ID && j.data === (DATA_ARG ? 'custom' : 'default')); } catch { resolve(false); } });
+      res.on('end', () => { try { const j = JSON.parse(data); resolve((j.app === APP_NAME || j.app === 'Box-DocSpitter') && j.install === INSTALL_ID && j.data === (DATA_ARG ? 'custom' : 'default')); } catch { resolve(false); } });
     });
     r.on('error', () => resolve(false));
     r.on('timeout', () => { r.destroy(); resolve(false); });
@@ -1127,7 +1255,7 @@ function listen(port) {
   await writeJSON(path.join(DATA, 'session.json'), { port: PORT, pid: process.pid, startedAt }).catch(() => {});
   console.log(`[${APP_NAME}] v${VERSION} running at http://${HOST}:${PORT}/`);
   if (APP_MODE || SHELL_MODE) openAppWindow(fileArgs);
-  buildLauncher().catch((e) => console.error(`[${APP_NAME}] ${e.message}`));
+  buildLauncher().then(() => migrateLauncher()).catch((e) => console.error(`[${APP_NAME}] ${e.message}`));
 })().catch((e) => { console.error(e); process.exit(1); });
 
 if (SHELL_MODE) process.on('disconnect', () => shutdown('shell closed'));

@@ -216,7 +216,7 @@ export class VideoEditor extends BaseEditor {
     this.strip.width = w * dpr;
     this.strip.height = hgt * dpr;
     const ctx = this.strip.getContext('2d');
-    ctx.fillStyle = '#16121f';
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-2').trim() || '#17181b';
     ctx.fillRect(0, 0, this.strip.width, this.strip.height);
     const probe = document.createElement('video');
     probe.muted = true;
@@ -268,9 +268,9 @@ export class VideoEditor extends BaseEditor {
     const ctx = this.strip.getContext('2d');
     ctx.scale(dpr, dpr);
     const css = getComputedStyle(document.documentElement);
-    ctx.fillStyle = css.getPropertyValue('--bg-2').trim() || '#16121f';
+    ctx.fillStyle = css.getPropertyValue('--bg-2').trim() || '#17181b';
     ctx.fillRect(0, 0, w, hgt);
-    ctx.fillStyle = css.getPropertyValue('--accent').trim() || '#b48cff';
+    ctx.fillStyle = css.getPropertyValue('--accent').trim() || '#b3a1f2';
     for (let x = 0; x < w; x++) {
       const p = this.peaks[Math.floor((x / w) * this.peaks.length)] || 0;
       const bh = Math.max(1, p * (hgt - 6));

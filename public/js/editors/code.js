@@ -10,7 +10,7 @@ import { api } from '../core/api.js';
 let monacoPromise = null;
 
 /** The Monaco colour theme that goes with the app theme (its right-click menu and lists in the app theme's colours). */
-export const monacoTheme = (t) => withMenus(t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : t === 'kabuto' ? 'bds-kabuto' : t === 'temple' ? 'bds-temple' : t === 'lubyanka' ? 'bds-lubyanka' : t === 'miami' ? 'bds-miami' : 'bds-dark');
+export const monacoTheme = (t) => withMenus(t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'dusk' ? 'bds-dusk' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : t === 'kabuto' ? 'bds-kabuto' : t === 'temple' ? 'bds-temple' : t === 'lubyanka' ? 'bds-lubyanka' : t === 'miami' ? 'bds-miami' : t === 'bluehour' ? 'bds-bluehour' : 'bds-dark');
 
 const allDefs = {}; // every Monaco theme as first defined, so the menu colours can be laid over it again
 /** Any CSS colour → #rrggbb (Monaco wants hex; theme variables may be rgb() or a name). */
@@ -30,10 +30,15 @@ function withMenus(name) {
   if (!window.monaco || !def) return name;
   const cs = getComputedStyle(document.documentElement);
   const v = (n) => hex(cs.getPropertyValue(n));
-  const acc = v('--accent'), bg = v('--bg-3'), fg = v('--text'), line = v('--line-2');
+  const acc = v('--accent'), acc2 = v('--accent-2'), bg = v('--bg-3'), fg = v('--text'), line = v('--line-2');
   window.monaco.editor.defineTheme(name, {
     ...def,
     colors: {
+      // the accent bits a theme doesn't colour itself (cursor, selection, find, brackets) in the app theme's accents
+      'editorLineNumber.activeForeground': acc, 'editorCursor.foreground': acc2,
+      'editor.selectionBackground': acc + '38', 'editor.inactiveSelectionBackground': acc + '1f', 'editor.selectionHighlightBackground': acc + '1a',
+      'editor.findMatchBackground': acc2 + '55', 'editor.findMatchHighlightBackground': acc + '33',
+      'editorIndentGuide.activeBackground1': acc + '40', 'editorBracketMatch.background': acc + '22', 'editorBracketMatch.border': acc + '66',
       ...def.colors,
       'menu.background': bg, 'menu.foreground': fg, 'menu.border': line, 'menu.separatorBackground': line,
       'menu.selectionBackground': acc + '3d', 'menu.selectionForeground': fg, 'menu.selectionBorder': acc + '00',
@@ -137,27 +142,15 @@ function defineThemes(monaco) {
       'diffEditor.insertedLineBackground': '#3ddc841c', 'diffEditor.insertedTextBackground': '#3ddc8455', 'diffEditor.removedLineBackground': '#ff4d6d1f', 'diffEditor.removedTextBackground': '#ff4d6d5c', 'diffEditorGutter.insertedLineBackground': '#3ddc8430', 'diffEditorGutter.removedLineBackground': '#ff4d6d33', 'diffEditorOverview.insertedForeground': '#3ddc84aa', 'diffEditorOverview.removedForeground': '#ff4d6daa', 'diffEditor.diagonalFill': '#ffffff10',
       'editor.foreground': '#e7e1f3',
       'editorLineNumber.foreground': '#433a58',
-      'editorLineNumber.activeForeground': '#b48cff',
-      'editorCursor.foreground': '#ff7ac6',
-      'editor.selectionBackground': '#b48cff38',
-      'editor.inactiveSelectionBackground': '#b48cff1f',
-      'editor.selectionHighlightBackground': '#b48cff1a',
       'editor.lineHighlightBackground': '#ffffff05',
       'editor.lineHighlightBorder': '#00000000',
-      'editor.findMatchBackground': '#ff7ac655',
-      'editor.findMatchHighlightBackground': '#b48cff33',
       'editorIndentGuide.background1': '#ffffff0b',
-      'editorIndentGuide.activeBackground1': '#b48cff40',
-      'editorBracketMatch.background': '#b48cff22',
-      'editorBracketMatch.border': '#b48cff66',
       'editorWidget.background': '#1c1726',
       'editorWidget.border': '#352c49',
       'editorSuggestWidget.background': '#1c1726',
-      'editorSuggestWidget.selectedBackground': '#b48cff2e',
       'editorHoverWidget.background': '#1c1726',
       'input.background': '#15111d',
       'input.border': '#352c49',
-      'focusBorder': '#b48cff88',
       'minimap.background': '#0d0a13',
       'scrollbarSlider.background': '#2c244088',
       'scrollbarSlider.hoverBackground': '#3d3358aa',
@@ -165,9 +158,56 @@ function defineThemes(monaco) {
       'editorOverviewRuler.border': '#00000000',
     },
   };
-  // Neon dusk (the default) has its own colours: sunset keywords, gold strings, cyan numbers on blue-hour navy.
+  // Charcoal (the default dark) has its own quiet colours: soft lavender keywords, sand strings, slate-teal numbers on grey.
   // The purple set above stays the base the other dark themes build on.
-  const duskDef = {
+  const charcoalDef = {
+    base: 'vs-dark', inherit: true,
+    rules: [
+      ...shared,
+      { token: 'comment', foreground: '6b6d73', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'b9a8f4' },
+      { token: 'keyword.json', foreground: 'b9a8f4' },
+      { token: 'string', foreground: 'c9b285' },
+      { token: 'string.key.json', foreground: 'cbbdf8' },
+      { token: 'string.value.json', foreground: 'c9b285' },
+      { token: 'number', foreground: '8fb3b9' },
+      { token: 'regexp', foreground: '8fb3b9' },
+      { token: 'type', foreground: '9eaecb' },
+      { token: 'type.identifier', foreground: '9eaecb' },
+      { token: 'tag', foreground: 'b9a8f4' },
+      { token: 'metatag', foreground: 'a5a6ab' },
+      { token: 'attribute.name', foreground: '8fb3b9' },
+      { token: 'attribute.value', foreground: 'c9b285' },
+      { token: 'delimiter', foreground: '8b8d93' },
+      { token: 'key', foreground: 'cbbdf8' },
+      { token: 'variable', foreground: 'e4e4e6' },
+      { token: 'variable.predefined', foreground: 'd39ae6' },
+      { token: 'constant', foreground: '8fb3b9' },
+    ],
+    colors: {
+      ...darkDef.colors,
+      'editor.background': '#151618', 'editorGutter.background': '#151618', 'minimap.background': '#151618',
+      'editor.foreground': '#e4e4e6',
+      'editorLineNumber.foreground': '#3c3e43', 'editorLineNumber.activeForeground': '#a5a6ab',
+      'editorCursor.foreground': '#b3a1f2',
+      'editor.selectionBackground': '#ffffff1f', 'editor.inactiveSelectionBackground': '#ffffff12', 'editor.selectionHighlightBackground': '#ffffff10',
+      'editor.findMatchBackground': '#b3a1f244', 'editor.findMatchHighlightBackground': '#b3a1f226',
+      'editorIndentGuide.activeBackground1': '#ffffff26',
+      'editorBracketMatch.background': '#ffffff14', 'editorBracketMatch.border': '#ffffff40',
+      'editorWidget.background': '#242528', 'editorWidget.border': '#37383d',
+      'editorSuggestWidget.background': '#242528', 'editorSuggestWidget.selectedBackground': '#ffffff14',
+      'editorHoverWidget.background': '#242528',
+      'input.background': '#1d1e21', 'input.border': '#37383d',
+      'focusBorder': '#b3a1f288',
+      'scrollbarSlider.background': '#30313588', 'scrollbarSlider.hoverBackground': '#44454aaa',
+      'editorBracketHighlight.foreground1': '#c9b285', 'editorBracketHighlight.foreground2': '#b49bb1', 'editorBracketHighlight.foreground3': '#8fb3b9',
+    },
+  };
+  monaco.editor.defineTheme('bds-dark', charcoalDef);
+  // Neon dusk: the purple set (its cursor, selection and find colours come from the theme's accents)
+  monaco.editor.defineTheme('bds-dusk', darkDef);
+  // Blue hour (hidden): sunset keywords, gold strings, cyan numbers on blue-hour navy
+  const blueHourDef = {
     base: 'vs-dark', inherit: true,
     rules: [
       ...shared,
@@ -209,7 +249,7 @@ function defineThemes(monaco) {
       'scrollbarSlider.background': '#262d4288', 'scrollbarSlider.hoverBackground': '#353e5aaa',
     },
   };
-  monaco.editor.defineTheme('bds-dark', duskDef);
+  monaco.editor.defineTheme('bds-bluehour', blueHourDef);
   themeDefs = { dark: darkDef };
   // PB&J: the dark syntax colours on a plum background
   monaco.editor.defineTheme('bds-pbj', {
@@ -398,26 +438,26 @@ function defineThemes(monaco) {
   monaco.editor.defineTheme('bds-light', themeDefs.light = {
     base: 'vs', inherit: true,
     rules: [
-      { token: 'comment', foreground: '8d84a0', fontStyle: 'italic' },
-      { token: 'keyword', foreground: '7a4fd6' },
-      { token: 'string', foreground: 'c2367f' },
-      { token: 'string.key.json', foreground: '7a4fd6' },
-      { token: 'string.value.json', foreground: 'c2367f' },
-      { token: 'number', foreground: '0f8580' },
-      { token: 'tag', foreground: '7a4fd6' },
-      { token: 'attribute.name', foreground: '0f8580' },
-      { token: 'attribute.value', foreground: 'c2367f' },
-      { token: 'key', foreground: '7a4fd6' },
+      { token: 'comment', foreground: '8a8894', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '5b49a0' },
+      { token: 'string', foreground: '8a5a2b' },
+      { token: 'string.key.json', foreground: '5b49a0' },
+      { token: 'string.value.json', foreground: '8a5a2b' },
+      { token: 'number', foreground: '2f7a76' },
+      { token: 'tag', foreground: '5b49a0' },
+      { token: 'attribute.name', foreground: '2f7a76' },
+      { token: 'attribute.value', foreground: '8a5a2b' },
+      { token: 'key', foreground: '5b49a0' },
     ],
     colors: {
-      'editor.background': '#fbf9fe',
+      'editor.background': '#fafafc',
       'diffEditor.insertedLineBackground': '#16a34a17', 'diffEditor.insertedTextBackground': '#16a34a3d', 'diffEditor.removedLineBackground': '#e11d4817', 'diffEditor.removedTextBackground': '#e11d4840', 'diffEditorGutter.insertedLineBackground': '#16a34a26', 'diffEditorGutter.removedLineBackground': '#e11d4826', 'diffEditorOverview.insertedForeground': '#16a34aaa', 'diffEditorOverview.removedForeground': '#e11d48aa',
-      'editorLineNumber.foreground': '#c0b6d2',
-      'editorLineNumber.activeForeground': '#7a4fd6',
-      'editorCursor.foreground': '#d6439a',
-      'editor.selectionBackground': '#7a4fd630',
-      'editor.lineHighlightBackground': '#7a4fd608',
-      'minimap.background': '#fbf9fe',
+      'editorLineNumber.foreground': '#c3c1cb',
+      'editorLineNumber.activeForeground': '#55535f',
+      'editorCursor.foreground': '#6c5ab0',
+      'editor.selectionBackground': '#6c5ab02e',
+      'editor.lineHighlightBackground': '#00000006',
+      'minimap.background': '#fafafc',
     },
   });
 }
@@ -888,30 +928,38 @@ export function formatXml(xml) {
   return out.join('\n') + '\n';
 }
 
+/** The Markdown colours from the app theme that's on (hidden and custom themes included). */
+function pageColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n, fb) => { const x = cs.getPropertyValue(n).trim(); return x ? hex(x) : fb; };
+  return { bg: v('--bg-1', '#100d16'), text: v('--text', '#e7e1f3'), rule: v('--line', '#2a2238'), a: v('--accent-strong', '#c7a6ff'), code: v('--bg-3', '#1e1929'),
+    pre: v('--bg-0', '#0b0910'), quote: v('--text-2', '#b0a6c4'), bar: v('--accent', '#b48cff'), cell: v('--line-2', '#352c49'), th: v('--bg-3', '#1c1726') };
+}
+
 export function markdownCss(theme = 'dark') {
   const dark = theme !== 'light';
-  // neon dusk (the default) gets its own navy & sunset; the other dark themes keep the purple set
+  // charcoal (the default dark) has its own greys; every other dark theme uses the page's own colours
   const P = theme === 'dark'
-    ? { bg: '#0d1019', text: '#eceef5', rule: '#232a3d', a: '#ffb184', code: '#181d2c', pre: '#090b12', quote: '#a7aec4', bar: '#ff9663', cell: '#2b3248', th: '#181d2c' }
-    : { bg: '#100d16', text: '#e7e1f3', rule: '#2a2238', a: '#c7a6ff', code: '#1e1929', pre: '#0b0910', quote: '#b0a6c4', bar: '#b48cff', cell: '#352c49', th: '#1c1726' };
+    ? { bg: '#17181b', text: '#e4e4e6', rule: '#2c2d31', a: '#cbbdf8', code: '#242528', pre: '#111214', quote: '#a5a6ab', bar: '#b3a1f2', cell: '#37383d', th: '#242528' }
+    : pageColors();
   return `
   :root { color-scheme: ${dark ? 'dark' : 'light'}; }
   html, body { margin: 0; background: ${dark ? P.bg : '#ffffff'}; }
-  .md { max-width: 820px; margin: 0 auto; padding: 32px 36px 60px; font: 15px/1.7 Inter, 'Segoe UI', system-ui, sans-serif; color: ${dark ? P.text : '#221c2e'}; }
+  .md { max-width: 820px; margin: 0 auto; padding: 32px 36px 60px; font: 15px/1.7 Inter, 'Segoe UI', system-ui, sans-serif; color: ${dark ? P.text : '#1f1e25'}; }
   .md h1, .md h2, .md h3, .md h4 { line-height: 1.25; margin: 1.6em 0 0.6em; font-weight: 600; }
-  .md h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid ${dark ? P.rule : '#e7e1f0'}; }
-  .md h2 { font-size: 1.45em; padding-bottom: .25em; border-bottom: 1px solid ${dark ? P.rule : '#eee8f5'}; }
+  .md h1 { font-size: 2em; padding-bottom: .3em; border-bottom: 1px solid ${dark ? P.rule : '#e6e5eb'}; }
+  .md h2 { font-size: 1.45em; padding-bottom: .25em; border-bottom: 1px solid ${dark ? P.rule : '#eeedf2'}; }
   .md h1:first-child, .md h2:first-child { margin-top: 0; }
-  .md a { color: ${dark ? P.a : '#6a3fc6'}; }
-  .md code { font: 0.88em 'IBM Plex Mono', Consolas, monospace; background: ${dark ? P.code : '#f3eff9'}; padding: .15em .4em; border-radius: 4px; }
-  .md pre { background: ${dark ? P.pre : '#f6f3fa'}; border: 1px solid ${dark ? P.rule : '#e7e1f0'}; padding: 14px 16px; border-radius: 8px; overflow: auto; }
+  .md a { color: ${dark ? P.a : '#5b49a0'}; }
+  .md code { font: 0.88em 'IBM Plex Mono', Consolas, monospace; background: ${dark ? P.code : '#f2f2f5'}; padding: .15em .4em; border-radius: 4px; }
+  .md pre { background: ${dark ? P.pre : '#f6f6f8'}; border: 1px solid ${dark ? P.rule : '#e6e5eb'}; padding: 14px 16px; border-radius: 8px; overflow: auto; }
   .md pre code { background: none; padding: 0; }
-  .md blockquote { margin: 1em 0; padding: .2em 1em; color: ${dark ? P.quote : '#5a5070'}; border-left: 3px solid ${dark ? P.bar : '#7a4fd6'}; }
+  .md blockquote { margin: 1em 0; padding: .2em 1em; color: ${dark ? P.quote : '#55535f'}; border-left: 3px solid ${dark ? P.bar : '#6c5ab0'}; }
   .md table { border-collapse: collapse; margin: 1em 0; }
-  .md th, .md td { border: 1px solid ${dark ? P.cell : '#ddd5ea'}; padding: 6px 12px; }
-  .md th { background: ${dark ? P.th : '#f6f3fa'}; }
+  .md th, .md td { border: 1px solid ${dark ? P.cell : '#dddce4'}; padding: 6px 12px; }
+  .md th { background: ${dark ? P.th : '#f6f6f8'}; }
   .md img { max-width: 100%; }
-  .md hr { border: 0; height: 1px; background: ${dark ? P.cell : '#e2dcec'}; margin: 2em 0; }
+  .md hr { border: 0; height: 1px; background: ${dark ? P.cell : '#e3e2e9'}; margin: 2em 0; }
   .md li input[type=checkbox] { margin-right: .5em; }
   .md ul:has(> li > input[type=checkbox]) { list-style: none; padding-left: 1.2em; }
   @media print { html, body { background: #fff; } .md { color: #000; padding: 0; } }

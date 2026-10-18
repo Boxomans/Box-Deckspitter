@@ -16,7 +16,7 @@ const err = (status, message) => Object.assign(new Error(message), { status });
 
 module.exports = function createRender({ tools, readBody, readJSONBody, requirePath, newJob, startJob, runFfmpegJob, cacheDir, log }) {
   const sessions = new Map();
-  const needFfmpeg = () => { if (!tools().ffmpeg) throw err(501, 'This needs ffmpeg (winget install Gyan.FFmpeg), then restart Box-DocSpitter.'); };
+  const needFfmpeg = () => { if (!tools().ffmpeg) throw err(501, 'This needs ffmpeg (winget install Gyan.FFmpeg), then restart Box-Deckspitter.'); };
   /** A cache file named after the source file and its size + date, so edits to the source make a new one. */
   async function cacheFor(src, suffix) {
     const st = await fsp.stat(src);
@@ -44,7 +44,7 @@ module.exports = function createRender({ tools, readBody, readJSONBody, requireP
 
   function startFfmpeg(s) {
     const ff = tools().ffmpeg;
-    if (!ff) throw err(501, 'Exporting needs ffmpeg (winget install Gyan.FFmpeg), then restart Box-DocSpitter.');
+    if (!ff) throw err(501, 'Exporting needs ffmpeg (winget install Gyan.FFmpeg), then restart Box-Deckspitter.');
     const args = ['-hide_banner', '-y', '-f', 'image2pipe', '-framerate', String(s.fps), '-c:v', 'mjpeg', '-i', 'pipe:0'];
     if (s.audio) args.push('-i', s.audio);
     args.push('-map', '0:v');
@@ -58,7 +58,72 @@ module.exports = function createRender({ tools, readBody, readJSONBody, requireP
     s.proc.stdin.on('error', () => { /* ffmpeg quit early; reported by finish */ });
   }
 
+  // ---------------------------------------------------------------- BoxConvert
+  /** `dir\name`, or `dir\name (2)` and so on when that's taken: a conversion never overwrites anything. */
+  function freePath(dir, name) {
+    const ext = path.extname(name), stem = path.basename(name, ext);
+    let p = path.join(dir, name);
+    for (let i = 2; fs.existsSync(p); i++) p = path.join(dir, `${stem} (${i})${ext}`);
+    return p;
+  }
+  const safeName = (n) => String(n || 'converted').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '').slice(0, 180) || 'converted';
+  /** What ffmpeg is told for each target: the video ones keep the picture and the sound, the audio ones drop the picture. */
+  const MEDIA_OUT = {
+    mp4: ['-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart'],
+    mov: ['-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k'],
+    mkv: ['-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k'],
+    webm: ['-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libvpx-vp9', '-crf', '32', '-b:v', '0', '-row-mt', '1', '-c:a', 'libopus', '-b:a', '128k'],
+    gif: ['-vf', "fps=15,scale='min(720,iw)':-2:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse", '-loop', '0'],
+    mp3: ['-vn', '-map', '0:a:0', '-c:a', 'libmp3lame', '-q:a', '2'],
+    wav: ['-vn', '-map', '0:a:0', '-c:a', 'pcm_s16le'],
+    m4a: ['-vn', '-map', '0:a:0', '-c:a', 'aac', '-b:a', '192k'],
+    ogg: ['-vn', '-map', '0:a:0', '-c:a', 'libvorbis', '-q:a', '6'],
+    opus: ['-vn', '-map', '0:a:0', '-c:a', 'libopus', '-b:a', '128k'],
+    flac: ['-vn', '-map', '0:a:0', '-c:a', 'flac'],
+  };
+
   return {
+    // A free file name for a converted file (dir: where it goes); folder: make it a new folder instead (PDF pages).
+    'POST /api/convert/name': async (req) => {
+      const { dir, name, folder } = await readJSONBody(req);
+      const d = requirePath(dir);
+      const p = freePath(d, safeName(name));
+      if (folder) await fsp.mkdir(p, { recursive: true });
+      return { path: p };
+    },
+    // A video or sound file in another format, through ffmpeg, as a job (/api/job for progress). Never overwrites.
+    'POST /api/convert/media': async (req) => {
+      const { path: src, to, dir } = await readJSONBody(req);
+      needFfmpeg();
+      const file = requirePath(src);
+      const args = MEDIA_OUT[String(to)];
+      if (!args) throw err(400, 'Can’t convert to that.');
+      if (!fs.existsSync(file)) throw err(404, 'That file isn’t there any more.');
+      const out = freePath(dir ? requirePath(dir) : path.dirname(file), `${safeName(path.parse(file).name)}.${to}`);
+      const job = newJob(`Converting ${path.basename(file)}`);
+      job.result = { path: out };
+      const r = startJob(job, () => new Promise((resolve, reject) => {
+        const p = spawn(tools().ffmpeg, ['-hide_banner', '-n', '-i', file, ...args, out], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        job.cancel = () => p.kill();
+        let msg = '', duration = 0;
+        p.stderr.on('data', (d) => {
+          const s = String(d);
+          msg = (msg + s).slice(-3000);
+          const dm = /Duration: (\d+):(\d+):([\d.]+)/.exec(s);
+          if (dm && !duration) duration = +dm[1] * 3600 + +dm[2] * 60 + +dm[3];
+          const tm = /time=(\d+):(\d+):([\d.]+)/.exec(s);
+          if (tm && duration) job.progress = Math.min(0.99, (+tm[1] * 3600 + +tm[2] * 60 + +tm[3]) / duration);
+        });
+        p.on('error', reject);
+        p.on('close', async (code) => {
+          if (code === 0) return resolve();
+          await fsp.rm(out, { force: true }).catch(() => {});
+          const last = msg.split('\n').map((l) => l.trim()).filter(Boolean).slice(-1)[0] || `ffmpeg stopped (${code})`;
+          reject(new Error(/matches no streams|does not contain any stream|Output file .* does not contain/i.test(msg) ? (args.includes('-vn') ? 'It has no sound to keep.' : 'It has no picture to keep.') : last));
+        });
+      }));
+      return { ...r, path: out };
+    },
     // A video the browser can't play (MKV/HEVC, AVI, WMV, ProRes…) gets an H.264 copy for editing; cached.
     'POST /api/render/proxy': async (req) => {
       const { path: src } = await readJSONBody(req);
@@ -153,7 +218,7 @@ module.exports = function createRender({ tools, readBody, readJSONBody, requireP
       // never overwrite a file the project itself uses
       const outAbs = path.resolve(requirePath(output)).toLowerCase();
       if ((inputs || []).some((p) => path.resolve(String(p)).toLowerCase() === outAbs)) throw err(400, 'That’s one of the project’s own media files. Pick another name for the export.');
-      if (!tools().ffmpeg) throw err(501, 'Exporting needs ffmpeg (winget install Gyan.FFmpeg), then restart Box-DocSpitter.');
+      if (!tools().ffmpeg) throw err(501, 'Exporting needs ffmpeg (winget install Gyan.FFmpeg), then restart Box-Deckspitter.');
       const w = Math.round(Number(width));
       const h = Math.round(Number(height));
       if (!(w >= 16 && w <= 7680 && h >= 16 && h <= 7680)) throw err(400, 'Bad video size.');

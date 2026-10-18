@@ -250,7 +250,7 @@ export class TickerEditor extends BaseEditor {
       : 'Couldn’t get prices. Check the internet connection; it tries again every 30 seconds.'));
   }
 
-  colorOf(n) { const c = PALETTE[n % PALETTE.length]; return c.startsWith('--') ? css(c) || '#b48cff' : c; }
+  colorOf(n) { const c = PALETTE[n % PALETTE.length]; return c.startsWith('--') ? css(c) || '#b3a1f2' : c; }
 
   fmtTime(t, tz, withDate) {
     const o = { timeZone: tz || 'America/New_York', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' };

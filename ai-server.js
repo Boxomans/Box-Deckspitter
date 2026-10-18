@@ -19,7 +19,7 @@ const PROVIDERS = {
   openrouter: {
     name: 'OpenRouter', company: 'OpenRouter', secret: 'openrouterKey', env: 'OPENROUTER_API_KEY', keyRe: /^sk-or-[\w-]{20,}$/, keyHint: 'OpenRouter keys start with sk-or-',
     chat: 'https://openrouter.ai/api/v1/chat/completions', models: 'https://openrouter.ai/api/v1/models', usage: true,
-    headers: { 'X-Title': 'Box-DocSpitter' },
+    headers: { 'X-Title': 'Box-Deckspitter' },
   },
   perplexity: {
     name: 'Perplexity', company: 'Perplexity', secret: 'perplexityKey', env: 'PERPLEXITY_API_KEY', keyRe: /^pplx-[\w-]{20,}$/, keyHint: 'Perplexity keys start with pplx-',

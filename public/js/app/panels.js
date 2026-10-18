@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the left side panel: switching it, the Toolbox and Recent.
+// Box-Deckspitter app shell, the left side panel: switching it, the Toolbox and Recent.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear, timeAgo } from '../core/dom.js';
@@ -34,6 +34,7 @@ export class PanelsPart {
     else if (name === 'tools') this.renderToolsPanel();
     else if (name === 'settings') this.renderSettings();
     else if (name === 'calendar') this.calendar.render(this.sidepanel);
+    else if (name === 'alerts') this.mailAlerts.render(this.sidepanel);
     else if (name === 'spaces') this.ensureSpaces().then((s) => s.render(this.sidepanel));
     this.active?.editor?.onShow?.();
   }
@@ -41,17 +42,20 @@ export class PanelsPart {
   /** The Toolbox at the foot of the left rail: every tool in one list. */
   renderToolsPanel() {
     const p = clear(this.sidepanel);
-    const row = ([ic, key, sub, open, cls = '']) => {
-      const b = h('button', { class: `file-row tools-row ${cls}`, title: sub }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
+    const row = ([ic, key, sub, open, cls = ''], movable = false) => {
+      const b = h('button', { class: `file-row tools-row ${cls}`, title: movable ? `${sub} · drag to reorder` : sub, dataset: movable ? { key } : {} }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
         h('span', { class: 'tools-text' }, h('span', { class: 'fr-name' }, this.toolName(key)), h('span', { class: 'tools-sub' }, sub)));
       b.addEventListener('click', open);
       b._find = `${this.toolName(key)} ${key} ${sub}`.toLowerCase();
       return b;
     };
-    // the home page's tools in your order (Music, Browser and BoxSpaces fill the window), then the rest
+    // Every tool in one list with its own order, dragged into place here and kept apart from the home page's. Until you move
+    // one it starts out like the home page (its tools in your order there, then the Toolbox-only ones); new tools go last.
+    const all = [...this.ordered('tools', this.homeTools(), (c) => c[1]),
+      ...TOOLS.filter((t) => t.toolbox && offered(t)).map((t) => [t.icon, t.name, t.toolbox, () => this.newDocument(t.mode)])];
+    const mine = !!(this.settings.cardOrder || {}).toolbox;
     const groups = [
-      ['Tools', [...this.ordered('tools', this.homeTools(), (c) => c[1]),
-        ...TOOLS.filter((t) => t.toolbox && offered(t)).map((t) => [t.icon, t.name, t.toolbox, () => this.newDocument(t.mode)])]],
+      ['Tools', this.ordered('toolbox', all, (c) => c[1])],
       ['More', [
         ['play', 'Video player', 'just watch something', () => this.openVideoPlayer()],
         ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
@@ -61,7 +65,8 @@ export class PanelsPart {
       ]],
     ];
     const list = h('div', { class: 'file-list tools-list' });
-    for (const [title, items] of groups) list.append(h('div', { class: 'tools-group' }, title), ...items.map(row));
+    for (const [title, items] of groups) list.append(h('div', { class: 'tools-group' }, title), ...items.map((it) => row(it, title === 'Tools')));
+    this.sortableTools(list);
     const filter = h('input', { type: 'search', class: 'tools-filter', placeholder: 'Filter tools…', spellcheck: false });
     filter.addEventListener('input', () => {
       const q = filter.value.trim().toLowerCase();
@@ -80,9 +85,44 @@ export class PanelsPart {
       if (g && !g.gameOver && sub && this.panel === 'tools') sub.textContent = this.splashLine(g.splashes);
     }).catch(() => {});
     p.append(h('div', { class: 'panel-head' }, 'Toolbox', h('div', { class: 'grow' }),
+      mine ? h('button', { class: 'icon-btn', 'data-tip': 'Put the tools back in their usual order', onclick: () => {
+        const { toolbox, ...rest } = this.settings.cardOrder || {};
+        void toolbox;
+        this.saveSettings({ cardOrder: rest });
+        this.renderToolsPanel();
+      } }, icon('refresh', 'sm')) : null,
       h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
     h('div', { class: 'tools-filter-box' }, filter),
     h('div', { class: 'panel-body' }, list));
+  }
+
+  /** Drag the Toolbox's tools into the order you like; it's saved on its own, apart from the home page's order. */
+  sortableTools(list) {
+    const rows = () => [...list.querySelectorAll('.tools-row[data-key]')];
+    let dragged = null;
+    const clearMarks = () => { for (const r of rows()) r.classList.remove('drop-before', 'drop-after'); };
+    for (const row of rows()) {
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => { dragged = row; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/bds-tool', row.dataset.key); });
+      row.addEventListener('dragend', () => { dragged = null; row.classList.remove('dragging'); clearMarks(); });
+      row.addEventListener('dragover', (e) => {
+        if (!dragged || dragged === row) return;
+        e.preventDefault();
+        const r = row.getBoundingClientRect();
+        clearMarks();
+        row.classList.add(e.clientY > r.top + r.height / 2 ? 'drop-after' : 'drop-before');
+      });
+      row.addEventListener('drop', (e) => {
+        if (!dragged || dragged === row) return;
+        e.preventDefault();
+        const after = row.classList.contains('drop-after');
+        clearMarks();
+        if (after) row.after(dragged); else row.before(dragged);
+        this.saveSettings({ cardOrder: { ...(this.settings.cardOrder || {}), toolbox: rows().map((r) => r.dataset.key) } });
+        // the reset button shows up once there's an order of your own
+        if (this.panel === 'tools' && !this.sidepanel.querySelector('.panel-head .icon-btn[data-tip^="Put the tools"]')) this.renderToolsPanel();
+      });
+    }
   }
 
   async renderRecentPanel() {

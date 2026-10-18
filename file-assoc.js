@@ -1,8 +1,8 @@
-// Windows file associations for Box-DocSpitter (per user, HKCU only: no admin rights, fully removable).
+// Windows file associations for Box-Deckspitter (per user, HKCU only: no admin rights, fully removable).
 //
 // Since Windows 10, apps can't make themselves the default: they register as a *handler* and the user
 // confirms the default in Settings. So this registers ProgIDs + OpenWithProgids + RegisteredApplications
-// capabilities (which makes Box-DocSpitter show up in Settings → Default apps), and can open that page.
+// capabilities (which makes Box-Deckspitter show up in Settings → Default apps), and can open that page.
 
 'use strict';
 
@@ -12,7 +12,9 @@ const os = require('os');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 
-const APP = 'Box-DocSpitter';
+const APP = 'Box-Deckspitter';
+const LEGACY_APP = 'Box-DocSpitter'; // the name before the rebrand: its Windows registration is cleaned up along with the new one
+const LAUNCHER = 'Box-Deckspitter.exe';
 const KEY = 'BoxDocSpitter';
 const CAP = `HKCU:\\Software\\${KEY}\\Capabilities`;
 
@@ -53,10 +55,10 @@ const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 module.exports = function createAssoc({ root, isWin, readJSONBody }) {
   const electron = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
   const mainJs = path.join(root, 'electron', 'main.js');
-  const launcher = path.join(root, `${APP}.exe`);
-  const icon = path.join(root, 'public', 'assets', 'icon.ico');
+  const launcher = path.join(root, LAUNCHER);
+  const icon = path.join(root, 'public', 'assets', 'icon-lavender.ico');
 
-  /** The command Windows runs to open a file with Box-DocSpitter. */
+  /** The command Windows runs to open a file with Box-Deckspitter. */
   function openCommand() {
     if (fs.existsSync(electron)) return `"${electron}" "${mainJs}" "%1"`;
     return `"${launcher}" "%1"`;
@@ -94,8 +96,9 @@ foreach ($k in Get-ChildItem 'HKCU:\\Software\\Classes' -ErrorAction SilentlyCon
 }
 Remove-Item -LiteralPath 'HKCU:\\Software\\${KEY}' -Recurse -Force -ErrorAction SilentlyContinue
 Remove-ItemProperty -LiteralPath 'HKCU:\\Software\\RegisteredApplications' -Name '${APP}' -ErrorAction SilentlyContinue
+Remove-ItemProperty -LiteralPath 'HKCU:\\Software\\RegisteredApplications' -Name '${LEGACY_APP}' -ErrorAction SilentlyContinue
 $app = 'HKCU:\\Software\\Classes\\Applications\\electron.exe'
-if ((Get-ItemProperty -LiteralPath $app -ErrorAction SilentlyContinue).FriendlyAppName -eq '${APP}') { Remove-Item -LiteralPath $app -Recurse -Force -ErrorAction SilentlyContinue }
+if (@('${APP}', '${LEGACY_APP}') -contains (Get-ItemProperty -LiteralPath $app -ErrorAction SilentlyContinue).FriendlyAppName) { Remove-Item -LiteralPath $app -Recurse -Force -ErrorAction SilentlyContinue }
 `;
 
   // Tell Explorer that file associations changed so icons and "Open with" refresh.
@@ -160,7 +163,7 @@ New-ItemProperty -Path "$app\\SupportedTypes" -Name '.${ext}' -Value '' -Propert
     return status();
   }
 
-  /** Opens Settings → Default apps on Box-DocSpitter's own page (Windows 11), or the general page. */
+  /** Opens Settings → Default apps on Box-Deckspitter's own page (Windows 11), or the general page. */
   function openDefaultApps() {
     const uri = `ms-settings:defaultapps?registeredAppUser=${encodeURIComponent(APP)}`;
     spawn('cmd.exe', ['/c', 'start', '', uri], { detached: true, stdio: 'ignore', windowsHide: true }).unref();

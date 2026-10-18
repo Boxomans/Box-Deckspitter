@@ -1,4 +1,4 @@
-// bds-scan: fast folder-size scanner for StoragePeek (Box-DocSpitter).
+// bds-scan: fast folder-size scanner for StoragePeek (Box-Deckspitter).
 // Compiled on first use with the .NET Framework compiler that ships with Windows (C# 5, no downloads).
 //
 // Reads whole directories at a time with GetFileInformationByHandleEx (sizes come back with the listing,

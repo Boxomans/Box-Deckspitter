@@ -1,4 +1,4 @@
-// Box-DocSpitter.exe: starts the app window (drag files onto it to open them). If the app window runtime
+// Box-Deckspitter.exe: starts the app window (drag files onto it to open them). If the app window runtime
 // (node_modules) is missing it sets it up first. The app rebuilds the .exe from this file whenever it changes,
 // with the C# compiler that ships with Windows (see buildLauncher in server.js). C# 5: no $"" strings.
 using System;
@@ -8,11 +8,11 @@ using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("Box-DocSpitter")]
-[assembly: AssemblyProduct("Box-DocSpitter")]
+[assembly: AssemblyTitle("Box-Deckspitter")]
+[assembly: AssemblyProduct("Box-Deckspitter")]
 
 static class Launcher {
-  const string Title = "Box-DocSpitter";
+  const string Title = "Box-Deckspitter";
 
   [STAThread]
   static int Main(string[] argv) {
@@ -30,16 +30,16 @@ static class Launcher {
       // Setup path: node_modules is missing or incomplete, so it needs Node.js and internet once.
       if (!HasNode(dir) && !InstallNode(dir)) return 1;
       if (!Directory.Exists(Path.Combine(dir, "node_modules")))
-        Run("cmd.exe", "/c title Box-DocSpitter setup && echo Installing Box-DocSpitter (one time)... && npm install --no-audit --no-fund && echo Done. && timeout /t 3", dir, true, true);
+        Run("cmd.exe", "/c title Box-Deckspitter setup && echo Installing Box-Deckspitter (one time)... && npm install --no-audit --no-fund && echo Done. && timeout /t 3", dir, true, true);
       if (!File.Exists(electron) && File.Exists(Path.Combine(dir, @"node_modules\electron\install.js")))
         // npm sometimes skips Electron's download step; fetch the app window runtime once.
-        Run("cmd.exe", @"/c title Box-DocSpitter setup && echo Downloading the app window (one time)... && node node_modules\electron\install.js", dir, true, true);
+        Run("cmd.exe", @"/c title Box-Deckspitter setup && echo Downloading the app window (one time)... && node node_modules\electron\install.js", dir, true, true);
 
       if (File.Exists(electron)) Run(electron, app + args, dir, false, true);
       else Run("node.exe", Quote(Path.Combine(dir, "server.js")) + " --app" + args, dir, false, false); // last resort: browser app window
       return 0;
     } catch (Exception e) {
-      MessageBox.Show("Box-DocSpitter couldn't start:\r\n\r\n" + e.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+      MessageBox.Show("Box-Deckspitter couldn't start:\r\n\r\n" + e.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
       return 1;
     }
   }
@@ -51,10 +51,10 @@ static class Launcher {
    * carry on with the setup. No winget (old Windows 10): offer the download page instead.
    */
   static bool InstallNode(string dir) {
-    const string missing = "Box-DocSpitter's app files (the node_modules folder) are missing. They're downloaded once with " +
-      "Node.js, which isn't installed.\r\n\r\n(Or copy the whole Box-DocSpitter folder again, including node_modules: then nothing needs installing.)";
+    const string missing = "Box-Deckspitter's app files (the node_modules folder) are missing. They're downloaded once with " +
+      "Node.js, which isn't installed.\r\n\r\n(Or copy the whole Box-Deckspitter folder again, including node_modules: then nothing needs installing.)";
     if (Run("cmd.exe", "/c where winget >nul 2>nul", dir, true, false) != 0) {
-      if (MessageBox.Show(missing + "\r\n\r\nOpen nodejs.org to download Node.js? Install the LTS version, then start Box-DocSpitter again.",
+      if (MessageBox.Show(missing + "\r\n\r\nOpen nodejs.org to download Node.js? Install the LTS version, then start Box-Deckspitter again.",
           Title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
         Process.Start("https://nodejs.org/en/download");
       return false;
@@ -63,7 +63,7 @@ static class Launcher {
         "in a console window. Windows may ask for permission, and winget may ask you to accept its terms there. " +
         "Setup then carries on by itself.", Title, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
       return false;
-    int code = Run("cmd.exe", "/c title Installing Node.js for Box-DocSpitter && winget install --id OpenJS.NodeJS.LTS --exact --source winget" +
+    int code = Run("cmd.exe", "/c title Installing Node.js for Box-Deckspitter && winget install --id OpenJS.NodeJS.LTS --exact --source winget" +
       " || (echo. & echo Node.js didn't install. & pause & exit /b 1)", dir, true, true);
     // the installer puts Node.js on the PATH for new programs, not this one: point this one (and the setup it runs) at it
     foreach (string root in new string[] { Environment.GetEnvironmentVariable("ProgramFiles"), Environment.GetEnvironmentVariable("ProgramW6432"),
@@ -77,8 +77,8 @@ static class Launcher {
     }
     if (HasNode(dir)) return true;
     MessageBox.Show(code == 0
-      ? "Node.js is installed, but Windows hasn't made it available yet. Start Box-DocSpitter again (or restart the PC first if it still says this)."
-      : "Node.js wasn't installed. You can install it yourself from nodejs.org (the LTS version) and start Box-DocSpitter again.",
+      ? "Node.js is installed, but Windows hasn't made it available yet. Start Box-Deckspitter again (or restart the PC first if it still says this)."
+      : "Node.js wasn't installed. You can install it yourself from nodejs.org (the LTS version) and start Box-Deckspitter again.",
       Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
     return false;
   }

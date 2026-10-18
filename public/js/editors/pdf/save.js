@@ -119,7 +119,7 @@ async function vectorSave(ed, L, fontkit, pages) {
   }
 
   if (ed.fields?.length && ed.formDirty && base) await applyForm(ed, out, fonts);
-  out.setProducer('Box-DocSpitter');
+  out.setProducer('Box-Deckspitter');
   out.setModificationDate(new Date());
   return out.save({ useObjectStreams: true });
 }
@@ -162,7 +162,7 @@ async function rasterSave(ed, L, fontkit, pages) {
     const map = (x, y) => { const [u, v] = rawToDisp(x, y, pm.w, pm.h, r); return [u, Hd - v]; };
     await drawAnnots(page, pm, { map, angleOffset: -r }, L, out, fonts, images, ed);
   }
-  out.setProducer('Box-DocSpitter');
+  out.setProducer('Box-Deckspitter');
   return out.save();
 }
 

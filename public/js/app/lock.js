@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the app PIN lock and the setup questions that guard keys.
+// Box-Deckspitter app shell, the app PIN lock and the setup questions that guard keys.
 // Methods of App (app.js mixes this class into it).
 
 import { $, h, clear } from '../core/dom.js';
@@ -53,7 +53,7 @@ export class LockPart {
     pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
     this.appLockEl = h('div', { class: 'applock' }, h('div', { class: 'applock-card' },
       h('div', { class: 'applock-logo' }, icon('lock', 'xl')),
-      h('div', { class: 'applock-title' }, 'Box-DocSpitter is locked'),
+      h('div', { class: 'applock-title' }, 'Box-Deckspitter is locked'),
       pin, err, go,
       h('div', { class: 'applock-hint faint' }, 'Forgot the PIN? Close the app, delete data\\applock.json in its folder, and start it again.')));
     document.body.append(this.appLockEl);
@@ -79,8 +79,8 @@ export class LockPart {
       this.appLockOn = on;
       clear(box).append(h('h4', {}, 'Security'),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, on
-          ? 'Box-DocSpitter asks for your PIN when it starts. This hides the app; it doesn’t encrypt your files (Secure notes are encrypted on their own).'
-          : 'Lock Box-DocSpitter with a PIN when it starts, after it’s been idle, or when Windows locks.'),
+          ? 'Box-Deckspitter asks for your PIN when it starts. This hides the app; it doesn’t encrypt your files (Secure notes are encrypted on their own).'
+          : 'Lock Box-Deckspitter with a PIN when it starts, after it’s been idle, or when Windows locks.'),
         h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
           h('button', { class: 'btn sm', onclick: async () => { if (await this.setAppPin(on)) draw(); } }, icon('lock', 'sm'), on ? 'Change PIN…' : 'Set a PIN…'),
           on ? h('button', { class: 'btn sm ghost', onclick: async () => { if (await this.removeAppPin()) draw(); } }, 'Turn off') : null,
@@ -123,9 +123,9 @@ export class LockPart {
       ...(on ? [{ name: 'current', label: 'Current PIN' }] : []),
       { name: 'pin', label: 'New PIN (4+ letters, numbers or symbols)', check: (x) => (!/^\S{4,32}$/u.test(x) ? 'A PIN is 4 to 32 letters, numbers or symbols (no spaces).' : null) },
       { name: 'pin2', label: 'New PIN again', check: (x, all) => (x !== all.pin ? 'The two PINs don’t match.' : null) },
-    ], on ? null : 'Box-DocSpitter will ask for it every time it starts.');
+    ], on ? null : 'Box-Deckspitter will ask for it every time it starts.');
     if (!v) return false;
-    try { await api.post('/api/applock/set', { current: v.current, pin: v.pin }); toast(on ? 'App PIN changed' : 'App PIN set — it’s asked for when Box-DocSpitter starts', { type: 'ok', timeout: 3000 }); return true; } catch (e) { errorToast(e); return false; }
+    try { await api.post('/api/applock/set', { current: v.current, pin: v.pin }); toast(on ? 'App PIN changed' : 'App PIN set — it’s asked for when Box-Deckspitter starts', { type: 'ok', timeout: 3000 }); return true; } catch (e) { errorToast(e); return false; }
   }
 
   async removeAppPin() {

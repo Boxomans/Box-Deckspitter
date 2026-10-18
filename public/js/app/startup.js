@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, after start-up: update checks, what's new, the welcome.
+// Box-Deckspitter app shell, after start-up: update checks, what's new, the welcome.
 // Methods of App (app.js mixes this class into it).
 
 import { $, h } from '../core/dom.js';
@@ -20,7 +20,7 @@ export class StartupPart {
       if (r && !r.seen) {
         fetch('/api/update/seen', { method: 'POST', headers: H }).catch(() => {});
         if (r.manualRollback) toast(`Went back to ${r.version}.`, { type: 'ok', timeout: 6000 });
-        else if (!r.ok) toast(`The update to ${r.version} didn’t work (${r.reason}), so Box-DocSpitter is still on ${r.from || 'the previous version'}. Nothing of yours was touched.`, { type: 'warn', timeout: 14000 });
+        else if (!r.ok) toast(`The update to ${r.version} didn’t work (${r.reason}), so Box-Deckspitter is still on ${r.from || 'the previous version'}. Nothing of yours was touched.`, { type: 'warn', timeout: 14000 });
       }
     } catch { /* browser mode or old server */ }
     this.launchUpdateCheck();
@@ -48,7 +48,7 @@ export class StartupPart {
       const info = await r.json();
       if (!info.newer) return;
       const git = st.gitCheckout;
-      toast(git ? `Update ${info.latest} is on GitHub — this is a git copy, so update it with git pull.` : `Box-DocSpitter ${info.latest} is available (you have ${info.current}).`, {
+      toast(git ? `Update ${info.latest} is on GitHub — this is a git copy, so update it with git pull.` : `Box-Deckspitter ${info.latest} is available (you have ${info.current}).`, {
         timeout: 0, closable: true,
         action: git ? null : { label: 'Update…', fn: () => { this.showPanel('settings'); setTimeout(() => [...document.querySelectorAll('.settings-group h4')].find((x) => x.textContent === 'Updates')?.scrollIntoView({ block: 'start', behavior: this.settings.animations === false ? 'auto' : 'smooth' }), 150); } },
       });
@@ -79,7 +79,7 @@ export class StartupPart {
     modal({
       title: 'Welcome',
       body: h('div', { class: 'welcome' },
-        h('div', { class: 'welcome-head' }, h('img', { src: '/assets/icon.svg', alt: '' }), h('div', {}, h('b', {}, 'BOX//DOCSPITTER'), h('span', { class: 'faint mono' }, `v${window.BDS?.version}`))),
+        h('div', { class: 'welcome-head' }, h('img', { src: '/assets/icon.svg', alt: '' }), h('div', {}, h('b', {}, 'BOX//DECKSPITTER'), h('span', { class: 'faint mono' }, `v${window.BDS?.version}`))),
         h('p', {}, 'Your own document workstation. Everything runs on this PC; your files stay here.'),
         h('ul', {},
           h('li', {}, h('b', {}, 'Start something'), ' on the home screen makes a new doc, PDF, sheet or picture. ', h('b', {}, 'Tools'), ' has the form filler, BoxMail, BoxDiff and the rest.'),

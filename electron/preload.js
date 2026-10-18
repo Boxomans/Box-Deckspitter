@@ -29,4 +29,9 @@ contextBridge.exposeInMainWorld('bdsShell', {
   onMainWindow: (cb) => { ipcRenderer.on('bds:main-window', () => cb()); },
   // a Win+Shift+Q screenshot was saved into the media dump ({ path, name, width, height })
   onSnip: (cb) => { ipcRenderer.on('bds:snip-saved', (_e, info) => cb(info)); },
+  // BoxStudio: { op: 'sources' | 'hotkeys' | 'unhotkeys' | 'busy', … } → { ok, … }, and its global hotkeys being pressed
+  studio: (req) => ipcRenderer.invoke('bds:studio', req),
+  onStudioKey: (cb) => { ipcRenderer.on('bds:studio-key', (_e, action) => cb(action)); },
+  // an area picked with the record-this-area key: { displayId, kind, title, x, y, w, h } as fractions of that display
+  onStudioArea: (cb) => { ipcRenderer.on('bds:studio-area', (_e, area) => cb(area)); },
 });

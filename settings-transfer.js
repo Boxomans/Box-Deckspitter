@@ -67,7 +67,7 @@ module.exports = function createTransfer({ root, data, version, settings, saveSe
     }
     const bg = s.bgImage?.file;
     if (bg && BG_RE.test(`background/${bg}`) && fs.existsSync(path.join(BGS, bg))) zip.file(`background/${bg}`, fs.readFileSync(path.join(BGS, bg)));
-    zip.file('manifest.json', JSON.stringify({ kind: KIND, app: 'Box-DocSpitter', version, exported: new Date().toISOString(), secureNotes: files.includes('notes.bdsv') }, null, 2));
+    zip.file('manifest.json', JSON.stringify({ kind: KIND, app: 'Box-Deckspitter', version, exported: new Date().toISOString(), secureNotes: files.includes('notes.bdsv') }, null, 2));
     const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     const tmp = `${out}.${crypto.randomBytes(4).toString('hex')}.tmp`;
     await fsp.writeFile(tmp, buf);
@@ -79,14 +79,14 @@ module.exports = function createTransfer({ root, data, version, settings, saveSe
   async function readExport(file) {
     const st = await fsp.stat(file).catch(() => null);
     if (!st?.isFile()) throw err(404, 'That file isn’t there any more.');
-    if (st.size > MAX_ZIP) throw err(400, 'That’s far too big to be a Box-DocSpitter export.');
+    if (st.size > MAX_ZIP) throw err(400, 'That’s far too big to be a Box-Deckspitter export.');
     let zip;
     try { zip = await JSZip.loadAsync(await fsp.readFile(file)); } catch { throw err(400, 'That isn’t a .zip file.'); }
     const allowed = new Set(['manifest.json', 'settings.json', ...NOTE_FILES.map((n) => `secure-notes/${n}`)]);
     const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name);
     let manifest;
     try { manifest = JSON.parse(await zip.file('manifest.json').async('string')); } catch { manifest = null; }
-    if (manifest?.kind !== KIND) throw err(400, 'That .zip isn’t a Box-DocSpitter export.');
+    if (manifest?.kind !== KIND) throw err(400, 'That .zip isn’t a Box-Deckspitter export.');
     if (names.some((n) => !allowed.has(n) && !BG_RE.test(n))) throw err(400, 'That export has files in it that don’t belong; not importing it.');
     let s = {};
     if (zip.file('settings.json')) {

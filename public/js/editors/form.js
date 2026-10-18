@@ -224,7 +224,7 @@ export class FormEditor extends PdfEditor {
     }
     const res = await modal({
       title: 'My info', wide: true,
-      body: h('div', {}, h('p', { class: 'dim' }, 'Saved only on this PC (Box-DocSpitter\\data\\settings.json) and used to autofill forms. Leave anything blank. Don’t store ID numbers here.'), grid),
+      body: h('div', {}, h('p', { class: 'dim' }, 'Saved only on this PC (Box-Deckspitter\\data\\settings.json) and used to autofill forms. Leave anything blank. Don’t store ID numbers here.'), grid),
       buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Save', value: 'ok', primary: true }],
     });
     if (res !== 'ok') return false;

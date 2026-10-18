@@ -1,5 +1,5 @@
 @echo off
-rem Creates Box-DocSpitter shortcuts on your Desktop and in the Start menu, pointing at this folder.
+rem Creates Box-Deckspitter shortcuts on your Desktop and in the Start menu, pointing at this folder.
 rem Run it again if you move or copy the folder somewhere else.
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -8,20 +8,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ws = New-Object -ComObject WScript.Shell;" ^
   "$targets = @([Environment]::GetFolderPath('Desktop'), (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'));" ^
   "foreach ($t in $targets) {" ^
-  "  $lnk = $ws.CreateShortcut((Join-Path $t 'Box-DocSpitter.lnk'));" ^
+  "  $old = Join-Path $t 'Box-DocSpitter.lnk'; if (Test-Path $old) { Remove-Item $old -ErrorAction SilentlyContinue }" ^
+  "  $lnk = $ws.CreateShortcut((Join-Path $t 'Box-Deckspitter.lnk'));" ^
   "  if (Test-Path $electron) {" ^
   "    $lnk.TargetPath = $electron;" ^
   "    $lnk.Arguments = '\"' + (Join-Path $dir 'electron\main.js') + '\"';" ^
   "  } else {" ^
-  "    $lnk.TargetPath = Join-Path $dir 'Box-DocSpitter.exe';" ^
+  "    $lnk.TargetPath = Join-Path $dir 'Box-Deckspitter.exe';" ^
   "    $lnk.Arguments = '';" ^
   "  }" ^
   "  $lnk.WorkingDirectory = $dir;" ^
-  "  $lnk.IconLocation = (Join-Path $dir 'public\assets\icon.ico') + ',0';" ^
-  "  $lnk.Description = 'Box-DocSpitter - local docs, PDFs, text and code';" ^
+  "  $lnk.IconLocation = (Join-Path $dir 'public\assets\icon-lavender.ico') + ',0';" ^
+  "  $lnk.Description = 'Box-Deckspitter - local docs, PDFs, text and code';" ^
   "  $lnk.Save();" ^
   "  Write-Host ('Created ' + $lnk.FullName)" ^
   "}"
 echo.
-echo Done. Look for Box-DocSpitter on your Desktop and in the Start menu.
+echo Done. Look for Box-Deckspitter on your Desktop and in the Start menu.
 pause

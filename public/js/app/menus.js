@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, the menu bar.
+// Box-Deckspitter app shell, the menu bar.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear } from '../core/dom.js';
@@ -107,7 +107,7 @@ export class MenusPart {
       { label: 'Close all tabs', disabled: !this.tabs.length, action: () => this.closeAll() },
       { sep: true },
       { label: 'New window', icon: 'window', action: () => api.newWindow().catch(errorToast) },
-      { label: 'Quit Box-DocSpitter', icon: 'power', action: () => this.quit() },
+      { label: 'Quit Box-Deckspitter', icon: 'power', action: () => this.quit() },
     ];
   }
 
@@ -190,7 +190,7 @@ export class MenusPart {
     return [
       { label: 'Keyboard shortcuts', icon: 'keyboard', shortcut: 'F1', action: () => this.showShortcuts() },
       { label: 'README', icon: 'markdown', action: () => this.showReadme() },
-      { label: 'About Box-DocSpitter', icon: 'info', action: () => this.showAbout() },
+      { label: 'About Box-Deckspitter', icon: 'info', action: () => this.showAbout() },
       { sep: true },
       { label: 'Join the Discord', icon: 'external', action: () => window.open(DISCORD_INVITE, '_blank', 'noopener') },
     ];

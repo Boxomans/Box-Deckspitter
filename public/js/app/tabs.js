@@ -1,4 +1,4 @@
-// Box-DocSpitter app shell, tabs: the strip, dragging and tearing off, pinning, the title and status bar.
+// Box-Deckspitter app shell, tabs: the strip, dragging and tearing off, pinning, the title and status bar.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear, uid, dirname } from '../core/dom.js';
@@ -217,6 +217,9 @@ export class TabsPart {
       setTimeout(() => tab.editor?.focus?.(), 0);
     }
     if (!tab) this.refreshHome();
+    // blue hour's rays follow the home page's sun: move them now, not on their next timer tick (they lingered and flickered)
+    this._rays?.place?.();
+    requestAnimationFrame(() => this._rays?.place?.());
   }
 
   async closeTab(tab, { force = false } = {}) {
@@ -231,6 +234,8 @@ export class TabsPart {
       if (choice === 'cancel' || choice == null) return false;
       if (choice === 'save' && !(await this.save(tab))) return false;
     }
+    // a tool that's busy (a recording) gets a say first
+    if (!force && tab.editor?.beforeClose && !(await tab.editor.beforeClose())) return false;
     const idx = this.tabs.indexOf(tab);
     if (tab.pinned && !this.quitting) { tab.pinned = false; this.savePinned(); }
     try { tab.editor?.destroy?.(); } catch (e) { console.warn(e); }
@@ -306,7 +311,7 @@ export class TabsPart {
 
   updateTitle() {
     const t = this.active;
-    document.title = t ? `${t.dirty ? '● ' : ''}${t.title} — Box-DocSpitter` : 'Box-DocSpitter';
+    document.title = t ? `${t.dirty ? '● ' : ''}${t.title} — Box-Deckspitter` : 'Box-Deckspitter';
     const el = clear($('#doc-title'));
     const tool = TOOL_MODES.includes(t?.mode) && !t.path;
     if (t) el.append(...[h('b', {}, t.title), t.path ? h('span', {}, '  ·  ' + dirname(t.path)) : tool ? null : h('span', {}, '  ·  not saved yet')].filter(Boolean));
@@ -319,7 +324,7 @@ export class TabsPart {
     if (!tab) {
       L.append(h('span', { class: 'sb-item mode' }, 'home'), h('span', { class: 'sb-item' }, `${this.tabs.length} open`));
       const root = this.info?.root || '';
-      // the last two folders are enough to tell copies apart ("Desktop\\Box-DocSpitter", "E:\\Box-DocSpitter")
+      // the last two folders are enough to tell copies apart ("Desktop\\Box-Deckspitter", "E:\\Box-Deckspitter")
       const short = root.split(/[\\/]/).filter(Boolean).slice(-2).join('\\');
       R.append(h('span', { class: 'sb-item' }, h('span', { class: 'sb-dot' }), 'local · 127.0.0.1'),
         root ? h('button', { class: 'sb-item sb-root', title: `Running from ${root}\nClick to open the folder`, onclick: () => api.reveal(root) }, icon('folder', 'sm'), short) : null,

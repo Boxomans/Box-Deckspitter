@@ -1,15 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#b48cff"/>
-      <stop offset="1" stop-color="#ff7ac6"/>
-    </linearGradient>
-  </defs>
-  <path d="M12 3h40l9 9v40l-9 9H12l-9-9V12z" fill="#140f1d"/>
-  <path d="M12.3 3.75h39.4l8.55 8.55v39.4l-8.55 8.55H12.3l-8.55-8.55V12.3z" fill="none" stroke="url(#g)" stroke-opacity=".6" stroke-width="1.5" stroke-linejoin="miter"/>
-  <path d="M19 14h17l9 9v28H19z" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="miter"/>
-  <path d="M36 14v9h9" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="miter"/>
-  <path d="M23.5 29.5l4.5 3.5-4.5 3.5" fill="none" stroke="#e8e2f4" stroke-width="2.6" stroke-linecap="square" stroke-linejoin="miter"/>
-  <path d="M31.5 36.5h6.5M24.5 43h8.5" stroke="#e8e2f4" stroke-width="2.6" stroke-linecap="square"/>
-  <rect x="36.5" y="40" width="4.5" height="6" fill="#6ee7e0"/>
+  <path d="M12 3h40l9 9v40l-9 9H12l-9-9V12z" fill="#1c1d21"/>
+  <path d="M12.3 3.75h39.4l8.55 8.55v39.4l-8.55 8.55H12.3l-8.55-8.55V12.3z" fill="none" stroke="#b3a1f2" stroke-opacity=".85" stroke-width="1.5" stroke-linejoin="miter"/>
+  <path d="M19 14h17l9 9v28H19z" fill="none" stroke="#f0eff5" stroke-width="3" stroke-linejoin="miter"/>
+  <path d="M36 14v9h9" fill="none" stroke="#f0eff5" stroke-width="3" stroke-linejoin="miter"/>
+  <path d="M23.5 29.5l4.5 3.5-4.5 3.5" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="square" stroke-linejoin="miter"/>
+  <path d="M31.5 36.5h6.5M24.5 43h8.5" stroke="#ffffff" stroke-width="2.6" stroke-linecap="square"/>
+  <rect x="36.5" y="40" width="4.5" height="6" fill="#c6b6fb"/>
 </svg>

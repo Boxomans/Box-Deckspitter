@@ -1,4 +1,4 @@
-// Thin client for the local Box-DocSpitter server API.
+// Thin client for the local Box-Deckspitter server API.
 
 const TOKEN = window.BDS?.token || '';
 const enc = encodeURIComponent;
@@ -14,7 +14,7 @@ async function request(method, url, { json, body, raw } = {}) {
   try {
     res = await fetch(url, { method, headers, body: payload });
   } catch (e) {
-    const err = new Error('Cannot reach the Box-DocSpitter server. Is it still running?');
+    const err = new Error('Cannot reach the Box-Deckspitter server. Is it still running?');
     err.offline = true;
     throw err;
   }
