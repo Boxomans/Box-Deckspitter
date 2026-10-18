@@ -67,7 +67,7 @@ export class SettingsPart {
     try {
       if (replace.checked) await window.bdsShell?.notes?.({ op: 'lock', hard: true });
       // close the game first so its progress can't be saved over the imported one
-      for (const t of this.tabs.filter((x) => x.mode === 'tomcat')) await this.closeTab(t);
+      for (const t of this.tabs.filter((x) => x.mode === 'tomcat' || x.mode === 'strike')) await this.closeTab(t);
       await this.stopTomcatFlight();
       const r = await api.post('/api/setup/import', { path: file, replaceNotes: replace.checked });
       toast(`Imported${r.notes === 'imported' ? ' (with Secure notes)' : r.notes === 'kept' ? ' — your Secure notes here were kept' : ''}. Restarting the window…`, { type: 'ok', timeout: 2500 });
@@ -111,6 +111,12 @@ export class SettingsPart {
           this.userFontSettings(),
           this.backgroundSettings(),
           check('animations', 'Animations (hovers, fades, sliding panels)', () => this.applyLook()),
+          (() => { // off unless switched on
+            const cb = h('input', { type: 'checkbox' });
+            cb.checked = !!s.fpsCounter;
+            cb.addEventListener('change', () => { this.saveSettings({ fpsCounter: cb.checked }); this.fps?.sync(); });
+            return h('label', { class: 'check' }, cb, 'FPS counter (a small box you can drag anywhere)');
+          })(),
           check('sounds', 'Sounds', () => this.syncSoundButton()),
           check('soundTyping', 'Typing sounds'),
           check('soundHover', 'Hover sounds'),

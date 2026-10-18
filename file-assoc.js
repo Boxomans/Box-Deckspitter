@@ -13,9 +13,6 @@ const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 
 const APP = 'Box-Deckspitter';
-// Registered before 1.1.1 under the old name: moved over once (see migrate()), cleaned up along with the new one.
-const LEGACY_APP = 'Box-DocSpitter';
-const LEGACY_KEY = 'BoxDocSpitter';
 const LAUNCHER = 'Box-Deckspitter.exe';
 const KEY = 'BoxDeckspitter';
 const CAP = `HKCU:\\Software\\${KEY}\\Capabilities`;
@@ -56,7 +53,6 @@ function runPs(script, timeout = 60000) {
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 module.exports = function createAssoc({ root, data, isWin, readJSONBody }) {
-  const NOTICE = path.join(data, '.file-types-renamed'); // "choose the default apps again", shown once
   const electron = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
   const mainJs = path.join(root, 'electron', 'main.js');
   const launcher = path.join(root, LAUNCHER);
@@ -90,20 +86,18 @@ if (-not $cmd) { foreach ($k in Get-ChildItem 'HKCU:\\Software\\Classes' -ErrorA
 
   /** Remove everything this app registered (keeps whatever else the user has). */
   const removeScript = `
-foreach ($k in Get-ChildItem 'HKCU:\\Software\\Classes' -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '${KEY}.*' -or $_.PSChildName -like '${LEGACY_KEY}.*' }) { Remove-Item -LiteralPath $k.PSPath -Recurse -Force -ErrorAction SilentlyContinue }
+foreach ($k in Get-ChildItem 'HKCU:\\Software\\Classes' -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '${KEY}.*' }) { Remove-Item -LiteralPath $k.PSPath -Recurse -Force -ErrorAction SilentlyContinue }
 foreach ($k in Get-ChildItem 'HKCU:\\Software\\Classes' -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like '.*' }) {
   $owp = Join-Path $k.PSPath 'OpenWithProgids'
   if (Test-Path -LiteralPath $owp) {
-    $props = (Get-ItemProperty -LiteralPath $owp).PSObject.Properties | Where-Object { $_.Name -like '${KEY}.*' -or $_.Name -like '${LEGACY_KEY}.*' }
+    $props = (Get-ItemProperty -LiteralPath $owp).PSObject.Properties | Where-Object { $_.Name -like '${KEY}.*' }
     foreach ($p in $props) { Remove-ItemProperty -LiteralPath $owp -Name $p.Name -ErrorAction SilentlyContinue }
   }
 }
 Remove-Item -LiteralPath 'HKCU:\\Software\\${KEY}' -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath 'HKCU:\\Software\\${LEGACY_KEY}' -Recurse -Force -ErrorAction SilentlyContinue
 Remove-ItemProperty -LiteralPath 'HKCU:\\Software\\RegisteredApplications' -Name '${APP}' -ErrorAction SilentlyContinue
-Remove-ItemProperty -LiteralPath 'HKCU:\\Software\\RegisteredApplications' -Name '${LEGACY_APP}' -ErrorAction SilentlyContinue
 $app = 'HKCU:\\Software\\Classes\\Applications\\electron.exe'
-if (@('${APP}', '${LEGACY_APP}') -contains (Get-ItemProperty -LiteralPath $app -ErrorAction SilentlyContinue).FriendlyAppName) { Remove-Item -LiteralPath $app -Recurse -Force -ErrorAction SilentlyContinue }
+if ((Get-ItemProperty -LiteralPath $app -ErrorAction SilentlyContinue).FriendlyAppName -eq '${APP}') { Remove-Item -LiteralPath $app -Recurse -Force -ErrorAction SilentlyContinue }
 `;
 
   // Tell Explorer that file associations changed so icons and "Open with" refresh.
@@ -174,37 +168,6 @@ New-ItemProperty -Path "$app\\SupportedTypes" -Name '.${ext}' -Value '' -Propert
     spawn('cmd.exe', ['/c', 'start', '', uri], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
   }
 
-  /**
-   * Once, after the rename: file types registered under the old name are registered again under the new one.
-   * Windows forgets a default app whose registration changes and only the user can choose it again, so a
-   * notice says so (Settings → Default apps).
-   */
-  async function migrate() {
-    const out = await runPs(`
-$r = @{}
-$fa = Get-ItemProperty -Path 'HKCU:\\Software\\${LEGACY_KEY}\\Capabilities\\FileAssociations' -ErrorAction SilentlyContinue
-if ($fa) { foreach ($p in $fa.PSObject.Properties) { if ($p.Name -like '.*') { $r[$p.Name.Substring(1)] = $p.Value } } }
-$cmd = ''
-foreach ($v in $r.Values) { $cmd = (Get-ItemProperty -Path ('HKCU:\\Software\\Classes\\' + $v + '\\shell\\open\\command') -ErrorAction SilentlyContinue).'(default)'; if ($cmd) { break } }
-@{ types = $r; command = $cmd } | ConvertTo-Json -Compress`);
-    const j = JSON.parse(out.trim() || '{}');
-    // another copy of the app made that registration: it's that copy's to move
-    if (!j.command || !String(j.command).toLowerCase().includes(path.resolve(root).toLowerCase())) return;
-    const old = j.types || {};
-    const bySuffix = Object.fromEntries(Object.entries(KINDS).map(([kind, [suffix]]) => [suffix, kind]));
-    const groups = {};
-    for (const [ext, progId] of Object.entries(old)) {
-      const kind = bySuffix[String(progId).split('.').pop()];
-      if (kind) (groups[kind] ||= []).push(ext);
-    }
-    if (!Object.keys(groups).length) return;
-    await register(groups);
-    fs.writeFileSync(NOTICE, new Date().toISOString());
-    console.log(`[assoc] ${Object.keys(old).length} file types registered under the new name`);
-  }
-  let migrating = isWin;
-  if (isWin) setTimeout(() => migrate().catch((e) => console.error(`[assoc] ${e.message}`)).finally(() => { migrating = false; }), 4000);
-
   const fail = (status, message) => Object.assign(new Error(message), { status });
   const needWin = () => { if (!isWin) throw fail(501, 'File associations are a Windows feature'); };
 
@@ -213,7 +176,5 @@ foreach ($v in $r.Values) { $cmd = (Get-ItemProperty -Path ('HKCU:\\Software\\Cl
     'POST /api/system/associations': async (req) => { needWin(); const { groups } = await readJSONBody(req); return register(groups || {}); },
     'POST /api/system/associations/remove': async () => { needWin(); return unregister(); },
     'POST /api/system/default-apps': async () => { needWin(); openDefaultApps(); return { ok: true }; },
-    'GET /api/system/associations/renamed': async () => ({ show: fs.existsSync(NOTICE), pending: migrating }),
-    'POST /api/system/associations/renamed/seen': async () => { fs.rmSync(NOTICE, { force: true }); return { ok: true }; },
   };
 };

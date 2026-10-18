@@ -11,6 +11,7 @@ import { icon } from './icons.js';
 import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal, promptDialog, confirmDialog } from './ui.js';
 import { pickOpen } from './files.js';
 import { sharePlaylist, importPlaylist } from './playlist-share.js';
+import { createLyrics } from './lyrics.js';
 
 // 10-band graphic EQ (±18 dB) between a low cut (high-pass) and a high cut (low-pass).
 export const BANDS = [
@@ -51,6 +52,8 @@ const LIKED = '\u0001liked'; // the liked songs, picked like a playlist (a folde
 export function createMusic(app) {
   const s = app.settings;
   const audio = new Audio();
+  let lyrics = null; // the lyrics panel, made the first time it's asked for
+  const toggleLyrics = () => (lyrics ||= createLyrics(app, { audio, current: () => state.tracks[state.idx] || null })).toggle();
   audio.preload = 'metadata';
   let ctx = null;
   let gain = null;
@@ -869,7 +872,7 @@ export function createMusic(app) {
     const tagsEl = h('div', { class: 'music-tags mono', hidden: true });
     const nowEl = h('div', { class: 'music-now' }, title, tagsEl, sub);
     const timeEl = h('div', { class: 'music-time' }, cur, seek, dur);
-    const controlsEl = h('div', { class: 'music-controls' }, shuffleB, btn('skip-back', 'Previous', () => prev()), playB, btn('skip-forward', 'Next', () => next()), loopB, likeB);
+    const controlsEl = h('div', { class: 'music-controls' }, shuffleB, btn('skip-back', 'Previous', () => prev()), playB, btn('skip-forward', 'Next', () => next()), loopB, likeB, btn('quote', 'Lyrics (looked up on LRCLIB)', () => toggleLyrics(), 'music-lyrics'));
     const volEl = h('div', { class: 'music-volrow' }, icon('volume', 'sm'), vol, mixerB);
     const parts = [head, nowEl, timeEl, controlsEl, volEl, eqWrap, tabs, pls, list];
     el.append(...parts);
@@ -1185,17 +1188,18 @@ export function createMusic(app) {
       h('div', { class: 'mm-top' }, h('span', { class: 'mm-note' }, '♪'), h('div', { class: 'mm-text' }, mini.title, mini.sub),
         btn('x', 'Close the small player', () => setMini({ on: false }), 'mm-x')),
       bar,
-      h('div', { class: 'mm-controls' }, mini.time, h('div', { class: 'grow' }), mini.likeB, btn('skip-back', 'Previous', () => prev()), mini.playB, btn('skip-forward', 'Next', () => next())));
+      h('div', { class: 'mm-controls' }, mini.time, h('div', { class: 'grow' }), btn('quote', 'Lyrics', () => toggleLyrics(), 'mm-lyrics'), mini.likeB, btn('skip-back', 'Previous', () => prev()), mini.playB, btn('skip-forward', 'Next', () => next())));
     mini.el.title = 'Click for the full player · drag to move, or onto the right sidebar or the top bar to fold it back into the ♪ button';
     mini.el.addEventListener('pointerdown', dragMini);
     mini.el.addEventListener('dragstart', (e) => e.preventDefault()); // the browser's own drag would cancel ours
   }
   function syncMini() {
-    if (!miniCfg().on || app.mainWindow === false) { mini?.el.remove(); return; }
+    if (!miniCfg().on || app.mainWindow === false) { mini?.el.remove(); app.syncMusicHome?.(); return; }
     if (!mini) buildMini();
     if (mini.el.parentElement !== document.body) document.body.append(mini.el);
     paintMini();
     placeMini();
+    app.syncMusicHome?.(); // it stands in for the ♪ button while it's out
   }
   function paintMini() {
     if (!mini?.el.isConnected) return;
@@ -1310,7 +1314,7 @@ export function createMusic(app) {
     toggleOpen: () => (tabHost ? undefined : state.docked ? app.toggleRightPanel(app.rightPanel === 'music' ? null : 'music') : setOpen(!state.open)),
     open: () => (state.docked ? (app.rightPanel !== 'music' && app.toggleRightPanel('music')) : setOpen(true)),
     dockInto, get docked() { return !!state.docked; },
-    popOut, get miniOn() { return !!miniCfg().on; },
+    popOut, get miniOn() { return !!miniCfg().on && app.mainWindow !== false; }, foldMini: () => setMini({ on: false }),
     /** Playlists (folders in the audio dump), for BoxTape's "save to". */
     get playlists() { return [...state.playlists]; },
     fullscreen: (on = true) => { if (!ui) build(); setFull(on); },

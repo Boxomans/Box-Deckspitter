@@ -78,6 +78,8 @@ export const TOOLS = [
     editor: () => import('../editors/todo.js').then((m) => m.TodoEditor), toolbox: 'lists · due dates · stars' },
   { mode: 'tomcat', name: 'F-14F Super Tomcat', icon: 'f14', tab: true, single: true,
     editor: () => import('../editors/tomcat.js').then((m) => m.TomcatEditor) },
+  { mode: 'strike', name: 'Deep Strike', icon: 'reticle', tab: true, single: true,
+    editor: () => import('../editors/strike.js').then((m) => m.StrikeEditor) },
 ];
 
 const tabTools = TOOLS.filter((t) => t.tab);

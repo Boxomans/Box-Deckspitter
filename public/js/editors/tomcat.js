@@ -145,8 +145,9 @@ export class TomcatEditor extends BaseEditor {
     const shop = this.carrierTab === 'shop';
     const badges = this.carrierTab === 'badges';
     const stats = this.carrierTab === 'stats';
+    const strike = this.carrierTab === 'strike';
     clearTimeout(this.statsTimer);
-    const rows = stats ? this.statsRows() : badges ? this.badgeRows() : shop ? this.shopRows(t) : unlockedUpgrades(reborn).map((u) => {
+    const rows = strike ? this.strikeRows() : stats ? this.statsRows() : badges ? this.badgeRows() : shop ? this.shopRows(t) : unlockedUpgrades(reborn).map((u) => {
       const level = lv[u.id] || 0;
       const cost = upgradeCost(u, level);
       const maxed = level >= u.max;
@@ -172,8 +173,10 @@ export class TomcatEditor extends BaseEditor {
       h('div', { class: 'th-head' }, h('span', {}, 'BACK ON THE CARRIER'), reborn ? h('span', { class: 'th-stars', title: `Reborn ${reborn}×` }, `★${reborn}`) : null,
         h('span', { class: 'th-cash' }, `$${cash.toLocaleString()}`),
         t.pending ? h('span', { class: 'th-pending', title: 'What this sortie has earned so far: paid when it ends' }, `+$${Math.round(t.pending).toLocaleString()}`) : null, tokens || reborn ? h('span', { class: 'th-tokens', title: 'Rebirth tokens' }, `◆${tokens}`) : null, close),
-      h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP'), tab('badges', 'BADGES'), tab('stats', 'STATS')),
-      h('div', { class: 'th-sub' }, stats
+      h('div', { class: 'th-tabs' }, tab('upgrades', 'UPGRADES'), tab('shop', '★ REBIRTH SHOP'), tab('badges', 'BADGES'), tab('stats', 'STATS'), tab('strike', 'DEEP STRIKE')),
+      h('div', { class: 'th-sub' }, strike
+        ? 'A strike-planning game: find an objective’s air defences with a sniffer jet, buy a package, draw its route and fly it.'
+        : stats
         ? 'Your jet with every upgrade and perk applied, and what this wave throws at you.'
         : badges
         ? 'For your totals: every sortie’s score, manual and automatic, and the time you spend in the air. Kept forever.'
@@ -185,6 +188,17 @@ export class TomcatEditor extends BaseEditor {
     const card = this.hangar.querySelector('.th-card');
     if (card) card.scrollTop = scroll[1];
     if (focused) this.hangar.focus();
+  }
+
+  /** DEEP STRIKE: the record so far and the button that opens the game in its own tab. */
+  strikeRows() {
+    const st = this.app.settings.tomcatStrike?.stats || {};
+    const go = h('button', { class: 'th-buy' }, 'LAUNCH');
+    go.addEventListener('click', () => { this.closeHangar(); this.app.newDocument('strike'); });
+    return [h('div', { class: 'th-row' },
+      h('div', { class: 'th-info' }, h('div', { class: 'th-name' }, 'DEEP STRIKE'),
+        h('div', { class: 'th-what' }, st.flown ? `${st.flown} flown · ${st.won || 0} objectives destroyed · ${st.jetsLost || 0} jets lost` : 'No missions flown yet.')),
+      go)];
   }
 
   /** One row per kind of badge (score, time): its level and latest name, and progress to the next. */

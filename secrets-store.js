@@ -11,7 +11,6 @@ module.exports = function createSecrets({ APP_NAME, DATA, IS_WIN, readJSON, writ
   // Windows account ({ "dpapi": "…" }), so the file is useless copied anywhere else. Read once, then kept in memory.
   const SECRETS_FILE = path.join(DATA, 'secrets.json');
   const SECRETS_ENTROPY = 'Box-Deckspitter secrets v1';
-  const OLD_SECRETS_ENTROPY = 'Box-DocSpitter secrets v1'; // sealed before 1.1.1 ("v" missing): read once, then sealed again
   let secretsCache = null;
   let secretsUnreadable = false; // sealed on another PC or Windows account: left alone until new ones are saved
 
@@ -33,14 +32,12 @@ module.exports = function createSecrets({ APP_NAME, DATA, IS_WIN, readJSON, writ
   async function loadSecrets() {
     const raw = readJSON(SECRETS_FILE, {});
     if (typeof raw.dpapi === 'string') {
-      const old = raw.v !== 2;
-      try { secretsCache = JSON.parse((await dpapi('unprotect', Buffer.from(raw.dpapi, 'base64'), old ? OLD_SECRETS_ENTROPY : SECRETS_ENTROPY)).toString('utf8')); } catch (e) {
+      try { secretsCache = JSON.parse((await dpapi('unprotect', Buffer.from(raw.dpapi, 'base64'))).toString('utf8')); } catch (e) {
         console.error(`[${APP_NAME}] secrets.json was sealed on another PC or Windows account; keys and passwords need entering again (${e.message})`);
         secretsCache = {};
         secretsUnreadable = true;
         return;
       }
-      if (old) await saveSecrets(secretsCache).catch((e) => console.error(`[${APP_NAME}] couldn't seal secrets.json again: ${e.message}`));
       return;
     }
     secretsCache = raw;

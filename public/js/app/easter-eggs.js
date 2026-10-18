@@ -17,6 +17,16 @@ export class EasterEggsPart {
       for (const t of this.tabs.filter((x) => x.mode === 'tomcat')) this.closeTab(t);
       this.stopTomcatFlight();
     }
+    this.syncStrike();
+  }
+
+  /** Deep Strike's own switch (Settings → Easter eggs): its top-bar button and Toolbox entry. The carrier's DEEP STRIKE
+   *  tab still opens it while the F-14 is on. */
+  syncStrike() {
+    const on = !!this.settings.strikeEnabled && this.mainWindow !== false;
+    $('#btn-strike').hidden = !on;
+    $('#btn-strike').title = 'Deep Strike · drag or flick it to the right sidebar to dock it there';
+    if (!on && !this.settings.tomcatEnabled) for (const t of this.tabs.filter((x) => x.mode === 'strike')) this.closeTab(t);
     this.syncRail();
   }
 
@@ -44,6 +54,14 @@ export class EasterEggsPart {
         draw();
       });
       const played = s.games || s.auto?.games;
+      const ds = this.settings.tomcatStrike?.stats || {};
+      const sb = h('input', { type: 'checkbox', checked: !!this.settings.strikeEnabled });
+      sb.addEventListener('change', async () => {
+        await this.saveSettings({ strikeEnabled: sb.checked });
+        this.syncStrike();
+        if (sb.checked) toast('Deep Strike is in the top bar and the Toolbox.', { type: 'ok', timeout: 3000 });
+        draw();
+      });
       const hid = h('input', { type: 'checkbox', checked: !!this.settings.hiddenThemes });
       hid.addEventListener('change', async () => {
         await this.saveSettings({ hiddenThemes: hid.checked });
@@ -62,6 +80,10 @@ export class EasterEggsPart {
           : 'An AWG-9 radar intercept game, behind a button in the top bar.'),
         // wiping progress only shows while the game itself is on
         on ? h('button', { class: 'btn sm danger', style: { alignSelf: 'flex-start' }, onclick: () => this.resetTomcat(draw) }, icon('trash', 'sm'), 'Reset game progress…') : null,
+        h('label', { class: 'check' }, sb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('reticle', 'sm'), 'Deep Strike')),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, ds.flown
+          ? `${ds.flown} flown · ${ds.won || 0} objectives destroyed · ${ds.jetsLost || 0} jets lost`
+          : 'A strike-planning game: find the defences, plan the package, fly it.'),
         h('label', { class: 'check' }, hid, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('palette', 'sm'), 'Hidden themes')),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, HIDDEN_THEMES.length
           ? `Adds ${HIDDEN_THEMES.length} more theme${HIDDEN_THEMES.length === 1 ? '' : 's'} to the theme list in Appearance (not the top-bar button).`

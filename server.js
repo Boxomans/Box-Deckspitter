@@ -280,7 +280,7 @@ async function readSongTags(file) {
   const st = await fsp.stat(file);
   const hit = songTagCache.get(file);
   if (hit && hit.mtime === st.mtimeMs) return hit.tags;
-  const tags = { genre: null, bpm: null };
+  const tags = { genre: null, bpm: null, title: null, artist: null };
   const fh = await fsp.open(file, 'r');
   try {
     const read = async (pos, n) => { const b = Buffer.alloc(n); const { bytesRead } = await fh.read(b, 0, n, pos); return b.subarray(0, bytesRead); };
@@ -298,13 +298,16 @@ async function readSongTags(file) {
           : body.toString(b[0] === 3 ? 'utf8' : 'latin1');
         return s.replace(/\0+$/, '').split('\0')[0].trim();
       };
-      while (pos + 10 <= end && (tags.genre == null || tags.bpm == null)) {
+      while (pos + 10 <= end && Object.values(tags).some((v) => v == null)) {
         const fr = await read(pos, 10);
         if (fr.length < 10 || fr[0] === 0) break; // padding
         const id = fr.toString('latin1', 0, 4);
         const size = v4 ? syncsafe(fr, 4) : fr.readUInt32BE(4);
         if (size <= 0 || pos + 10 + size > end) break;
-        if ((id === 'TCON' || id === 'TBPM') && size < 512) {
+        if ((id === 'TIT2' || id === 'TPE1') && size < 1024) { // title and artist (the lyrics lookup uses them)
+          const v = text(await read(pos + 10, size));
+          tags[id === 'TIT2' ? 'title' : 'artist'] = v || null;
+        } else if ((id === 'TCON' || id === 'TBPM') && size < 512) {
           const v = text(await read(pos + 10, size));
           if (id === 'TBPM') tags.bpm = Math.round(parseFloat(v)) || null;
           // old-style "(17)" genre numbers are left off; so is YouTube's video category, which older downloads have
@@ -615,6 +618,7 @@ function openAppWindow(paths = []) {
 // The parts that live in their own files (each gets what it uses from here and gives back what others use).
 const { routes: marketRoutes } = require('./market-server')({ BROWSER_UA });
 const { routes: weatherRoutes } = require('./weather-server')({ BROWSER_UA });
+const { routes: lyricsRoutes } = require('./lyrics-server')();
 const { routes: translateRoutes } = require('./translate-server')({ BROWSER_UA, readJSONBody });
 const { routes: dumpsRoutes, dumpRel, dumpName, dumpAbs, dumpRelOf } = require('./dumps-server')({
   DUMP_AUDIO_EXT, DUMP_EXT, DUMP_VIDEO_EXT, IS_WIN, dumpOf, ok, readBody, readJSONBody, requirePath, revealInExplorer,
@@ -627,7 +631,7 @@ const { routes: mediaRoutes, findExe, tools, streamFile, runCapture, newJob, run
   readJSONBody, requirePath, spotify: { findOnYouTube: (it) => spotify.findOnYouTube(it) },
 });
 const { routes: spacesRoutes } = require('./spaces-server')({ IS_WIN, findExe, ok, psQuote, readJSONBody, requirePath, runCapture });
-const { routes: storageRoutes, drives, buildLauncher, migrateLauncher } = require('./storage-server')({
+const { routes: storageRoutes, drives, buildLauncher } = require('./storage-server')({
   APP_NAME, DATA, IS_WIN, PUBLIC, ROOT, listDrives, newJob, readJSONBody, requirePath, runCapture, startJob,
 });
 const { secretsReady, secrets, saveSecrets } = require('./secrets-store')({ APP_NAME, DATA, IS_WIN, readJSON, writeJSON });
@@ -978,7 +982,7 @@ const routes = {
       removed.push(path.basename(d.dir));
     }
     // Cache left behind by early versions that kept Electron's data in %APPDATA%.
-    if (IS_WIN && process.env.APPDATA) for (const name of [APP_NAME, 'Box-DocSpitter']) await fsp.rm(path.join(process.env.APPDATA, name), { recursive: true, force: true }).catch(() => {});
+    if (IS_WIN && process.env.APPDATA) await fsp.rm(path.join(process.env.APPDATA, APP_NAME), { recursive: true, force: true }).catch(() => {});
     console.log(`[${APP_NAME}] reset to clean state: ${removed.join(', ')}`);
     setTimeout(() => {
       if (SHELL_MODE) process.send({ type: 'relaunch' });
@@ -994,7 +998,7 @@ const routes = {
 };
 
 // their routes
-Object.assign(routes, marketRoutes, weatherRoutes, translateRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, storageRoutes, aiRoutes);
+Object.assign(routes, marketRoutes, weatherRoutes, lyricsRoutes, translateRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, storageRoutes, aiRoutes);
 
 // Windows file associations ("open .pdf with Box-Deckspitter").
 Object.assign(routes, require('./file-assoc')({ root: ROOT, data: DATA, isWin: IS_WIN, readJSONBody }));
@@ -1221,7 +1225,7 @@ function ping(port) {
       let data = '';
       res.on('data', (c) => (data += c));
       // the same install with the same data folder; anything else (another copy, a test run) isn't ours to join
-      res.on('end', () => { try { const j = JSON.parse(data); resolve((j.app === APP_NAME || j.app === 'Box-DocSpitter') && j.install === INSTALL_ID && j.data === (DATA_ARG ? 'custom' : 'default')); } catch { resolve(false); } });
+      res.on('end', () => { try { const j = JSON.parse(data); resolve(j.app === APP_NAME && j.install === INSTALL_ID && j.data === (DATA_ARG ? 'custom' : 'default')); } catch { resolve(false); } });
     });
     r.on('error', () => resolve(false));
     r.on('timeout', () => { r.destroy(); resolve(false); });
@@ -1258,7 +1262,7 @@ function listen(port) {
   await writeJSON(path.join(DATA, 'session.json'), { port: PORT, pid: process.pid, startedAt }).catch(() => {});
   console.log(`[${APP_NAME}] v${VERSION} running at http://${HOST}:${PORT}/`);
   if (APP_MODE || SHELL_MODE) openAppWindow(fileArgs);
-  buildLauncher().then(() => migrateLauncher()).catch((e) => console.error(`[${APP_NAME}] ${e.message}`));
+  buildLauncher().catch((e) => console.error(`[${APP_NAME}] ${e.message}`));
 })().catch((e) => { console.error(e); process.exit(1); });
 
 if (SHELL_MODE) process.on('disconnect', () => shutdown('shell closed'));

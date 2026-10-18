@@ -102,9 +102,9 @@ function flingable(el, zone, onMove, { home, onHome, marker, onFloat } = {}) {
   });
 }
 
-const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-weather', 'btn-tomcat', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
+const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-weather', 'btn-tomcat', 'btn-strike', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
 
-const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-weather': 'weather', 'btn-tomcat': 'F-14', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
+const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-weather': 'weather', 'btn-tomcat': 'F-14', 'btn-strike': 'strike', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
 
 export class RailPart {
   decorateChrome() {
@@ -124,6 +124,8 @@ export class RailPart {
     this.wireMusicDock();
     $('#btn-tomcat').append(icon('f14'));
     $('#btn-tomcat').addEventListener('click', () => this.newDocument('tomcat'));
+    $('#btn-strike').append(icon('reticle'));
+    $('#btn-strike').addEventListener('click', () => this.newDocument('strike'));
     this.syncTomcat();
     $('#btn-fullscreen').addEventListener('click', () => this.toggleFullScreen());
     // leaving full screen some other way (the window manager, focus mode) keeps the button right
@@ -194,11 +196,12 @@ export class RailPart {
     const btn = $('#btn-music');
     const tab = this.musicRailTab();
     if ((this.settings.musicDock === 'side') !== side) this.saveSettings({ musicDock: side ? 'side' : 'top' });
+    if (animate && this.music?.miniOn) this.music.foldMini(); // docking it on purpose folds the small player back in
     if (side) {
       btn.hidden = true;
       if (drop) this.railMove(tab, drop.clientY); else this.placeSaved(tab);
       // dragged in: open it there; at startup: only if it was open when the app closed
-      if (animate || this.settings.rightPanel === 'music') this.toggleRightPanel('music', { force: true });
+      if (!this.music?.miniOn && (animate || this.settings.rightPanel === 'music')) this.toggleRightPanel('music', { force: true });
     } else {
       if (this.rightPanel === 'music') this.toggleRightPanel(null);
       this.music.dockInto(null);
@@ -207,6 +210,19 @@ export class RailPart {
       btn.hidden = false;
     }
     tab.classList.toggle('playing', !!this.music.playing);
+    this.syncMusicHome();
+  }
+
+  /** While the small player is out on the page it stands in for the ♪ button, like the F-14's radar does for its own:
+   *  the top-bar button or the sidebar tab hides until it's folded back in. */
+  syncMusicHome() {
+    const out = !!this.music?.miniOn;
+    const btn = $('#btn-music');
+    if (!btn) return;
+    btn.hidden = out || this.settings.musicDock === 'side';
+    const tab = this.musicRailTab();
+    tab.hidden = out;
+    if (out && this.rightPanel === 'music') this.toggleRightPanel(null);
     this.syncRail();
   }
 

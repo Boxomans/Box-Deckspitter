@@ -9,6 +9,7 @@ import { createSounds } from './core/sounds.js';
 import { createClips } from './core/clips.js';
 import { createMusic } from './core/music.js';
 import { createClock } from './core/clock.js';
+import { createFps } from './core/fps.js';
 import { createWeather } from './core/weather.js';
 import { createTranslate } from './core/translate.js';
 import { createCalendar } from './core/calendar.js';
@@ -81,6 +82,7 @@ class App {
     this.clips = createClips(this);
     this.music = createMusic(this);
     this.clock = createClock(this);
+    this.fps = createFps(this);
     this.weather = createWeather(this);
     this.translate = createTranslate(this);
     // Win+Shift+Q screenshots (electron/snip.js) land in the media dump
@@ -103,6 +105,7 @@ class App {
     if (this.settings.sidebar) this.showPanel(this.settings.sidebar);
     if (this.settings.musicDock === 'side') this.setMusicDock(true, { animate: false });
     if (this.settings.rightPanel && !(this.settings.rightPanel === 'music' && this.rightPanel === 'music') && !this.panelOnTop(this.settings.rightPanel)) this.toggleRightPanel(this.settings.rightPanel);
+    this.syncMusicHome(); // a small player left out on the page stands in for the ♪ button
     // the app is up: confirm a just-installed update (otherwise the boot file rolls it back), then say how it went
     window.bdsShell?.appReady?.();
     this.afterStartup();

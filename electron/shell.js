@@ -26,7 +26,6 @@ app.setPath('userData', USER_DATA);
 // Windows treated every copy as the same app, so pinning one to the taskbar could launch another.
 const ROOT_HASH = require('crypto').createHash('sha1').update(path.resolve(ROOT).toLowerCase()).digest('hex').slice(0, 10);
 const APP_ID = 'BoxDeckspitter.App.' + ROOT_HASH;
-const OLD_APP_ID = 'BoxDocSpitter.App.' + ROOT_HASH; // before 1.1.1: shortcuts still carrying it are moved to APP_ID below
 app.setAppUserModelId(APP_ID);
 Menu.setApplicationMenu(null);
 // UI sounds (hover etc.) should work before the first click; this is our own app window, not a website.
@@ -310,8 +309,6 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
       const plain = path.join(d, 'Box-Deckspitter.lnk');
       return !fs.existsSync(plain) || mine(plain) ? plain : path.join(d, `Box-Deckspitter (${where.replace(/[\\/:*?"<>|]/g, '')}).lnk`);
     });
-    // the shortcut from before the rename ("Box-DocSpitter") is replaced by the new one, not left beside it
-    for (const d of dirs) { const old = path.join(d, 'Box-DocSpitter.lnk'); try { if (fs.existsSync(old) && mine(old)) fs.unlinkSync(old); } catch { /* in use: leave it */ } }
     for (const lnk of targets) {
       const ok = shell.writeShortcutLink(lnk, fs.existsSync(lnk) ? 'replace' : 'create', {
         target: process.execPath,
@@ -380,8 +377,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
         try {
           const lnk = path.join(dir, f);
           const l = shell.readShortcutLink(lnk);
-          if (l.appUserModelId === OLD_APP_ID) shell.writeShortcutLink(lnk, 'update', { appUserModelId: APP_ID, icon: ICON, iconIndex: 0 });
-          else if (l.appUserModelId === APP_ID && path.resolve(l.icon || '').toLowerCase() !== ICON.toLowerCase()) {
+          if (l.appUserModelId === APP_ID && path.resolve(l.icon || '').toLowerCase() !== ICON.toLowerCase()) {
             shell.writeShortcutLink(lnk, 'update', { icon: ICON, iconIndex: 0 });
           }
         } catch { /* not a shortcut we can read */ }

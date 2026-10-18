@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.1.2",
+    "date": "2026-10-18",
+    "notes": [
+      "Music: a Lyrics button in the player and the small player. It shows the playing song's words from LRCLIB in a panel you can drag anywhere. Timed lyrics light up line by line, and clicking a line jumps there. Artist and title come from the song's tags or an \"Artist - Title\" file name. Needs an internet connection.",
+      "Music: while the small player is out on the page, the ♪ button (top bar or sidebar) is hidden. It comes back when the small player is folded in.",
+      "Settings › Appearance: an FPS counter, a small box showing frames per second that you can drag anywhere. Off to start with.",
+      "BoxMap: Antarctic territorial claims, shaded south of 60°S. Hover one to see whose it is, when it was claimed and its span, overlaps included. They can be turned off in the map's options.",
+      "Settings → Easter eggs: another game has turned up."
+    ]
+  },
+  {
     "version": "1.1.1",
     "date": "2026-10-17",
     "notes": [

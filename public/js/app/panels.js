@@ -62,6 +62,7 @@ export class PanelsPart {
         ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
         ...(this.weather ? [['cloud-sun', 'Weather widget', 'a small floating forecast · click again to close', () => this.weather.toggleMini()]] : []),
         ...(this.settings.tomcatEnabled ? [['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.newDocument('tomcat')]] : []),
+        ...(this.settings.strikeEnabled ? [['reticle', 'Deep Strike', 'find the defences · plan the package · fly it', () => this.newDocument('strike')]] : []),
       ]],
     ];
     const list = h('div', { class: 'file-list tools-list' });

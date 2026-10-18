@@ -8,7 +8,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ws = New-Object -ComObject WScript.Shell;" ^
   "$targets = @([Environment]::GetFolderPath('Desktop'), (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'));" ^
   "foreach ($t in $targets) {" ^
-  "  $old = Join-Path $t 'Box-DocSpitter.lnk'; if (Test-Path $old) { Remove-Item $old -ErrorAction SilentlyContinue }" ^
   "  $lnk = $ws.CreateShortcut((Join-Path $t 'Box-Deckspitter.lnk'));" ^
   "  if (Test-Path $electron) {" ^
   "    $lnk.TargetPath = $electron;" ^

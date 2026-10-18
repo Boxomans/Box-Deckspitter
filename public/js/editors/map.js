@@ -69,6 +69,30 @@ const LANDUSE = {
   industrial: 'industrial', railway: 'industrial', military: 'industrial', aerodrome: 'industrial', runway: 'industrial', taxiway: 'industrial', apron: 'industrial',
   pedestrian: 'urban', pier: 'urban', platform: 'industrial', hospital: 'hospital', school: 'school', university: 'school', college: 'school', kindergarten: 'school',
 };
+/** Antarctica's territorial claims, south of 60°S, as sectors between meridians [west lon, east lon] (none crosses the
+ *  date line: the Ross Dependency is in two). The Antarctic Treaty (1959) freezes them: not recognised, not given up. */
+const CLAIMS = [
+  { who: 'Norway', name: 'Queen Maud Land', span: '20°W – 44°38′E', year: 1939, color: '#d9534f', at: [12, -76], s: [[-20, 44.633]],
+    info: 'Norway also claims Peter I Island, off Marie Byrd Land (1931). Troll station is inland.' },
+  { who: 'Australia', name: 'Australian Antarctic Territory', span: '44°38′E – 136°11′E, 142°02′E – 160°E', year: 1933, color: '#e0a030', at: [90, -76], s: [[44.633, 136.183], [142.033, 160]],
+    info: 'The largest claim, about 42% of the continent, in two parts either side of Adélie Land. Mawson, Davis and Casey stations.' },
+  { who: 'France', name: 'Adélie Land', span: '136°11′E – 142°02′E', year: 1924, color: '#4f7fd9', at: [139.1, -70], s: [[136.183, 142.033]],
+    info: 'A thin slice between the two parts of Australia’s claim. Dumont d’Urville station is on its coast.' },
+  { who: 'New Zealand', name: 'Ross Dependency', span: '160°E – 150°W', year: 1923, color: '#3aa58a', at: [-178, -80], s: [[160, 180], [-180, -150]],
+    info: 'Takes in most of the Ross Ice Shelf. Scott Base, with the United States’ McMurdo Station next door.' },
+  { who: null, name: 'Marie Byrd Land', span: '150°W – 90°W', year: null, color: '#8a8f98', at: [-120, -78], s: [[-150, -90]],
+    info: 'Claimed by no one: the largest unclaimed land on Earth.' },
+  { who: 'Chile', name: 'Chilean Antarctic Territory', span: '90°W – 53°W', year: 1940, color: '#c94fc0', at: [-80, -72], s: [[-90, -53]],
+    info: 'Overlaps Argentina’s and Britain’s claims on the Antarctic Peninsula. Villa Las Estrellas, at Frei station, has families living year-round.' },
+  { who: 'Argentina', name: 'Argentine Antarctica', span: '74°W – 25°W', year: 1943, color: '#5bb3e0', at: [-38, -76], s: [[-74, -25]],
+    info: 'Overlaps Chile’s and Britain’s claims. Esperanza Base, near the peninsula’s tip, has had children born there.' },
+  { who: 'United Kingdom', name: 'British Antarctic Territory', span: '80°W – 20°W', year: 1908, color: '#9b7be0', at: [-50, -82], s: [[-80, -20]],
+    info: 'The oldest claim, overlapping both Chile’s and Argentina’s. Rothera and Halley stations.' },
+];
+const claimsAt = (lon, lat) => (lat > -60 ? [] : CLAIMS.filter((c) => c.s.some(([a, b]) => lon >= a && lon < b)));
+/** The tiny joke at 69°N 69°W: 200 m across, so it only shows zoomed far in. */
+const NICE = { lon: -69, lat: 69, text: 'Nice.', metres: 200 };
+
 const ROAD_W = { highway: 3.6, major_road: 2.8, medium_road: 2.2, minor_road: 1.5, other: 1.1, path: 0.9 };
 
 export class MapEditor extends BaseEditor {
@@ -165,6 +189,7 @@ export class MapEditor extends BaseEditor {
   optionsMenu() {
     return [
       { label: 'Show OpenStreetMap streets while online', checked: this.settings.osm !== false, action: () => { this.settings.osm = this.settings.osm === false; this.saveSettings(); this.draw(); } },
+      { label: 'Show Antarctic claims (hover one to see whose)', checked: this.settings.claims !== false, action: () => { this.settings.claims = this.settings.claims === false; this.saveSettings(); this.hideClaim(); this.draw(); } },
       { label: 'Show the outlines of downloaded maps', checked: !!this.settings.outlines, action: () => { this.settings.outlines = !this.settings.outlines; this.saveSettings(); this.draw(); } },
       { sep: true },
       { label: 'Clear the online street cache from memory', icon: 'refresh', action: () => { this.raster.clear(); this.draw(); } },
@@ -179,8 +204,9 @@ export class MapEditor extends BaseEditor {
     this.attrib = h('div', { class: 'mp-attrib' }, 'Natural Earth · © OpenStreetMap contributors');
     this.hint = h('div', { class: 'mp-hint', hidden: true });
     this.popEl = h('div', { class: 'mp-pop', hidden: true });
+    this.claimTip = h('div', { class: 'mp-claim-tip', hidden: true });
     this.panel = h('div', { class: 'mp-panel', hidden: true });
-    this.wrap = h('div', { class: 'mp-wrap', tabindex: '0' }, this.cv, this.hint, this.popEl, this.attrib, this.results);
+    this.wrap = h('div', { class: 'mp-wrap', tabindex: '0' }, this.cv, this.hint, this.popEl, this.claimTip, this.attrib, this.results);
     this.root = h('div', { class: 'mp' }, h('div', { class: 'mp-main' }, this.wrap, this.panel),
       h('div', { class: 'mp-bar' }, icon('map-pin', 'sm'), this.coordsEl, h('div', { class: 'grow' }), this.zoomEl));
     this.pane.append(this.root);
@@ -302,7 +328,8 @@ export class MapEditor extends BaseEditor {
       this.coordsEl.textContent = `${fmtDeg(latOf(wy), 'N', 'S')}, ${fmtDeg(lonOf(wx), 'E', 'W')}`;
       this.mouse = [px, py];
       if (this.mode === 'measure' && this.measure.length) this.draw();
-      if (!drag) { cv.style.cursor = this.mode ? 'crosshair' : this.pinAt(px, py) ? 'pointer' : 'grab'; return; }
+      if (!drag) { cv.style.cursor = this.mode ? 'crosshair' : this.pinAt(px, py) ? 'pointer' : 'grab'; this.hoverClaim(px, py, lonOf(wx), latOf(wy)); return; }
+      this.hideClaim();
       if (drag.kind === 'area') { this.areaBox[2] = wx; this.areaBox[3] = wy; this.draw(); return; }
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
@@ -327,6 +354,7 @@ export class MapEditor extends BaseEditor {
     };
     cv.addEventListener('pointerup', up);
     cv.addEventListener('pointercancel', () => { drag = null; });
+    cv.addEventListener('pointerleave', () => this.hideClaim());
     cv.addEventListener('dblclick', (e) => {
       if (this.mode) return;
       const r = cv.getBoundingClientRect();
@@ -428,6 +456,8 @@ export class MapEditor extends BaseEditor {
       if (this.settings.osm !== false) this.paintRaster(ctx, dpr, ox, oy, S);
       // 3. the downloaded regions' vector tiles
       this.paintVector(ctx, dpr, ox, oy, S);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (this.settings.claims !== false) this.paintClaims(ctx);
       // 4. label candidates: world places where no region covers (the tiles added theirs as they drew)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       if (w) this.worldLabels(w);
@@ -438,6 +468,7 @@ export class MapEditor extends BaseEditor {
     // 5. overlays
     for (const c of copies) this.inCopy(c, () => {
       if (this.settings.outlines || this.mode === 'area') this.paintRegionOutlines(ctx);
+      this.paintNice(ctx);
       this.paintPins(ctx);
     });
     this.paintMeasure(ctx);
@@ -771,6 +802,78 @@ export class MapEditor extends BaseEditor {
       const [a, b, c, d] = this.bboxToBox(r.bbox);
       return x0 >= a && x1 <= c && y0 >= b && y1 <= d;
     });
+  }
+
+  /** The claims as tinted sectors from 60°S to the bottom of the map, edged in their colour, named where there's room. */
+  paintClaims(ctx) {
+    const [, top] = this.toScreen(0, my(-60)), [, bot] = this.toScreen(0, 1);
+    if (top > this.H || bot < 0) return;
+    const hot = this.claimHot || [];
+    ctx.save();
+    for (const c of CLAIMS) {
+      const lit = hot.includes(c);
+      for (const [a, b] of c.s) {
+        const [x0] = this.toScreen(mx(a), 0), [x1] = this.toScreen(mx(b), 0);
+        if (x1 < 0 || x0 > this.W) continue;
+        ctx.globalAlpha = c.who ? (lit ? 0.34 : 0.15) : (lit ? 0.16 : 0.05);
+        ctx.fillStyle = c.color; ctx.fillRect(x0, top, x1 - x0, bot - top);
+        ctx.globalAlpha = lit ? 1 : 0.7;
+        ctx.strokeStyle = c.color; ctx.lineWidth = lit ? 2 : 1.2; ctx.setLineDash(c.who ? [] : [5, 4]);
+        ctx.beginPath(); ctx.moveTo(x0, bot); ctx.lineTo(x0, top); ctx.lineTo(x1, top); ctx.lineTo(x1, bot); ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    // names, where the sector is wide enough on screen
+    ctx.font = `600 11px ${this.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    for (const c of CLAIMS) {
+      const [x, y] = this.toScreen(mx(c.at[0]), my(c.at[1]));
+      const label = c.who || 'Unclaimed';
+      const room = Math.max(...c.s.map(([a, b]) => (b - a) / 360)) * this.scale();
+      if (room < ctx.measureText(label).width + 12 || x < -100 || x > this.W + 100 || y < -20 || y > this.H + 20) continue;
+      ctx.strokeStyle = this.pal.halo; ctx.lineWidth = 3; ctx.strokeText(label, x, y);
+      ctx.fillStyle = c.color; ctx.fillText(label, x, y);
+    }
+    ctx.restore();
+  }
+  /** Hovering south of 60°S: a card with whose claim it is (all of them where they overlap). */
+  hoverClaim(px, py, lon, lat) {
+    const list = this.settings.claims === false || this.mode ? [] : claimsAt(lon, lat);
+    if (!list.length) { this.hideClaim(); return; }
+    const was = this.claimHot || [];
+    if (list.length !== was.length || list.some((c, i) => c !== was[i])) {
+      this.claimHot = list;
+      clear(this.claimTip).append(...list.map((c) => h('div', { class: 'mp-claim' },
+        h('div', { class: 'mp-claim-head' }, h('span', { class: 'mp-dot', style: { background: c.color } }), h('b', {}, c.name)),
+        h('div', { class: 'mp-claim-who' }, c.who ? `${c.who} · claimed ${c.year} · ${c.span}` : `Unclaimed · ${c.span}`),
+        h('div', { class: 'mp-claim-info' }, c.info))),
+        h('div', { class: 'mp-claim-foot faint' }, list.length > 1 ? 'Overlapping claims. All are frozen by the Antarctic Treaty (1959).' : 'Frozen by the Antarctic Treaty (1959): not recognised, not given up.'));
+      this.claimTip.hidden = false;
+      this.draw();
+    }
+    const w = this.claimTip.offsetWidth, hh = this.claimTip.offsetHeight;
+    this.claimTip.style.left = `${px + 16 + w > this.W ? px - 16 - w : px + 16}px`;
+    this.claimTip.style.top = `${clamp(py - hh - 12, 8, Math.max(8, this.H - hh - 8))}px`;
+  }
+  hideClaim() {
+    if (!this.claimHot) return;
+    this.claimHot = null;
+    this.claimTip.hidden = true;
+    this.draw();
+  }
+
+  /** "Nice." at 69°N 69°W, drawn to its true size (200 m wide): a speck until zoomed far in. */
+  paintNice(ctx) {
+    const [x, y] = this.toScreen(mx(NICE.lon), my(NICE.lat));
+    const wpx = NICE.metres / ((Math.cos((NICE.lat * Math.PI) / 180) * 40075016.7) / this.scale());
+    if (wpx < 14 || x < -wpx || x > this.W + wpx || y < -wpx || y > this.H + wpx) return;
+    ctx.save();
+    ctx.font = `700 100px ${this.font}`;
+    const size = (100 * wpx) / ctx.measureText(NICE.text).width;
+    ctx.font = `700 ${size}px ${this.font}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = this.pal.halo; ctx.lineWidth = Math.max(2, size / 8); ctx.strokeText(NICE.text, x, y);
+    ctx.fillStyle = this.pal.text; ctx.fillText(NICE.text, x, y);
+    ctx.restore();
   }
 
   paintRegionOutlines(ctx) {

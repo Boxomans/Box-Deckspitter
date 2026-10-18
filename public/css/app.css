@@ -3000,3 +3000,106 @@ select optgroup.opt-hidden { margin-top: 5px; padding-top: 7px; border-top: 1px 
 .music-like-btn.active { color: var(--danger, #e5484d); }
 .music-pl-liked .i { color: var(--danger, #e5484d); }
 .mm-btn.mm-like.on { color: var(--danger, #e5484d); }
+
+/* ---- Deep Strike (the carrier screen's strike game): a fixed dark tactical look, whatever the theme */
+.ds-root { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0b1219; color: #d7e4ee; font: 12px ui-monospace, Consolas, monospace; overflow: hidden; }
+.ds-top { display: flex; align-items: center; gap: 12px; padding: 6px 12px; background: #0e161d; border-bottom: 1px solid #22313c; flex-wrap: wrap; }
+.ds-title { font-weight: 700; letter-spacing: 0.18em; color: #ff3df0; }
+.ds-code { color: #7d8d9a; letter-spacing: 0.08em; }
+.ds-steps { display: flex; gap: 4px; }
+.ds-step { padding: 2px 8px; border: 1px solid #22313c; color: #566876; letter-spacing: 0.08em; font-size: 11px; }
+.ds-step.done { color: #7d8d9a; }
+.ds-step.on { color: #0b1219; background: #5ec8ff; border-color: #5ec8ff; }
+.ds-top .grow, .ds-panel .grow { flex: 1; }
+.ds-speeds, .ds-seg { display: flex; gap: 2px; }
+.ds-clock { color: #b6f36a; min-width: 64px; text-align: right; }
+.ds-body { flex: 1; min-height: 0; display: flex; }
+.ds-mapwrap { flex: 1; min-width: 0; position: relative; }
+.ds-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; cursor: crosshair; }
+.ds-panel { width: 340px; flex: none; overflow-y: auto; background: #0e161d; border-left: 1px solid #22313c; padding: 6px 0 16px; }
+.ds-sec { padding: 8px 12px; border-bottom: 1px solid #17232c; display: flex; flex-direction: column; gap: 5px; }
+.ds-h { color: #5ec8ff; letter-spacing: 0.14em; font-size: 10.5px; }
+.ds-h2 { color: #9fb2c0; letter-spacing: 0.1em; font-size: 10.5px; }
+.ds-big { font-size: 15px; color: #e8eef3; }
+.ds-note { color: #9fb2c0; line-height: 1.5; }
+.ds-root .faint { color: #6c7d8a; }
+.ds-root .sm { font-size: 11px; }
+.ds-root .bad { color: #ff5a5a; }
+.ds-root .warn { color: #ffd84a; }
+.ds-root .good { color: #6fe08a; }
+.ds-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.ds-kv > span:first-child { color: #7d8d9a; }
+.ds-obj { color: #e8eef3; }
+.ds-star { color: #ff3df0; }
+.ds-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ds-btn { background: #121d26; color: #cfe0ec; border: 1px solid #2c3f4d; padding: 5px 10px; font: inherit; letter-spacing: 0.06em; cursor: pointer; }
+.ds-btn:hover:not(:disabled) { border-color: #5ec8ff; color: #fff; }
+.ds-btn.sm { padding: 2px 6px; font-size: 11px; }
+.ds-btn.on { background: #5ec8ff; color: #0b1219; border-color: #5ec8ff; }
+.ds-btn.primary { background: #1a3344; border-color: #5ec8ff; color: #e8f6ff; }
+.ds-btn.wide { width: 100%; margin-top: 4px; }
+.ds-btn:disabled { opacity: 0.4; cursor: default; }
+.ds-play.on { background: #3a1d1d; border-color: #ff5a5a; color: #ffd0d0; }
+.ds-sel { background: #121d26; color: #cfe0ec; border: 1px solid #2c3f4d; padding: 4px 6px; font: inherit; min-width: 0; }
+.ds-sel.sm { font-size: 11px; padding: 2px 4px; flex: 1 1 0; min-width: 0; }
+.ds-st > .faint { flex-basis: 100%; padding-left: 2px; }
+.ds-trow, .ds-srow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 2px 4px; cursor: default; }
+.ds-srow { cursor: pointer; }
+.ds-srow:hover, .ds-srow.on { background: #15222c; }
+.ds-trow.obj { color: #ff9cf6; }
+.ds-trow.dead, .ds-srow.dead { color: #566876; text-decoration: line-through; }
+.ds-ico { width: 14px; text-align: center; color: #7d8d9a; }
+.ds-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ds-sub { width: 100%; padding-left: 22px; color: #6c7d8a; font-size: 11px; }
+.ds-log { color: #9fb2c0; line-height: 1.4; }
+.ds-log.warn { color: #ffd84a; }
+.ds-log.loss { color: #ff7070; }
+.ds-log.good { color: #6fe08a; }
+.ds-log.kill { color: #ffae42; }
+.ds-log.objective { color: #ff3df0; font-weight: 700; }
+.ds-budget { height: 6px; background: #17232c; }
+.ds-bar { height: 100%; background: #5ec8ff; }
+.ds-bar.over { background: #ff5a5a; }
+.ds-jet { border: 1px solid #22313c; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.ds-jet-h { display: flex; gap: 8px; align-items: baseline; }
+.ds-jet-h b { flex: 1; color: #e8eef3; font-weight: 600; }
+.ds-x { background: none; border: none; color: #7d8d9a; font-size: 15px; cursor: pointer; padding: 0 4px; }
+.ds-x:hover { color: #ff5a5a; }
+.ds-st { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.ds-leg { display: flex; flex-direction: column; gap: 5px; padding: 6px; border: 1px solid #2c3f4d; background: #101b23; }
+.ds-check { display: flex; gap: 6px; align-items: center; color: #9fb2c0; cursor: pointer; }
+.ds-result { font-size: 18px; letter-spacing: 0.12em; font-weight: 700; }
+.ds-result.good { color: #6fe08a; }
+.ds-result.bad { color: #ff5a5a; }
+.ds-speed { min-width: 58px; text-align: center; color: #b6f36a; }
+.ds-story { margin: 0; color: #c3d2dd; line-height: 1.55; font-family: Georgia, 'Times New Roman', serif; font-size: 13px; }
+.ds-tip { position: absolute; z-index: 3; max-width: 320px; padding: 8px 10px; background: rgba(10, 17, 23, 0.94); border: 1px solid #2c3f4d; color: #cfe0ec; pointer-events: none; display: flex; flex-direction: column; gap: 4px; line-height: 1.4; }
+.ds-tip[hidden], .ds-legend[hidden] { display: none; }
+.ds-tip-h { display: flex; gap: 6px; align-items: center; color: #e8eef3; font-weight: 600; letter-spacing: 0.06em; }
+.ds-tip-what { color: #9fb2c0; }
+.ds-tip-line { color: #cfe0ec; font-size: 11px; }
+.ds-legend { position: absolute; right: 10px; bottom: 10px; z-index: 2; padding: 8px 10px; background: rgba(10, 17, 23, 0.9); border: 1px solid #22313c; display: flex; flex-direction: column; gap: 3px; min-width: 200px; }
+.ds-leg-row { display: flex; gap: 8px; align-items: center; }
+.ds-swatch { width: 10px; height: 10px; flex: none; border: 1px solid rgba(255, 255, 255, 0.25); }
+
+/* FPS counter (core/fps.js) */
+.fps-counter { position: fixed; z-index: 890; display: flex; align-items: baseline; gap: 4px; padding: 3px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg-1); color: var(--accent); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); cursor: grab; user-select: none; touch-action: none; -webkit-app-region: no-drag; font-size: 12px; line-height: 1.2; }
+.fps-counter.dragging { cursor: grabbing; opacity: 0.85; }
+.fps-counter .fps-num { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
+.fps-counter .fps-unit { color: var(--text-3); font-size: 10px; letter-spacing: 0.05em; }
+.fps-counter.low { color: var(--warn); }
+
+/* Lyrics panel (core/lyrics.js) */
+.lyrics-panel { position: fixed; z-index: 905; width: 320px; height: min(440px, 70vh); display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-1); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); -webkit-app-region: no-drag; overflow: hidden; }
+.lyrics-panel.dragging { opacity: 0.85; }
+.lyrics-panel .ly-top { display: flex; align-items: flex-start; gap: 6px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--line-2); cursor: grab; user-select: none; touch-action: none; }
+.lyrics-panel.dragging .ly-top { cursor: grabbing; }
+.lyrics-panel .ly-head { flex: 1; min-width: 0; }
+.lyrics-panel .ly-title { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lyrics-panel .ly-src { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lyrics-panel .ly-body { flex: 1; overflow-y: auto; padding: 12px 14px 40px; line-height: 1.55; }
+.lyrics-panel .ly-plain { white-space: pre-wrap; color: var(--text-2); }
+.lyrics-panel .ly-line { padding: 2px 0; color: var(--text-3); cursor: pointer; transition: color 0.2s; }
+.lyrics-panel .ly-line:hover { color: var(--text-2); }
+.lyrics-panel .ly-line.on { color: var(--accent); font-weight: 600; }
+.lyrics-panel .ly-note { padding: 20px 0; text-align: center; }

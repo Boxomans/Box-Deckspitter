@@ -12,8 +12,8 @@ const { spawn } = require('child_process');
 
 const DEFAULT_REPO = 'Boxomans/Box-Deckspitter';
 const BRANCH = 'main';
-// package names this app has shipped under: an update may carry either (the package is renamed once every copy accepts both)
-const APP_PACKAGES = ['box-docspitter', 'box-deckspitter'];
+// the package name an update must carry
+const APP_PACKAGES = ['box-deckspitter'];
 // electron/main.js is never replaced by an update. These versions of it differ only in the app's name, so an update
 // that carries one while another is installed doesn't count as a launcher change (sha-256, line endings ignored).
 const SAME_LAUNCHER = new Set([
@@ -21,8 +21,15 @@ const SAME_LAUNCHER = new Set([
   '9b2816413c3c335316ccb1316420af325294e5b2877f034a77e6023f4cfc24cd',
 ]);
 const launcherHash = (buf) => require('crypto').createHash('sha256').update(buf.toString('utf8').replace(/\r\n/g, '\n')).digest('hex');
+/** Whether a launcher (electron/main.js, as text) is really a different one from the installed copy's. */
+function launcherChanged(text, root) {
+  let cur;
+  try { cur = fs.readFileSync(path.join(root, 'electron', 'main.js')); } catch { return true; }
+  const a = launcherHash(cur), b = launcherHash(Buffer.from(String(text), 'utf8'));
+  return a !== b && !(SAME_LAUNCHER.has(a) && SAME_LAUNCHER.has(b));
+}
 const MAX_ZIP = 300 * 1024 * 1024;
-const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-(docspitter|deckspitter)\.exe$/i];
+const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-deckspitter\.exe$/i];
 // Files that must be in any real release.
 const REQUIRED = ['package.json', 'server.js', 'update-server.js', 'electron/shell.js', 'electron/preload.js', 'public/index.html', 'public/js/app.js'];
 
@@ -120,7 +127,9 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
       } catch { if (!notes.length) notes = [String(head.commit?.message || '').split('\n')[0]]; }
     }
     const warnings = [];
-    if (newer && changed?.includes('electron/main.js')) warnings.push('This update changes the app launcher, which can’t be updated from inside the app. Install it by copying the new version over.');
+    let launcher = newer && changed?.includes('electron/main.js');
+    if (launcher) launcher = await gh(`/contents/electron/main.js?ref=${sha}`, { raw: true }).then((t) => launcherChanged(t, root)).catch(() => true);
+    if (launcher) warnings.push('This update changes the app launcher, which can’t be updated from inside the app. Install it by copying the new version over.');
     if (newer && depsMissing(remotePkg).length) warnings.push(`This update needs new libraries (${depsMissing(remotePkg).join(', ')}), which have to be installed by hand.`);
     lastCheck = { sha, latest, newer, at: Date.now() };
     return { current: version, latest, newer, sha: sha.slice(0, 7), notes, warnings, date: head.commit?.committer?.date || null };
@@ -140,9 +149,7 @@ module.exports = function createUpdater({ root, data, version, shellMode, secret
         notes = log.filter((e) => cmpVersion(e.version, version) > 0).flatMap((e) => (e.notes || []).map((n) => `${e.version}: ${n}`)).slice(0, 40);
       } catch { /* no changelog */ }
       try {
-        const launcher = await rawFile(sha, 'electron/main.js');
-        const cur = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
-        if (launcher.replace(/\r\n/g, '\n') !== cur.replace(/\r\n/g, '\n')) warnings.push('This update changes the app launcher, which can’t be updated from inside the app. Install it by copying the new version over.');
+        if (launcherChanged(await rawFile(sha, 'electron/main.js'), root)) warnings.push('This update changes the app launcher, which can’t be updated from inside the app. Install it by copying the new version over.');
       } catch { /* checked again when it's downloaded */ }
       if (depsMissing(remotePkg).length) warnings.push(`This update needs new libraries (${depsMissing(remotePkg).join(', ')}), which have to be installed by hand.`);
     }

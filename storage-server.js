@@ -147,7 +147,6 @@ module.exports = function createStorage({
    * the .exe, and it's rebuilt only when that stamp is missing (no .exe, or an update changed the source).
    */
   const LAUNCHER_EXE = 'Box-Deckspitter.exe';
-  const OLD_LAUNCHER_EXE = 'Box-DocSpitter.exe'; // its name before the rebrand
   async function buildLauncher() {
     if (!IS_WIN) return;
     const src = path.join(ROOT, 'tools', 'launcher.cs');
@@ -172,41 +171,6 @@ module.exports = function createStorage({
     (err, stdout) => (err ? reject(new Error('Launcher compile failed: ' + (stdout || err.message))) : resolve())));
     await fsp.rename(out, exe); // fails harmlessly if the .exe is still running; tried again next start
     console.log(`[${APP_NAME}] rebuilt ${LAUNCHER_EXE}`);
-  }
-
-  /**
-   * Once, after the rename: shortcuts that still point at Box-DocSpitter.exe (desktop, Start menu, taskbar pins, startup)
-   * are pointed at Box-Deckspitter.exe instead (and the old "Box-DocSpitter" shortcut name is updated), then the old
-   * launcher is deleted. A marker in data/ keeps it from running again; if the old file is busy it's tried next start.
-   */
-  async function migrateLauncher() {
-    if (!IS_WIN) return;
-    const oldExe = path.join(ROOT, OLD_LAUNCHER_EXE), newExe = path.join(ROOT, LAUNCHER_EXE);
-    const marker = path.join(DATA, '.launcher-renamed');
-    if (!fs.existsSync(newExe)) return;
-    if (!fs.existsSync(marker)) {
-      const script = [
-        "$old = $env:BDS_OLD; $new = $env:BDS_NEW; $ws = New-Object -ComObject WScript.Shell",
-        "$dirs = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('CommonDesktopDirectory'), (Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs'), [Environment]::GetFolderPath('Startup'), (Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar'), (Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\StartMenu'))",
-        "foreach ($d in $dirs) { if (-not $d -or -not (Test-Path -LiteralPath $d)) { continue }",
-        "  Get-ChildItem -LiteralPath $d -Filter *.lnk -Recurse -Depth 2 -ErrorAction SilentlyContinue | ForEach-Object {",
-        "    try {",
-        "      $l = $ws.CreateShortcut($_.FullName)",
-        "      if ($l.TargetPath -and ($l.TargetPath -ieq $old)) {",
-        "        $l.TargetPath = $new",
-        "        if ($l.IconLocation -and $l.IconLocation.ToLower().StartsWith($old.ToLower())) { $l.IconLocation = $new + ',0' }",
-        "        $l.Save()",
-        "        if ($_.BaseName -eq 'Box-DocSpitter' -and -not (Test-Path -LiteralPath (Join-Path $_.DirectoryName 'Box-Deckspitter.lnk'))) { Rename-Item -LiteralPath $_.FullName -NewName 'Box-Deckspitter.lnk' }",
-        "      }",
-        "    } catch { }",
-        "  } }",
-      ].join('\n');
-      await new Promise((resolve) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-        { env: { ...process.env, BDS_OLD: oldExe, BDS_NEW: newExe }, windowsHide: true, timeout: 30000 }, () => resolve()));
-      await fsp.writeFile(marker, new Date().toISOString()).catch(() => {});
-      console.log(`[${APP_NAME}] shortcuts moved to ${LAUNCHER_EXE}`);
-    }
-    await fsp.unlink(oldExe).then(() => console.log(`[${APP_NAME}] removed ${OLD_LAUNCHER_EXE}`)).catch(() => {});
   }
 
   function applyScanLine(tree, job, line) {
@@ -446,5 +410,5 @@ module.exports = function createStorage({
     },
   };
 
-  return { routes, drives, buildLauncher, migrateLauncher };
+  return { routes, drives, buildLauncher };
 };
