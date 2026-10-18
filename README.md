@@ -1,10 +1,8 @@
-# BOX//DECKSPITTER
+<img width="1482" height="941" alt="image" src="https://github.com/user-attachments/assets/4765730b-a31e-416f-b41a-598db4d91316" /># BOX//DECKSPITTER
 
 https://discord.gg/3qxNWFErAV
 
 > local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to
-
-![Box-Deckspitter home screen](docs/screenshot.png)
 
 A self-hosted document workstation that runs entirely on your PC: a Word-style editor, a PDF editor and
 form filler, a notepad, a code/config editor, spreadsheets, a layered image editor, offline OCR, a file
