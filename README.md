@@ -1,4 +1,4 @@
-<img width="1482" height="941" alt="image" src="https://github.com/user-attachments/assets/4765730b-a31e-416f-b41a-598db4d91316" /># BOX//DECKSPITTER
+# BOX//DECKSPITTER
 
 https://discord.gg/3qxNWFErAV
 
