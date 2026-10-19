@@ -329,8 +329,8 @@ export class TabsPart {
     if (!tab) {
       L.append(h('span', { class: 'sb-item mode' }, 'home'), h('span', { class: 'sb-item' }, `${this.tabs.length} open`));
       const root = this.info?.root || '';
-      // the last two folders are enough to tell copies apart ("Desktop\\Box-Deckspitter", "E:\\Box-Deckspitter")
-      const short = root.split(/[\\/]/).filter(Boolean).slice(-2).join('\\');
+      // the last two folders are enough to tell copies apart ("Desktop\\Box-Deckspitter", "E:\\Box-Deckspitter", "jane/bds")
+      const short = root.split(/[\\/]/).filter(Boolean).slice(-2).join(root.includes('\\') ? '\\' : '/');
       R.append(h('span', { class: 'sb-item' }, h('span', { class: 'sb-dot' }), 'local · 127.0.0.1'),
         root ? h('button', { class: 'sb-item sb-root', title: `Running from ${root}\nClick to open the folder`, onclick: () => api.reveal(root) }, icon('folder', 'sm'), short) : null,
         h('span', { class: 'sb-item' }, 'v' + (window.BDS?.version || '')));

@@ -98,7 +98,7 @@ export class StorageEditor extends BaseEditor {
           current.remove();
           title.textContent = `${root}`;
           const took = (j.elapsed || Date.now() - j.started) / 1000;
-          stats.textContent = `${(j.files || 0).toLocaleString()} files · ${(j.dirs || 0).toLocaleString()} folders · ${formatBytes(j.bytes || 0)} on disk · scanned in ${took < 10 ? took.toFixed(1) : Math.round(took)}s${j.engine === 'node' ? ' (portable mode)' : ''}${j.admin ? ' · admin' : ''}`;
+          stats.textContent = `${(j.files || 0).toLocaleString()} files · ${(j.dirs || 0).toLocaleString()} folders · ${formatBytes(j.bytes || 0)} on disk · scanned in ${took < 10 ? took.toFixed(1) : Math.round(took)}s${j.engine === 'node' && this.app.info?.platform === 'win32' ? ' (portable mode)' : ''}${j.admin ? ' · admin' : ''}`;
           clear(actions).append(
             h('button', { class: 'btn sm', onclick: () => this.scan(root) }, icon('refresh', 'sm'), 'Rescan'),
             !j.admin && this.app.info?.platform === 'win32'

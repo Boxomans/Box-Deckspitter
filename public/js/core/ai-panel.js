@@ -150,7 +150,7 @@ export class AiPanel {
         h('li', {}, 'Paste it below and press Save')),
       keyIn,
       h('button', { class: 'btn primary', onclick: save }, 'Save key'),
-      h('div', { class: 'faint', style: { fontSize: '11px', lineHeight: '1.5' } }, `The key is stored only in Box-Deckspitter\\data\\secrets.json, sealed to your Windows account, and is never shown in the app again. Text is sent to ${P.company} only when you press send or an action. Usage is billed to your ${P.company} account.`));
+      h('div', { class: 'faint', style: { fontSize: '11px', lineHeight: '1.5' } }, `The key is stored only in Box-Deckspitter${BDS.sep}data${BDS.sep}secrets.json, sealed ${BDS.sep === "/" ? "with your system keyring" : "to your Windows account"}, and is never shown in the app again. Text is sent to ${P.company} only when you press send or an action. Usage is billed to your ${P.company} account.`));
   }
 
   // ------------------------------------------------------------------ context

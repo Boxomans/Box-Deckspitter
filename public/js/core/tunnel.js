@@ -5,10 +5,13 @@
 // Other apps can only pick a line up through a virtual audio cable: set the line's output to the cable.
 
 import { PITCH_URL, chainFx, fxSig } from './tunnel-fx.js';
+import { api } from './api.js';
 
 const SYSTEM = 'system';
+const SYSTEM_LABEL = 'Box-Deckspitter-system-sound'; // the input platform.js makes for system sound
+export const LINUX = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
 const NONE = 'none';
-const VIRTUAL_RE = /virtual|cable|vb-audio|voicemeeter|vac\b/i;
+const VIRTUAL_RE = /virtual|cable|vb-audio|voicemeeter|vac\b|null output|null sink|boxline/i; // the last three: Linux's own kind
 export const GATE_DEFAULT = -50; // dB
 const GATE_URL = new URL('./tunnel-gate.js', import.meta.url).href;
 
@@ -167,7 +170,9 @@ class Tunnel {
       try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()); list = await navigator.mediaDevices.enumerateDevices(); } catch { /* no mic */ }
     }
     const pick = (kind) => list.filter((d) => d.kind === kind && d.deviceId !== 'communications').map((d) => ({ id: d.deviceId, label: d.label || 'Unnamed device' }));
-    this.devs = { inputs: pick('audioinput'), outputs: pick('audiooutput') };
+    const inputs = pick('audioinput');
+    // Linux: the app's own copy of the speakers' sound is "System sound", not one more input
+    this.devs = { inputs: inputs.filter((d) => d.label !== SYSTEM_LABEL), outputs: pick('audiooutput'), system: inputs.find((d) => d.label === SYSTEM_LABEL) || null };
     this.emit();
     return this.devs;
   }
@@ -209,7 +214,10 @@ class Tunnel {
     const s = this.streams.get(key);
     if (s) { s.users++; return s.stream; }
     let stream;
-    if (key === SYSTEM) {
+    if (key === SYSTEM && LINUX) {
+      // Chromium can't record system sound on Linux; PulseAudio / PipeWire offer it as an input, "Monitor of <speakers>"
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: await this.systemMonitor() }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 } });
+    } else if (key === SYSTEM) {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { mandatory: { chromeMediaSource: 'desktop' } },
         video: { mandatory: { chromeMediaSource: 'desktop', maxWidth: 1, maxHeight: 1, maxFrameRate: 1 } },
@@ -220,6 +228,22 @@ class Tunnel {
     }
     this.streams.set(key, { stream, users: 1 });
     return stream;
+  }
+
+  /** Linux: the id of the input that carries everything the default speakers play (made by the server, see platform.js). */
+  async systemMonitor() {
+    let made = null;
+    try { made = (await api.post('/api/sound/system-source')).name; } catch { /* fall back to a monitor input below */ }
+    await this.refreshDevices();
+    if (made && !this.devs.system) { await new Promise((r) => setTimeout(r, 400)); await this.refreshDevices(); } // a new input can take a moment to show up
+    if (this.devs.system) return this.devs.system.id;
+    const monitors = this.devs.inputs.filter((d) => /^Monitor of /i.test(d.label));
+    if (!monitors.length) throw new Error('No system sound to record: on Linux it comes from PulseAudio or PipeWire, and neither offers it here.');
+    let speakers = null;
+    try { speakers = (await api.get('/api/sound/speakers')).name; } catch { /* use the name match below */ }
+    const def = this.defaultOutput();
+    const named = (n) => n && monitors.find((m) => m.label.replace(/^Monitor of /i, '') === n);
+    return (named(speakers) || named(def?.label) || monitors[0]).id;
   }
 
   dropStream(key) {

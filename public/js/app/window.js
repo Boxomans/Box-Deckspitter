@@ -184,7 +184,7 @@ export class WindowPart {
     const rows = [
       ['New document', 'Alt+N'], ['Open file', 'Ctrl+O'], ['Save', 'Ctrl+S'], ['Save as', 'Ctrl+Shift+S'], ['Close tab', 'Alt+W'],
       ['Next / previous tab', 'Ctrl+Alt+→ / ←'], ['Jump to tab 1–9', 'Alt+1…9'], ['Print', 'Ctrl+P'], ['Find', 'Ctrl+F'], ['Find & replace', 'Ctrl+H'],
-      ['Zoom in / out / reset', 'Ctrl+= / - / 0'], ['Full screen', 'F11'], ['Focus mode (full screen, no bars)', 'Shift+F11'], ['Shortcuts', 'F1'], ['Lock the app (with a PIN set)', 'Ctrl+Alt+L'], ['Screenshot to the media dump (anywhere in Windows)', 'Win+Shift+Q'],
+      ['Zoom in / out / reset', 'Ctrl+= / - / 0'], ['Full screen', 'F11'], ['Focus mode (full screen, no bars)', 'Shift+F11'], ['Shortcuts', 'F1'], ['Lock the app (with a PIN set)', 'Ctrl+Alt+L'], this.info?.platform === 'linux' ? ['Screenshot to the media dump (anywhere on the desktop)', 'Super+Shift+Q'] : ['Screenshot to the media dump (anywhere in Windows)', 'Win+Shift+Q'],
     ];
     const hoverRows = [
       ['Rename what’s under the mouse', 'F2'], ['Put the original name back', 'Ctrl+F2'], ['Remove what’s under the mouse', 'Del'],
@@ -272,7 +272,7 @@ export class WindowPart {
         h('div', { class: 'row' }, h('img', { src: '/assets/icon.svg', style: { width: '44px' } }), h('div', {}, h('div', { class: 'brand-name', style: { fontSize: '15px' } }, 'BOX//DECKSPITTER'), h('div', { class: 'faint mono' }, 'v' + window.BDS?.version))),
         h('p', {}, 'A self-hosted document workstation. Everything runs on this PC at 127.0.0.1. Your files never leave it.'),
         h('p', { class: 'dim' }, 'Built with pdf.js, pdf-lib, Monaco, SheetJS, docx and JSZip, all served from your own disk.'),
-        h('p', { class: 'dim mono', style: { fontSize: '11.5px' } }, 'Backups of every save: Box-Deckspitter\\data\\backups'),
+        h('p', { class: 'dim mono', style: { fontSize: '11.5px' } }, `Backups of every save: Box-Deckspitter${BDS.sep}data${BDS.sep}backups`),
         h('p', { class: 'dim' }, 'Made by boxbind · Discord: @boxbind')),
     });
   }

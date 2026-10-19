@@ -2,12 +2,18 @@
 // (own icon, own taskbar entry, no browser chrome). Everything still talks to 127.0.0.1 with the per-launch token.
 // Loaded by electron/main.js (the boot file), which applies updates and rolls them back if this doesn't start.
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeImage, clipboard, ClipboardItem, powerMonitor, screen } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, nativeImage, clipboard, ClipboardItem, powerMonitor, screen, safeStorage } = require('electron');
 const { fork } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
+// Linux: Chromium only uses the keyring on desktops it recognises (GNOME, KDE…). Under a bare window manager (i3,
+// sway…) it picks no keyring at all, even when GNOME Keyring or KeePassXC is running, so ask for the Secret Service.
+if (process.platform === 'linux' && !app.commandLine.hasSwitch('password-store')
+  && !/gnome|kde|plasma|xfce|unity|pantheon|deepin|cinnamon|mate|budgie|ukui|lxqt/i.test(process.env.XDG_CURRENT_DESKTOP || '')) {
+  app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
+}
 // Windows caches icons by file path, so a redesigned icon gets a new file name or the old one keeps showing
 let ICON = path.join(ROOT, 'public', 'assets', 'icon-lavender.ico');
 // Copies told apart on the taskbar: one run from a git checkout (the dev copy) gets a red icon, one run from the temp
@@ -61,6 +67,8 @@ app.setAppUserModelId(APP_ID);
 Menu.setApplicationMenu(null);
 // UI sounds (hover etc.) should work before the first click; this is our own app window, not a website.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Linux on Wayland: keys that work in any app (Super+Shift+Q, BoxStudio's) go through the desktop's shortcut service
+if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
 
 /** Files passed on the command line (drag-and-drop onto the shortcut). */
 function fileArgs(argv) {
@@ -111,6 +119,18 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     server.on('message', (m) => {
       if (m && m.type === 'attached') attached = true;
       if (m && m.type === 'pdf') renderPdf(m);
+      // Linux: the server's secrets.json is sealed with the system keyring, which only this process can reach
+      if (m && m.type === 'seal') {
+        let reply;
+        try {
+          const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'system';
+          if (!safeStorage.isEncryptionAvailable()) throw new Error('no keyring');
+          const data = m.op === 'protect' ? safeStorage.encryptString(Buffer.from(m.data, 'base64').toString('utf8'))
+            : Buffer.from(safeStorage.decryptString(Buffer.from(m.data, 'base64')), 'utf8');
+          reply = { ok: true, data: data.toString('base64'), weak: /^basic/.test(backend) };
+        } catch (e) { reply = { ok: false, error: e.message }; }
+        try { server.send({ type: 'sealed', id: m.id, ...reply }); } catch { /* server gone */ }
+      }
       if (m && m.type === 'relaunch') {
         quitting = true;
         try { server?.kill(); } catch { /* gone */ }
@@ -332,6 +352,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
 
   // Desktop + Start menu shortcuts carrying the app id, so a pinned shortcut and the open window are one icon.
   ipcMain.handle('bds:shortcuts', () => {
+    if (process.platform === 'linux') return [linuxMenuEntry()];
     const made = [];
     const dirs = [app.getPath('desktop'), path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')];
     // a shortcut that already belongs to another copy of the app is left alone: this copy gets its own name
@@ -357,6 +378,23 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     }
     return made;
   });
+
+  /** Linux: the app menu entry (~/.local/share/applications), which starts this copy through Box-Deckspitter.sh. */
+  function linuxMenuEntry() {
+    const dir = path.join(process.env.XDG_DATA_HOME || path.join(app.getPath('home'), '.local', 'share'), 'applications');
+    // one entry per copy: the first is plain "box-deckspitter", others get a hash of their folder
+    const plain = path.join(dir, 'box-deckspitter.desktop');
+    const own = (f) => { try { return fs.readFileSync(f, 'utf8').includes(`Path=${ROOT}\n`); } catch { return true; } };
+    const file = !fs.existsSync(plain) || own(plain) ? plain
+      : path.join(dir, `box-deckspitter-${require('crypto').createHash('sha1').update(ROOT).digest('hex').slice(0, 8)}.desktop`);
+    const q = (s) => `"${s.replace(/(["`$\\])/g, '\\$1')}"`; // the desktop entry spec's quoting
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, ['[Desktop Entry]', 'Type=Application', 'Name=Box-Deckspitter',
+      'Comment=Local docs, PDFs, video, storage, text and code', `Exec=sh ${q(path.join(ROOT, 'Box-Deckspitter.sh'))} %F`, `Path=${ROOT}`,
+      `Icon=${path.join(ROOT, 'public', 'assets', 'icon-256.png')}`, 'Terminal=false', 'Categories=Office;Utility;AudioVideo;',
+      'StartupWMClass=Box-Deckspitter', ''].join('\n'), { mode: 0o755 });
+    return file;
+  }
 
   // ---- Secure notes (electron/secure-notes.js): encrypted here, in the window's own process. Only the app's
   // own page may ask; the local server never sees any of it.

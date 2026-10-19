@@ -1,4 +1,4 @@
-// Playlist sharing: a playlist (a folder at the top of the audio dump) → a short code to paste to a friend, or a
+// Playlist sharing: a playlist in the audio dump → a short code to paste to a friend, or a
 // .plylst file, listing where each song came from. Their copy reads that back and BoxTape downloads the songs.
 // Only links and names travel, never the music itself.
 
@@ -6,7 +6,6 @@
 
 const fs = require('fs');
 const fsp = fs.promises;
-const path = require('path');
 const zlib = require('zlib');
 
 const PREFIX = 'PLYLST1:';
@@ -115,22 +114,19 @@ function decode(text) {
   return { name: str(name, 80) || 'Shared playlist', songs };
 }
 
-module.exports = function createPlaylistShare({ dumpAbs, dumpRel, readJSONBody, requirePath }) {
-  const AUDIO = /\.(mp3|m4a|opus|ogg|wav|flac|aac|webm)$/i;
-
-  async function share(folder) {
-    const sub = dumpRel(folder, 'audio', { folder: true });
-    if (!sub || sub.includes('/')) throw Object.assign(new Error('Pick a playlist to share'), { status: 400 });
-    const dir = dumpAbs('audio', sub);
-    const names = (await fsp.readdir(dir, { withFileTypes: true }).catch(() => []))
-      .filter((e) => e.isFile() && AUDIO.test(e.name)).map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+module.exports = function createPlaylistShare({ dumpAbs, playlists, readJSONBody, requirePath }) {
+  async function share(playlist) {
+    const sub = String(playlist || '').trim();
+    if (!sub) throw Object.assign(new Error('Pick a playlist to share'), { status: 400 });
+    const songs0 = await playlists.songs(sub);
+    if (!songs0) throw Object.assign(new Error(`There’s no playlist called “${sub}”`), { status: 404 });
+    const names = [...songs0].sort((a, b) => a.split('/').pop().localeCompare(b.split('/').pop(), undefined, { numeric: true, sensitivity: 'base' }));
     if (!names.length) throw Object.assign(new Error('That playlist is empty'), { status: 400 });
     const songs = [];
     let linked = 0;
     for (const n of names.slice(0, MAX_SONGS)) {
-      const base = n.replace(/\.[^.]+$/, '');
-      const t = /\.mp3$/i.test(n) ? await readLinkTags(path.join(dir, n)).catch(() => ({})) : {};
+      const base = n.split('/').pop().replace(/\.[^.]+$/, '');
+      const t = /\.mp3$/i.test(n) ? await readLinkTags(dumpAbs('audio', n)).catch(() => ({})) : {};
       if (t.url) linked++;
       // without a title tag, the file name ("Artist - Song") stands in
       songs.push({ url: t.url || '', title: noNA(t.title || base), artist: noNA(t.artist || '') });
@@ -147,7 +143,8 @@ module.exports = function createPlaylistShare({ dumpAbs, dumpRel, readJSONBody, 
   }
 
   return {
-    'GET /api/audio/share': async (req, q) => share(q.get('folder')),
+    // ?playlist= (older pages sent ?folder=)
+    'GET /api/audio/share': async (req, q) => share(q.get('playlist') ?? q.get('folder')),
     // a code or a .plylst file's text (or the file itself, by path) → the playlist's name and songs
     'POST /api/audio/share/read': async (req) => {
       const { text, path: p } = await readJSONBody(req);

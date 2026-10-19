@@ -66,7 +66,7 @@ export async function addMailAccountDialog() {
       h('ol', {},
         h('li', {}, 'Turn on 2-Step Verification for the Google account, if it isn’t already.'),
         h('li', {}, 'Create an app password: ', h('a', { href: 'https://myaccount.google.com/apppasswords', target: '_blank', rel: 'noopener' }, 'myaccount.google.com/apppasswords'), ' — name it “Box-Deckspitter”.'),
-        h('li', {}, 'Paste the 16-letter password below. It’s stored only on this PC, in Box-Deckspitter\\data.')),
+        h('li', {}, `Paste the 16-letter password below. It’s stored only on this PC, in Box-Deckspitter${BDS.sep}data.`)),
       h('div', { class: 'form-grid' }, h('label', {}, 'Gmail address'), addr, h('label', {}, 'App password'), pass, h('label', {}, 'Your name'), name),
       h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Work or school Google accounts work too if their admin allows app passwords. You can remove the account any time in Settings → Email.'),
       err),

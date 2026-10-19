@@ -15,6 +15,15 @@ downloads, update checks).
 <p align="center"><img src="docs/screenshot-home.png" alt="The home screen with the Toolbox open and the music player docked"></p>
 <p align="center"><img src="docs/screenshot-home-2.webp" width="49%" alt="The home screen in another dark theme"> <img src="docs/screenshot-home-light.webp" width="49%" alt="The home screen in a light theme"></p>
 
+**What's in it** (more on each one below)
+
+- **Documents:** Word-style editor, PDF editor, Fill a form, notepad, code & config editor, spreadsheets, BoxDiff
+- **Pictures:** BoxPaint, the image viewer, BoxScribe (offline OCR), BoxConvert
+- **Video:** video editor, video trimmer, BoxKlep (video grabber), BoxStudio (screen recorder)
+- **Sound & music:** ♪ music player, BoxTape (YouTube/Spotify to MP3), BoxWave (audio editor), BoxBeat (drum machine), BoxTunnel (audio routing)
+- **Files & PC:** BoxSpaces (folder workspaces), StoragePeek (disk space), BoxSwap (file swapper), BoxLog (every log), BoxTerminal (shell)
+- **Everything else:** Browser (with an ad blocker), BoxMail (Gmail), BoxMap (offline world map), Weather, BoxTicker (market prices), Secure notes, Todo, calendar, clock with alarms and timers, AI assistant, clip history
+
 ## Start it
 
 | | |
@@ -33,6 +42,29 @@ http://127.0.0.1:7717 if you'd rather use a browser tab.
 Start Box-Deckspitter, right-click its button on the taskbar, and choose **Pin to taskbar**. If you pinned it
 before this update, unpin the old one first, because it launches bare Electron. Settings → Windows → **Add to
 Start menu & Desktop** makes shortcuts that group with the open window under one icon.
+
+## On Linux
+
+Box-Deckspitter runs on Linux too (any distro with a desktop, X11 or Wayland).
+
+1. Install Node.js and npm once (`sudo apt install nodejs npm`, `sudo dnf install nodejs npm` or
+   `sudo pacman -S nodejs npm`). They're only needed to download the app's parts on the first start.
+2. Download or clone this repo, then in its folder run `sh Box-Deckspitter.sh`. The first start downloads
+   `node_modules` (a few hundred MB), then the app opens. Files given after it open in the app.
+3. **Settings → Linux → Add to the app menu** puts it in your desktop's app menu.
+   **Choose file types…** in the same place makes it open PDFs, documents, text and so on when you
+   double-click them (on Linux it becomes the default straight away; **Remove** puts things back).
+
+Differences from Windows:
+- **yt-dlp and ffmpeg**: BoxTape's **Install them for me** downloads them into `data/bin/`, no admin needed.
+- **Screenshots** are **Super+Shift+Q**. On Wayland the desktop asks once whether Box-Deckspitter may take
+  screenshots, and only the main screen can be grabbed.
+- **BoxTunnel's "System sound"** needs PulseAudio or PipeWire (with `pactl`, from `pulseaudio-utils`).
+- **BoxTerminal** runs bash. **BoxLog** reads `/var/log` and your apps' logs (no Windows event logs).
+- Keys and passwords in `data/secrets.json` are sealed with your system keyring instead of your Windows account.
+- **Updates** work the same way. To go back after one, use **Settings → Updates → Go back to …**
+  (`Restore previous version.bat` is Windows only).
+- Windows-only for now: setting the desktop background, and StoragePeek's **Rescan as admin**.
 
 ## Open files with Box-Deckspitter
 
@@ -279,6 +311,55 @@ dump, or drop a sound file on the row. Each row has mute, solo, volume, pan and 
 (type it or tap it), swing and 8 to 64 steps. **Export** renders the loop as many times as you like into the
 audio dump as an MP3 (with ffmpeg) or WAV. Beats are saved in `data/beats.json`.
 
+**BoxStudio** (home page → BoxStudio) A screen recorder with scenes. Each scene stacks sources on one canvas of
+any size: screens, windows, cameras, pictures, videos, text and colour. Every source can be moved, resized,
+rotated, cropped and flipped. The PC's sound, any number of mics or line-ins and the sound of video sources are
+mixed, each with its own volume. Recordings are saved as MP4, MKV, WebM or MOV (through ffmpeg), into the media
+dump or a folder you pick. Hotkeys work while another app has focus: **Ctrl+Alt+F9** starts and stops,
+**Ctrl+Alt+F10** pauses, **Ctrl+Alt+F11** takes a screenshot of the output, and **Win+Shift+K** picks an area of
+the screen to record just that part. Change them in the studio's settings (click a box and press the keys). The
+setup is kept in `data/studio.json`.
+
+**BoxWave** (Toolbox → BoxWave, or right-click a sound → **Open in BoxWave**) A plain audio editor. Open a
+sound, the sound of a video, or record from a mic, and see the waveform. Select with the mouse to cut, copy,
+paste, delete, trim or silence. Amplify, normalize, fade, reverse, change the speed, or add BoxTunnel's effects
+(pitch, echo, reverb with room size and strength, robot, radio…). Exports WAV, or MP3, FLAC, OGG, Opus or M4A
+with ffmpeg. Undo keeps whole copies, so very long files keep fewer undo steps.
+
+**BoxMap** (Toolbox → BoxMap) A world map that works offline. Countries, borders, coastlines, lakes and about
+7,000 cities ship with the app (from Natural Earth). For street-level detail, pick an area and download it
+(OpenStreetMap vector tiles). That area then keeps every street, building, park and name with no connection.
+While online, places you haven't downloaded can show OpenStreetMap's own tiles, which are kept on disk once
+seen. Search, pins with notes and a distance tool. Downloads live in `data/maps/`, pins in `data/map-pins.json`.
+
+**BoxLog** (Toolbox → BoxLog) Every log on the PC in one place. Pick any number of sources: Windows event logs,
+log files from Windows, apps and games (Steam, Epic, Unity, Unreal, Minecraft and the usual launchers), or a
+folder or file of your own. They're merged into one timeline you can filter by words, regex, level, source and
+time range. **Live** follows the files as they grow. Quick starts on the empty page: what's being written right
+now, Windows errors and warnings, and recent game logs. Read-only: BoxLog never changes a log.
+
+**BoxTerminal** (Toolbox → BoxTerminal, or right-click a folder → **Open in BoxTerminal**) A shell inside the
+app: Windows PowerShell, PowerShell 7 or Command Prompt (bash on Linux), started in any folder. Up/Down walk
+your history, Tab completes, Shift+Enter adds a line, Ctrl+C stops what's running and Ctrl+L clears. It's a
+command shell, not a full terminal: programs that take over the screen or wait for a keypress (vim, less,
+"Press any key") won't work.
+
+**BoxTicker** (Toolbox → BoxTicker) The NASDAQ Composite and the S&P 500, plus any ticker you search for, each
+as a card with its price and a chart. The numbers come from Yahoo Finance's public feeds (no key needed) and
+refresh every 30 seconds while the tab is open. It only shows prices: no trading, no accounts.
+
+**Browser** (left sidebar → globe, or the home page) A web browser in its own tab, in the desktop app only.
+Pages run on a session of their own, so sites never see the app or your files. It has tabs, favorites with each
+site's logo, page zoom, find in page, a built-in **ad and tracker blocker** (turn it off per site), an
+**equalizer** for the sound of web pages, and unpacked Chrome extensions. Right-click a picture or video to send
+it to the media dump, save the page to the doc dump as a PDF, or hand the page to BoxKlep to grab its videos.
+Logins are kept only once they can be stored encrypted; until then the browser forgets them when the app closes.
+
+**Weather** (the weather button in the top bar, or Toolbox → Weather) The conditions and temperature for one
+place you pick by searching, on a button in the top bar or the right sidebar. Click it for the next hours and 7
+days, or pop out a small widget you can drag around. The Weather tool shows the full view: now, a 24-hour
+temperature line and the week. °F or °C, refreshed every 15 minutes. Forecasts come from Open-Meteo (free, no key).
+
 **Binary files** A fast hex viewer that identifies the file type.
 
 ## Side tabs (right edge)
@@ -366,6 +447,15 @@ the point of the encryption. Keep the sticky note somewhere other than next to t
   fires while you're typing in a text box, and everything it removes is recoverable (`.removed` folders,
   the Recycle Bin, or Ctrl+Z for layers).
 - **Menus**: press on a menu, drag to an item and let go to pick it, submenus included.
+- **Clock, alarms and timers**: the clock button in the top bar (or the right sidebar) shows the time. Click it for
+  other time zones (type a city, state or zone), **alarms** and a **countdown timer**. An alarm has a time, an
+  optional label and repeats once, every day, on weekdays or on weekends; switch each one on or off. The timer
+  takes minutes and seconds or a preset (1, 5, 10, 15 or 25 minutes, or 1 hour). When one goes off it rings,
+  shows a desktop notification and offers **Snooze 5m**. Alarms ring in the main window; a timer rings in the
+  window it was started in. 12- or 24-hour times.
+- **Calendar** (left sidebar): a month at a glance with holidays and your own events. An event has a start time
+  and a length (or is all day), can repeat weekly, monthly or yearly, and can ring through the clock's alarm before
+  it starts and/or when it ends. Today's events are listed in the clock's panel.
 - **Mouse back / forward** (buttons 4 and 5) step between tabs, or between folders over the file panel.
 - **Version history**: every save keeps the previous version (File → Version history).
 - **App PIN lock** (Settings → Security, off unless you turn it on): asks for a PIN when the app starts, after
@@ -423,8 +513,10 @@ the point of the encryption. Keep the sticky note somewhere other than next to t
 | `data/secure-notes/` | Secure notes, encrypted (`notes.bdsv`), this PC's DPAPI-sealed key (`device.key`) and the last 10 versions (`backups/`) |
 | `data/applock.json` | the app PIN lock (a scrypt hash); delete it to remove a forgotten app PIN |
 | `data/bin/` | the compiled StoragePeek scanner (rebuilt automatically if deleted) |
+| `data/studio.json` | BoxStudio's scenes, sources and hotkeys |
+| `data/maps/` | BoxMap's downloaded areas and the tiles it kept (`data/map-pins.json` has your pins) |
 | `doc-dump/` | the doc dump (removed files go to `doc-dump/.removed`) |
-| `audio-dump/` | songs for the ♪ player (removed songs go to `audio-dump/.removed`) |
+| `audio-dump/` | songs for the ♪ player (removed songs go to `audio-dump/.removed`; `.playlists.json` holds your playlists) |
 | `media-dump/` | the media dump: pictures, videos and sounds (removed files go to `media-dump/.removed`; an old `image-dump/` is moved here on start) |
 
 ## Under the hood
@@ -440,8 +532,10 @@ back; `electron/shell.js` is the window itself, which runs `server.js` as a chil
 `settings-transfer.js` (setup export/import and the app PIN lock), `dumps-server.js` (the dumps), `media-server.js`
 (streaming, yt-dlp / ffmpeg, BoxKlep and BoxTape downloads), `appearance-server.js` (backgrounds and your fonts),
 `spaces-server.js` (BoxSpaces), `storage-server.js` (StoragePeek), `market-server.js` (BoxTicker),
+`studio-server.js` (BoxStudio recordings and BoxWave exports), `map-server.js` (BoxMap), `log-server.js` (BoxLog),
+`terminal-server.js` (BoxTerminal), `weather-server.js` (Weather),
 `presence-server.js` (Discord), `ai-server.js` (the AI assistant) and `secrets-store.js` (the sealed keys and passwords).
-`electron/secure-notes.js` runs in the window process, not the server.
+`electron/secure-notes.js` and `electron/browser.js` (the Browser) run in the window process, not the server.
 
 The page is plain ES modules. `public/js/app.js` starts the app; its methods are spread over `public/js/app/`, a
 file per part (tabs, menus, home page, settings and so on). `public/js/core/tools.js` is the one list of tools:

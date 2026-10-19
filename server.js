@@ -13,7 +13,7 @@ const fsp = fs.promises;
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn, execFile, execFileSync } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const { pathToFileURL } = require('url');
 
@@ -43,7 +43,9 @@ function moveDumpFolder(from, to) {
 }
 moveDumpFolder(path.join(ROOT, 'pdf-dump'), DOC_DUMP);
 moveDumpFolder(path.join(ROOT, 'image-dump'), DUMP);
-const IS_WIN = process.platform === 'win32';
+const platform = require('./platform');
+const { IS_WIN, listDrives } = platform;
+const revealInExplorer = platform.reveal; // the file manager, whichever system this is
 const DUMP_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.avif', '.jfif', '.ico']);
 const DUMP_VIDEO_EXT = new Set(['.mp4', '.m4v', '.webm', '.mov', '.mkv', '.avi', '.wmv', '.ogv', '.3gp']);
 const DUMP_AUDIO_EXT = new Set(['.mp3', '.m4a', '.aac', '.wav', '.flac', '.ogg', '.oga', '.opus', '.weba']);
@@ -190,16 +192,6 @@ function knownFolder(name) {
   return candidates.find((c) => fs.existsSync(c)) || null;
 }
 
-function listDrives() {
-  if (!IS_WIN) return ['/'];
-  const out = [];
-  for (let c = 67; c <= 90; c++) { // C..Z
-    const d = String.fromCharCode(c) + ':\\';
-    try { if (fs.existsSync(d)) out.push(d); } catch { /* ignore */ }
-  }
-  return out;
-}
-
 function findBrowser() {
   const candidates = IS_WIN ? [
     path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft\\Edge\\Application\\msedge.exe'),
@@ -325,77 +317,6 @@ async function readSongTags(file) {
 // Native dialogs (Windows, via PowerShell + WinForms)
 // ---------------------------------------------------------------------------
 
-function psQuote(s) { return "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'"; }
-
-function buildFilter(filters) {
-  if (!Array.isArray(filters) || !filters.length) return 'All files (*.*)|*.*';
-  return filters.map((f) => {
-    const pats = (f.extensions || ['*']).map((e) => (e === '*' ? '*.*' : '*.' + e)).join(';');
-    return `${f.name} (${pats})|${pats}`;
-  }).join('|');
-}
-
-function nativeDialog(opts) {
-  if (!IS_WIN) return Promise.resolve({ unsupported: true });
-  const kind = opts.kind;
-  let s = `
-$ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-[System.Windows.Forms.Application]::EnableVisualStyles()
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$owner = New-Object System.Windows.Forms.Form
-$owner.TopMost = $true
-$owner.ShowInTaskbar = $false
-$owner.FormBorderStyle = 'None'
-$owner.StartPosition = 'CenterScreen'
-$owner.Size = New-Object System.Drawing.Size(1, 1)
-$owner.Opacity = 0
-$owner.Show()
-$owner.Activate()
-`;
-  if (kind === 'open') {
-    s += `$d = New-Object System.Windows.Forms.OpenFileDialog\n$d.Multiselect = ${opts.multi ? '$true' : '$false'}\n`;
-  } else if (kind === 'save') {
-    s += `$d = New-Object System.Windows.Forms.SaveFileDialog\n$d.OverwritePrompt = $true\n$d.AddExtension = $true\n$d.FileName = ${psQuote(opts.defaultName || '')}\n`;
-    if (opts.defaultExt) s += `$d.DefaultExt = ${psQuote(opts.defaultExt)}\n`;
-  } else {
-    s += `$d = New-Object System.Windows.Forms.FolderBrowserDialog\n$d.ShowNewFolderButton = $true\n`;
-    if (opts.title) s += `$d.Description = ${psQuote(opts.title)}\n`;
-  }
-  if (kind !== 'folder') {
-    s += `$d.Filter = ${psQuote(buildFilter(opts.filters))}\n$d.FilterIndex = ${Number(opts.filterIndex) || 1}\n`;
-    if (opts.title) s += `$d.Title = ${psQuote(opts.title)}\n`;
-    if (opts.initialDir && fs.existsSync(opts.initialDir)) s += `$d.InitialDirectory = ${psQuote(opts.initialDir)}\n`;
-  } else if (opts.initialDir && fs.existsSync(opts.initialDir)) {
-    s += `$d.SelectedPath = ${psQuote(opts.initialDir)}\n`;
-  }
-  s += `
-$r = $d.ShowDialog($owner)
-$owner.Close()
-if ($r -eq [System.Windows.Forms.DialogResult]::OK) {
-`;
-  if (kind === 'open') s += `  foreach ($f in $d.FileNames) { [Console]::Out.WriteLine('PATH:' + $f) }\n`;
-  else if (kind === 'save') s += `  [Console]::Out.WriteLine('PATH:' + $d.FileName)\n  [Console]::Out.WriteLine('FILTER:' + $d.FilterIndex)\n`;
-  else s += `  [Console]::Out.WriteLine('PATH:' + $d.SelectedPath)\n`;
-  s += '}\n';
-
-  const encoded = Buffer.from(s, 'utf16le').toString('base64');
-  return new Promise((resolve) => {
-    execFile('powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-      { windowsHide: true, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' },
-      (err, stdout, stderr) => {
-        if (err) return resolve({ unsupported: true, error: String(stderr || err.message).slice(0, 500) });
-        const lines = String(stdout).split(/\r?\n/);
-        const paths = lines.filter((l) => l.startsWith('PATH:')).map((l) => l.slice(5));
-        const fl = lines.find((l) => l.startsWith('FILTER:'));
-        if (!paths.length) return resolve({ cancelled: true });
-        resolve({ paths, filterIndex: fl ? Number(fl.slice(7)) : undefined });
-      });
-  });
-}
-
 // ---------------------------------------------------------------------------
 // HTML → PDF using a headless Chromium browser (Edge on Windows)
 // ---------------------------------------------------------------------------
@@ -448,22 +369,6 @@ async function unlockPdf(bytes) {
   }
   delete doc.context.trailerInfo.Encrypt;
   return Buffer.from(await doc.save({ useObjectStreams: false }));
-}
-
-/**
- * Opens Explorer with a file selected (or a folder opened). Explorer only understands /select,"C:\path"
- * with the quotes around the path alone, so the command line is built by hand: Node's own quoting wraps
- * the whole argument and Explorer then gives up and shows Documents.
- */
-function revealInExplorer(target, { select = true } = {}) {
-  if (!IS_WIN) {
-    spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [select ? path.dirname(target) : target], { detached: true, stdio: 'ignore' }).unref();
-    return;
-  }
-  const clean = String(target).replace(/"/g, '');
-  const exists = fs.existsSync(clean);
-  const arg = select && exists ? `/select,"${clean}"` : `"${exists ? clean : path.dirname(clean)}"`;
-  spawn('explorer.exe', [arg], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
 }
 
 async function htmlToPdf(html) {
@@ -620,17 +525,16 @@ const { routes: marketRoutes } = require('./market-server')({ BROWSER_UA });
 const { routes: weatherRoutes } = require('./weather-server')({ BROWSER_UA });
 const { routes: lyricsRoutes } = require('./lyrics-server')();
 const { routes: translateRoutes } = require('./translate-server')({ BROWSER_UA, readJSONBody });
-const { routes: dumpsRoutes, dumpRel, dumpName, dumpAbs, dumpRelOf } = require('./dumps-server')({
-  DUMP_AUDIO_EXT, DUMP_EXT, DUMP_VIDEO_EXT, IS_WIN, dumpOf, ok, readBody, readJSONBody, requirePath, revealInExplorer,
-  runProcess,
+const { routes: dumpsRoutes, dumpRel, dumpName, dumpAbs, dumpRelOf, playlists } = require('./dumps-server')({
+  DUMP_AUDIO_EXT, DUMP_EXT, DUMP_VIDEO_EXT, dumpOf, ok, platform, readBody, readJSONBody, requirePath, revealInExplorer,
 });
 const { routes: presenceRoutes, presence } = require('./presence-server')({ IS_WIN, readJSONBody });
 const { routes: appearanceRoutes, BG_DIR, FONT_DIR } = require('./appearance-server')({ DATA, IS_WIN, ok, readJSONBody, requirePath, writeJSON });
 const { routes: mediaRoutes, findExe, tools, streamFile, runCapture, newJob, runFfmpegJob, startJob } = require('./media-server')({
   AUDIO_DUMP, BROWSER_UA, DATA, IS_WIN, MEDIA_MIME, MIME, checkUrl, dumpAbs, dumpRel, dumpRelOf, klepFolder, ok,
-  readJSONBody, requirePath, spotify: { findOnYouTube: (it) => spotify.findOnYouTube(it) },
+  platform, playlists, readJSONBody, readSongTags, requirePath, spotify: { findOnYouTube: (it) => spotify.findOnYouTube(it) },
 });
-const { routes: spacesRoutes } = require('./spaces-server')({ IS_WIN, findExe, ok, psQuote, readJSONBody, requirePath, runCapture });
+const { routes: spacesRoutes } = require('./spaces-server')({ findExe, ok, platform, readJSONBody, requirePath, runCapture });
 const { routes: storageRoutes, drives, buildLauncher } = require('./storage-server')({
   APP_NAME, DATA, IS_WIN, PUBLIC, ROOT, listDrives, newJob, readJSONBody, requirePath, runCapture, startJob,
 });
@@ -640,11 +544,14 @@ const { routes: aiRoutes, forgetAiClient, aiChat } = require('./ai-server')({ ok
 const routes = {
   // Help → README: the app's own README.md
   'GET /api/readme': async () => ({ text: await fsp.readFile(path.join(ROOT, 'README.md'), 'utf8') }),
+  // Linux: the speakers system sound plays on (BoxTunnel records it from their monitor)
+  'GET /api/sound/speakers': async () => ({ name: await platform.defaultSpeakers() }),
+  'POST /api/sound/system-source': async () => ({ name: await platform.systemSoundSource() }),
   'GET /api/info': async () => ({
     app: APP_NAME, version: VERSION, platform: process.platform, sep: path.sep,
     home: os.homedir(), desktop: knownFolder('desktop'), documents: knownFolder('documents'),
     downloads: knownFolder('downloads'), pictures: knownFolder('pictures'),
-    drives: listDrives(), pdfExport: !!BROWSER || SHELL_MODE, nativeDialogs: IS_WIN, appMode: APP_MODE || SHELL_MODE, shell: SHELL_MODE,
+    drives: listDrives(), pdfExport: !!BROWSER || SHELL_MODE, nativeDialogs: SHELL_MODE || platform.hasFileDialogs(), appMode: APP_MODE || SHELL_MODE, shell: SHELL_MODE,
     user: os.userInfo().username,
     root: ROOT, // the folder this copy runs from (shown in the status bar)
     data: DATA, // where new BoxSpaces go by default (data/BoxSpaces)
@@ -770,7 +677,7 @@ const routes = {
     return { ok: true };
   },
 
-  'POST /api/dialog': async (req) => nativeDialog(await readJSONBody(req)),
+  'POST /api/dialog': async (req) => platform.fileDialog(await readJSONBody(req)),
 
   'POST /api/pdf/unlock': async (req) => {
     const bytes = await readBody(req, 300 * 1024 * 1024);
@@ -920,14 +827,12 @@ const routes = {
   },
   // ---- the music player: a song's genre and BPM, from its MP3 tag
   'GET /api/audio/tags': async (req, q) => readSongTags(requirePath(q.get('path'))),
-  // Any file → Windows clipboard as a file (used by the clip tab to re-copy files).
+  // Any file → the clipboard as a file (used by the clip tab to re-copy files).
   'POST /api/clip-file': async (req) => {
     const { path: p } = await readJSONBody(req);
     const full = requirePath(p);
     if (!fs.existsSync(full)) throw Object.assign(new Error('That file isn’t there any more'), { status: 404 });
-    if (!IS_WIN) throw Object.assign(new Error('Copying files needs Windows'), { status: 501 });
-    const ps = `Set-Clipboard -LiteralPath '${full.replace(/'/g, "''")}'`;
-    await runProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Sta', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], 15000);
+    await platform.copyFileToClipboard(full);
     return { ok: true };
   },
 
@@ -1004,7 +909,7 @@ Object.assign(routes, marketRoutes, weatherRoutes, lyricsRoutes, translateRoutes
 Object.assign(routes, require('./file-assoc')({ root: ROOT, data: DATA, isWin: IS_WIN, readJSONBody }));
 
 // Playlist sharing: a playlist → a code or a .plylst file of its songs' links, and back.
-Object.assign(routes, require('./playlist-share')({ dumpAbs, dumpRel, readJSONBody, requirePath }));
+Object.assign(routes, require('./playlist-share')({ dumpAbs, playlists, readJSONBody, requirePath }));
 
 // Settings export / import (.zip: settings + the still-encrypted Secure notes) and the app PIN lock.
 Object.assign(routes, require('./settings-transfer')({

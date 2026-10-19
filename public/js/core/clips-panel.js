@@ -176,7 +176,7 @@ export class ClipsPanel {
     upd();
     const res = await modal({
       title: s ? 'Edit snippet' : 'New snippet', wide: true,
-      body: h('div', { class: 'clip-edit' }, title, body, count, h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Stored only on this PC (Box-Deckspitter\\data). Settings → Reset erases it.')),
+      body: h('div', { class: 'clip-edit' }, title, body, count, h('div', { class: 'faint', style: { fontSize: '11px' } }, `Stored only on this PC (Box-Deckspitter${BDS.sep}data). Settings → Reset erases it.`)),
       buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Save', value: 'ok', primary: true }],
       onOpen: () => setTimeout(() => (s || text ? title : body).focus(), 40),
     });

@@ -12,7 +12,7 @@ const path = require('path');
 
 module.exports = function createMedia({
   AUDIO_DUMP, BROWSER_UA, DATA, IS_WIN, MEDIA_MIME, MIME, checkUrl, dumpAbs, dumpRel, dumpRelOf, klepFolder, ok,
-  readJSONBody, requirePath, spotify,
+  platform, playlists, readJSONBody, readSongTags, requirePath, spotify,
 }) {
   function findExe(name) {
     const exts = IS_WIN ? ['.exe', '.cmd', '.bat', ''] : [''];
@@ -505,9 +505,9 @@ module.exports = function createMedia({
    *  them. Runs once at start, before any download can be using the folder. */
   setTimeout(() => fsp.rm(path.join(AUDIO_DUMP, '.incoming'), { recursive: true, force: true }).catch(() => {}), 2000).unref?.();
 
-  async function grabAudio(job, items, parallel = 3, folder = '', retries = 3) {
-    // folder: a playlist (a folder in the audio dump) to save into; '' = the top of the audio dump
-    const destDir = folder ? dumpAbs('audio', folder) : AUDIO_DUMP;
+  async function grabAudio(job, items, parallel = 3, playlist = '', retries = 3) {
+    // songs land at the top of the audio dump; playlist: a playlist they're added to as each one finishes
+    const destDir = AUDIO_DUMP;
     await fsp.mkdir(destDir, { recursive: true });
     const children = new Set();
     let cancelled = false;
@@ -584,7 +584,8 @@ module.exports = function createMedia({
             tr.file = await ffmpegToMp3(it.url, dest, it.referer, onProgress, onChild);
           }
           tr.status = 'done';
-          tr.name = dumpRelOf('audio', tr.file) || path.basename(tr.file); // with its playlist in front, as the player names it
+          tr.name = dumpRelOf('audio', tr.file) || path.basename(tr.file); // its name in the audio dump, as the player names it
+          if (playlist) await playlists.add(playlist, [tr.name]).catch(() => {});
           job.done++;
         } catch (e) {
           if (cancelled) { tr.status = 'cancelled'; } else { tr.status = 'failed'; tr.error = e.message; job.failed++; }
@@ -638,17 +639,160 @@ module.exports = function createMedia({
     return { id: job.id };
   }
 
+  // ---- songs like a playlist's, from Deezer (free, no key; only artist names are sent)
+
+  const deezer = async (p) => {
+    const r = await fetch(`https://api.deezer.com/${p}`, { signal: AbortSignal.timeout(8000) });
+    const j = r.ok ? await r.json() : null;
+    if (!j || j.error) throw new Error('Deezer didn’t answer');
+    return j.data || [];
+  };
+  const deezerArtists = new Map(); // name → Deezer artist id (or null)
+  async function deezerArtist(name) {
+    const key = norm(name);
+    if (deezerArtists.has(key)) return deezerArtists.get(key);
+    const hit = (await deezer(`search/artist?${new URLSearchParams({ q: name, limit: '5' })}`)).find((a) => norm(a.name) === key) || null;
+    deezerArtists.set(key, hit?.id || null);
+    return hit?.id || null;
+  }
+
+  /** Who a playlist's songs are by: the artist tag, or "Artist - Song" in the file name. Most songs first. */
+  async function playlistArtists(paths) {
+    const count = new Map();
+    await mapLimit(paths.slice(0, 300), 8, async (p) => {
+      let artist = null;
+      try { artist = (await readSongTags(requirePath(p))).artist; } catch { /* unreadable: the name may still say */ }
+      if (!artist) { const m = /^(.+?)\s+[-–—]\s+.+$/.exec(path.basename(p).replace(/\.[^.]+$/, '')); if (m) artist = m[1]; }
+      artist = String(artist || '').split(/,|;|\s(?:feat\.?|ft\.?|&|x)\s/i)[0].trim();
+      if (!artist) return;
+      const k = norm(artist);
+      const c = count.get(k) || { name: artist, n: 0 };
+      c.n++;
+      count.set(k, c);
+    });
+    return [...count.values()].sort((a, b) => b.n - a.n);
+  }
+
+  const shuffled = (a) => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  /** Songs by artists like the playlist's (Deezer's related artists, then their top songs), leaving out songs already in
+   *  the audio dump; at most two per artist, best fits first. */
+  async function recommend(paths, have) {
+    const seeds = (await playlistArtists(paths)).slice(0, 6);
+    if (!seeds.length) return { items: [], note: 'None of these songs say who they’re by, so there’s nothing to go on.' };
+    const own = new Set(seeds.map((s) => norm(s.name)));
+    const related = new Map(); // artist id → { name, score }
+    const ids = await mapLimit(seeds, 3, (s) => deezerArtist(s.name).catch(() => null));
+    await mapLimit(seeds.map((s, i) => [s, ids[i]]).filter(([, id]) => id), 3, async ([s, id]) => {
+      const rel = await deezer(`artist/${id}/related?limit=8`).catch(() => []);
+      rel.forEach((a, k) => {
+        if (own.has(norm(a.name))) return;
+        const r = related.get(a.id) || { id: a.id, name: a.name, score: 0 };
+        r.score += s.n * (1 - k / 10); // liked by more of the playlist, and nearer the top of Deezer's list
+        related.set(a.id, r);
+      });
+    });
+    if (!ids.some(Boolean)) throw new Error('Deezer doesn’t know these artists');
+    const haveSet = new Set((have || []).map((n) => norm(String(n).replace(/\.[^.]+$/, '').split('/').pop())));
+    const owned = (artist, title) => {
+      const t = norm(title), a = norm(artist);
+      // "Artist - Song" names, and songs named just by their title
+      return [...haveSet].some((h) => h === t || (h.includes(t) && h.includes(a)));
+    };
+    // the closest six artists every time, and six more picked at random from the next ones, so asking again finds others
+    const ranked = [...related.values()].sort((a, b) => b.score - a.score);
+    const pick = [...ranked.slice(0, 6), ...shuffled(ranked.slice(6, 24)).slice(0, 6)];
+    const tops = await mapLimit(pick, 4, (a) => deezer(`artist/${a.id}/top?limit=8`).catch(() => []));
+    const seen = new Set();
+    const per = pick.map((a, i) => shuffled(tops[i].filter((t) => t.readable !== false && t.title && !owned(a.name, t.title_short || t.title)))
+      .filter((t) => { const k = norm(a.name) + '|' + norm(t.title_short || t.title); return !seen.has(k) && seen.add(k); }) // one of each song, not every version
+      .slice(0, 2).map((t) => ({ title: t.title_short || t.title, artist: t.artist?.name || a.name, duration: t.duration || null, url: t.link })));
+    // one song from each artist first, then the second ones
+    const items = [...per.map((s) => s[0]), ...per.map((s) => s[1])].filter(Boolean).slice(0, 20);
+    return { items, basedOn: seeds.map((s) => s.name) };
+  }
+
+  // ---- Linux: yt-dlp and ffmpeg into data/bin (findExe looks there first), no password needed. yt-dlp is its own
+  // official single-file build; ffmpeg the static build yt-dlp's own docs point to (BtbN), unpacked with the system's tar.
+  const LINUX_BUILDS = new Map([
+    ['x64', { ytdlp: 'yt-dlp_linux', ffmpeg: 'ffmpeg-master-latest-linux64-gpl.tar.xz' }],
+    ['arm64', { ytdlp: 'yt-dlp_linux_aarch64', ffmpeg: 'ffmpeg-master-latest-linuxarm64-gpl.tar.xz' }],
+  ]);
+  async function installLinuxTools() {
+    const builds = process.platform === 'linux' && LINUX_BUILDS.get(process.arch);
+    if (!builds) throw Object.assign(new Error(`Install them with your package manager: ${platform.installHint('yt-dlp')} and ${platform.installHint('ffmpeg')}`), { status: 400 });
+    const t = tools();
+    const want = [!t.ytdlp && 'yt-dlp', !t.ffmpeg && 'ffmpeg'].filter(Boolean);
+    if (!want.length) return { id: null, already: true };
+    const bin = path.join(DATA, 'bin');
+    const job = newJob(`Installing ${want.join(' + ')}`);
+    const fetchTo = async (url, dest, share) => {
+      const ctl = new AbortController();
+      job.cancel = () => ctl.abort();
+      const r = await fetch(url, { redirect: 'follow', signal: ctl.signal });
+      if (!r.ok || !r.body) throw new Error(`the download failed (${r.status})`);
+      const size = Number(r.headers.get('content-length')) || 0;
+      let got = 0;
+      const out = fs.createWriteStream(dest);
+      for await (const chunk of Readable.fromWeb(r.body)) {
+        got += chunk.length;
+        if (size) job.progress = share[0] + (got / size) * share[1];
+        if (!out.write(chunk)) await new Promise((res) => out.once('drain', res));
+      }
+      await new Promise((res, rej) => out.end((e) => (e ? rej(e) : res())));
+    };
+    return startJob(job, async () => {
+      await fsp.mkdir(bin, { recursive: true });
+      for (const [i, name] of want.entries()) {
+        const share = [i / want.length, 1 / want.length];
+        job.current = `Downloading ${name} (${i + 1} of ${want.length})${name === 'ffmpeg' ? ' — about 130 MB' : ''}…`;
+        try {
+          if (name === 'yt-dlp') {
+            const dest = path.join(bin, 'yt-dlp');
+            await fetchTo(`https://github.com/yt-dlp/yt-dlp/releases/latest/download/${builds.ytdlp}`, dest + '.part', share);
+            await fsp.chmod(dest + '.part', 0o755);
+            await fsp.rename(dest + '.part', dest);
+          } else {
+            const tmp = path.join(bin, '.ffmpeg-download');
+            await fsp.rm(tmp, { recursive: true, force: true });
+            await fsp.mkdir(tmp, { recursive: true });
+            try {
+              const xz = path.join(tmp, 'ffmpeg.tar.xz');
+              await fetchTo(`https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${builds.ffmpeg}`, xz, share);
+              job.current = 'Unpacking ffmpeg…';
+              await runCapture('tar', ['-xJf', xz, '-C', tmp, '--strip-components=2', '--wildcards', '*/bin/ffmpeg', '*/bin/ffprobe'], 5 * 60 * 1000);
+              for (const f of ['ffmpeg', 'ffprobe']) { await fsp.chmod(path.join(tmp, f), 0o755); await fsp.rename(path.join(tmp, f), path.join(bin, f)); }
+            } finally { await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {}); }
+          }
+        } catch (e) {
+          if (e.name === 'AbortError') throw e;
+          throw new Error(`Couldn’t install ${name} (${e.message}). Install it by hand: ${platform.installHint(name)}`);
+        }
+        if (!findExe(name)) throw new Error(`${name} was downloaded but won’t run here. Install it by hand: ${platform.installHint(name)}`);
+      }
+      job.current = null;
+    });
+  }
+
   const routes = {
+    'POST /api/music/recommend': async (req) => {
+      const { paths, have } = await readJSONBody(req);
+      if (!Array.isArray(paths) || !paths.length) throw Object.assign(new Error('That playlist is empty'), { status: 400 });
+      return recommend(paths.filter((p) => typeof p === 'string'), Array.isArray(have) ? have.slice(0, 20000) : []);
+    },
     'GET /api/tools': async () => {
       const t = tools();
-      return { ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: klepFolder(), mediaDump: dumpAbs('media', ''), canInstall: IS_WIN };
+      return {
+        ytdlp: !!t.ytdlp, ffmpeg: !!t.ffmpeg, ytdlpPath: t.ytdlp, ffmpegPath: t.ffmpeg, downloads: klepFolder(), mediaDump: dumpAbs('media', ''),
+        canInstall: IS_WIN || LINUX_BUILDS.has(process.arch) && process.platform === 'linux',
+        hints: { ytdlp: platform.installHint('yt-dlp'), ffmpeg: platform.installHint('ffmpeg') }, // to install them by hand
+      };
     },
 
     // installs whichever of yt-dlp / ffmpeg is missing with winget (Windows' own package manager), one after the other.
     // A job: the client polls /api/job for job.current (what's happening) and the end. winget puts both in its Links
     // folder, which findExe already looks in, so they work straight away without a restart.
     'POST /api/tools/install': async () => {
-      if (!IS_WIN) throw Object.assign(new Error('Installing these for you only works on Windows (use your package manager).'), { status: 400 });
+      if (!IS_WIN) return installLinuxTools();
       const t = tools();
       const want = [!t.ytdlp && ['yt-dlp', 'yt-dlp.yt-dlp'], !t.ffmpeg && ['ffmpeg', 'Gyan.FFmpeg']].filter(Boolean);
       if (!want.length) return { id: null, already: true };
@@ -730,16 +874,15 @@ module.exports = function createMedia({
 
     // Links → MP3s in the audio dump (one at a time; failures are skipped and reported per track).
     'POST /api/audio/grab': async (req) => {
-      const { items, parallel, folder, retries } = await readJSONBody(req);
+      const { items, parallel, playlist, folder, retries } = await readJSONBody(req);
       const list = (Array.isArray(items) ? items : []).filter((x) => x && typeof x.url === 'string').slice(0, 500);
       const lanes = Math.max(1, Math.min(6, Number(parallel) || 3));
       if (!list.length) throw Object.assign(new Error('Nothing to download'), { status: 400 });
-      // a playlist is one folder at the top of the audio dump
-      const sub = folder ? dumpRel(folder, 'audio', { folder: true }) : '';
-      if (sub.includes('/')) throw Object.assign(new Error('A playlist is a single folder name'), { status: 400 });
+      // folder: what older pages called the playlist
+      const pl = String(playlist ?? folder ?? '').trim();
       const job = newJob(list.length === 1 ? (list[0].title || list[0].url) : `${list.length} tracks`);
       const again = Number.isFinite(Number(retries)) ? Math.max(0, Math.min(10, Math.round(Number(retries)))) : 3;
-      return startJob(job, () => grabAudio(job, list, lanes, sub, again));
+      return startJob(job, () => grabAudio(job, list, lanes, pl, again));
     },
 
     'POST /api/klep/download': async (req) => {

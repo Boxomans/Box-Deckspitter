@@ -9,8 +9,9 @@
 //       secure key slot scrypt(secure key + PIN)                → HKDF → AES-256-GCM (for a new PC / fresh copy)
 //     scrypt is deliberately slow and memory-hungry (256 MiB per guess), so guessing a copied file is impractical.
 //     (Electron's crypto library has no Argon2, and scrypt needs nothing extra installed.)
-//   - The device key is random and sealed with Windows DPAPI under this Windows account, so a copied vault
-//     file can't be opened anywhere else with the passphrase — only with the secure key (+ PIN, if one is set).
+//   - The device key is random and sealed with Windows DPAPI under this Windows account (on Linux, with the system
+//     keyring through Electron's safeStorage), so a copied vault file can't be opened anywhere else with the
+//     passphrase — only with the secure key (+ PIN, if one is set).
 //   - The secure key is XXXX-XXXX-XXXX-XXXX-XXXX-XXXX: 24 random letters and numbers, not case-sensitive, no
 //     look-alikes (~120 bits), shown once at setup (a sticky note is fine). It's also kept inside the encrypted
 //     notes, so the secure key slot can be re-made when the PIN changes.
@@ -61,6 +62,31 @@ function open(key, box, aad) {
   d.setAAD(Buffer.from(aad));
   d.setAuthTag(unb64(box.tag));
   return Buffer.concat([d.update(unb64(box.ct)), d.final()]); // throws if the key is wrong or the data was changed
+}
+
+/** Linux: the system keyring (GNOME Keyring, KWallet…) through Electron's safeStorage. With no keyring Electron
+ *  falls back to a fixed built-in key ("basic_text"), which protects nothing, so that counts as no keyring. */
+const NO_KEYRING = 'Secure notes need the system keyring (GNOME Keyring or KWallet), and none is running.';
+function keyring() {
+  const { safeStorage } = require('electron');
+  if (!safeStorage.isEncryptionAvailable() || /^basic/.test(safeStorage.getSelectedStorageBackend?.() || '')) throw fail(NO_KEYRING, 'platform');
+  return safeStorage;
+}
+/** Can the device key be sealed here? null if so, else why not. */
+function sealProblem() {
+  if (process.platform === 'win32') return null;
+  if (process.platform !== 'linux') return 'Secure notes need Windows or Linux.';
+  try { keyring(); return null; } catch (e) { return e.message; }
+}
+/** The device key sealed to this computer's account: "2:" DPAPI on Windows, "3:" the keyring on Linux. */
+async function sealDevice(key) {
+  if (process.platform === 'win32') return '2:' + b64(await dpapi('protect', key));
+  return '3:' + b64(keyring().encryptString(b64(key)));
+}
+async function openDevice(saved) {
+  if (saved.startsWith('2:') && process.platform === 'win32') return dpapi('unprotect', unb64(saved.slice(2)), DPAPI_ENTROPY);
+  if (saved.startsWith('3:') && process.platform !== 'win32') return unb64(keyring().decryptString(unb64(saved.slice(2))));
+  throw new Error('sealed on another system');
 }
 
 /** Windows DPAPI (current user) through PowerShell. Data goes over stdin/stdout, never on the command line. */
@@ -164,19 +190,18 @@ module.exports = function createSecureNotes({ dir, clipboard, onLockChange = () 
       const key = crypto.randomBytes(32);
       fs.mkdirSync(dir, { recursive: true });
       if (fs.existsSync(DEVICE)) fs.copyFileSync(DEVICE, DEVICE + '.old');
-      fs.writeFileSync(DEVICE, '2:' + b64(await dpapi('protect', key)));
+      fs.writeFileSync(DEVICE, await sealDevice(key));
       return key;
     }
     if (!fs.existsSync(DEVICE)) throw fail('This PC’s key for Secure notes is missing. Open them with your secure key.', 'device');
     try {
       const saved = fs.readFileSync(DEVICE, 'utf8').trim();
-      if (!saved.startsWith('2:')) throw new Error('old key');
-      const key = await dpapi('unprotect', unb64(saved.slice(2)), DPAPI_ENTROPY);
+      const key = await openDevice(saved);
       if (key.length !== 32) throw new Error('bad key');
       return key;
     } catch (e) {
       if (e.code === 'platform') throw e;
-      throw fail('These Secure notes were set up on another PC or Windows account, so they can’t be opened here with the passphrase. Open them with your secure key.', 'device');
+      throw fail('These Secure notes were set up on another PC or account, so they can’t be opened here with the passphrase. Open them with your secure key.', 'device');
     }
   }
 
@@ -310,7 +335,8 @@ module.exports = function createSecureNotes({ dir, clipboard, onLockChange = () 
       pinSet: data ? !!data.pin : !!pinWrap,
       autoLockMin: data ? Number(data.settings?.autoLockMin ?? 5) : null,
       count: data ? data.entries.length : null,
-      platform: process.platform === 'win32',
+      platform: !sealProblem(),
+      platformNote: sealProblem(),
     }),
 
     create: async ({ passphrase, pin }) => {

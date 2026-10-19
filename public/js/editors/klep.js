@@ -155,13 +155,13 @@ export class KlepEditor extends BaseEditor {
   }
 
   ytdlpHelp() {
-    const cmd = 'winget install yt-dlp';
+    const cmd = this.tools?.hints?.ytdlp || 'winget install yt-dlp';
     return h('div', { class: 'klep-help' },
       h('div', { class: 'klep-help-title' }, icon('info', 'sm'), 'This site needs yt-dlp'),
       h('div', {}, 'YouTube and most social sites don’t expose a plain video file. yt-dlp is the free, open-source tool that reads them — BoxKlep uses it automatically once it’s installed.'),
       h('div', { class: 'row' }, h('code', { class: 'klep-cmd' }, cmd),
         h('button', { class: 'btn sm', onclick: () => { navigator.clipboard.writeText(cmd); toast('Copied — paste it into a terminal', { type: 'ok' }); } }, icon('copy', 'sm'), 'Copy')),
-      h('div', { class: 'faint' }, 'Optional, for best quality (merging HD video + audio): ', h('code', {}, 'winget install Gyan.FFmpeg'), '. Then restart Box-Deckspitter.'));
+      h('div', { class: 'faint' }, 'Optional, for best quality (merging HD video + audio): ', h('code', {}, this.tools?.hints?.ffmpeg || 'winget install Gyan.FFmpeg'), '. Then restart Box-Deckspitter.'));
   }
 
   card(it, res) {
@@ -240,7 +240,7 @@ export class KlepEditor extends BaseEditor {
 
   /** Convert to MP3 into the audio dump (one job for the whole batch). */
   async toMp3(list) {
-    if (!this.tools?.ffmpeg) return toast('Making MP3s needs ffmpeg: winget install Gyan.FFmpeg, then restart Box-Deckspitter.', { type: 'warn', timeout: 6000 });
+    if (!this.tools?.ffmpeg) return toast(`Making MP3s needs ffmpeg: ${this.tools?.hints?.ffmpeg || 'winget install Gyan.FFmpeg'}, then restart Box-Deckspitter.`, { type: 'warn', timeout: 6000 });
     const label = list.length === 1 ? `♪ ${list[0].name || list[0].title || 'audio'}` : `♪ ${list.length} tracks → MP3`;
     const row = this.addJobRow(label);
     try {

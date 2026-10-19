@@ -43,7 +43,8 @@ module.exports = function createTerminal({ requirePath, readJSONBody, findExe })
       cmd = s.shell === 'pwsh' ? (findExe?.('pwsh') || 'pwsh') : 'powershell.exe';
       args = ['-NoLogo', '-NoProfile', '-NonInteractive', ...(IS_WIN ? ['-ExecutionPolicy', 'Bypass'] : []), '-Command', '-'];
     }
-    const p = spawn(cmd, args, { cwd: s.cwd, windowsHide: true, env: { ...process.env, TERM: 'dumb' } });
+    // elsewhere the shell leads its own process group, so Stop takes down what it's running too (see kill)
+    const p = spawn(cmd, args, { cwd: s.cwd, windowsHide: true, detached: !IS_WIN, env: { ...process.env, TERM: 'dumb' } });
     s.proc = p;
     s.partial = '';
     const feed = (kind) => (d) => {
@@ -92,10 +93,10 @@ module.exports = function createTerminal({ requirePath, readJSONBody, findExe })
     if (!p || p.exitCode != null) return;
     try {
       if (IS_WIN) execFile('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true }, () => {});
-      else p.kill('SIGKILL');
+      else { try { process.kill(-p.pid, 'SIGKILL'); } catch { p.kill('SIGKILL'); } }
     } catch { /* already gone */ }
   }
-  process.on('exit', () => { for (const s of sessions.values()) { try { s.proc?.kill(); } catch { /* ignore */ } } });
+  process.on('exit', () => { for (const s of sessions.values()) { try { if (IS_WIN) s.proc?.kill(); else if (s.proc) process.kill(-s.proc.pid, 'SIGKILL'); } catch { /* ignore */ } } });
 
   const get = (id) => { const s = sessions.get(id); if (!s) throw err(404, 'That terminal isn’t running any more'); return s; };
 

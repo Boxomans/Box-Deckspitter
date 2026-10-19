@@ -9,8 +9,7 @@ const fsp = require('fs').promises;
 const path = require('path');
 
 module.exports = function createDumps({
-  DUMP_AUDIO_EXT, DUMP_EXT, DUMP_VIDEO_EXT, IS_WIN, dumpOf, ok, readBody, readJSONBody, requirePath, revealInExplorer,
-  runProcess,
+  DUMP_AUDIO_EXT, DUMP_EXT, DUMP_VIDEO_EXT, dumpOf, ok, platform, readBody, readJSONBody, requirePath, revealInExplorer,
 }) {
   /** A number that goes up whenever something in a dump changes on disk (Explorer included); watched from the first ask. */
   const dumpWatch = new Map();
@@ -91,7 +90,137 @@ module.exports = function createDumps({
     return candidate;
   }
 
+  // ---- playlists: lists of songs in the audio dump, kept in audio-dump/.playlists.json (so they travel with the songs).
+  // A song can be in any number of them; the files themselves stay wherever they are. Before these, a playlist was a
+  // folder at the top of the audio dump: the first read turns each of those folders into a list of its songs.
+  const PL_FILE = () => path.join(dumpOf('audio').dir, '.playlists.json');
+  const plName = (n) => String(n ?? '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/^[. ]+|[. ]+$/g, '').replace(/\s+/g, ' ').slice(0, 80);
+  const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+  let plChain = Promise.resolve();
+  async function readLists() {
+    const raw = await fsp.readFile(PL_FILE(), 'utf8').catch(() => null);
+    if (raw != null) {
+      try {
+        const j = JSON.parse(raw);
+        return (Array.isArray(j.lists) ? j.lists : []).filter((l) => l && plName(l.name))
+          .map((l) => ({ name: plName(l.name), songs: [...new Set((Array.isArray(l.songs) ? l.songs : []).filter((s) => typeof s === 'string'))] }));
+      } catch { /* damaged: kept aside below, and the folders are read again */ }
+      await fsp.rename(PL_FILE(), `${PL_FILE()}.damaged-${Date.now()}`).catch(() => {});
+    }
+    const lists = [];
+    for (const e of await fsp.readdir(dumpOf('audio').dir, { withFileTypes: true }).catch(() => [])) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue;
+      lists.push({ name: plName(e.name) || e.name, songs: await walkDump('audio', e.name, 1) });
+    }
+    lists.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    await writeLists(lists);
+    return lists;
+  }
+  async function writeLists(lists) {
+    const tmp = `${PL_FILE()}.${process.pid}.tmp`;
+    await fsp.writeFile(tmp, JSON.stringify({ version: 1, lists }, null, 1));
+    await fsp.rename(tmp, PL_FILE());
+    // the file is hidden from the dump's watch, so open players are told here
+    const w = dumpWatch.get(dumpOf('audio').dir);
+    if (w) w.rev++;
+  }
+  /** Change the playlists one at a time (downloads finish side by side). fn changes `lists` in place; whatever it
+   *  returns is passed back. */
+  function editLists(fn) {
+    const run = plChain.then(async () => {
+      const lists = await readLists();
+      const before = JSON.stringify(lists);
+      const out = await fn(lists);
+      if (JSON.stringify(lists) !== before) await writeLists(lists);
+      return out;
+    });
+    plChain = run.catch(() => {});
+    return run;
+  }
+  const findList = (lists, name) => {
+    const n = plName(name);
+    const l = n && lists.find((x) => sameName(x.name, n));
+    if (!l) throw Object.assign(new Error(`There’s no playlist called “${n}”`), { status: 404 });
+    return l;
+  };
+  /** The playlists with their songs, as the dump has them now. A song moved or renamed outside the app is found again
+   *  by its file name when that's the only one; songs that are gone stay listed (they come back if the file does). */
+  async function playlistsNow() {
+    const files = await walkDump('audio');
+    const have = new Set(files);
+    const byBase = new Map();
+    for (const f of files) { const b = f.split('/').pop().toLowerCase(); byBase.set(b, byBase.has(b) ? null : f); }
+    return editLists((lists) => {
+      for (const l of lists) l.songs = [...new Set(l.songs.map((s) => (have.has(s) ? s : byBase.get(s.split('/').pop().toLowerCase()) || s)))];
+      return lists.map((l) => ({ name: l.name, songs: l.songs.filter((s) => have.has(s)) }));
+    });
+  }
+  /** Files and folders in the audio dump moved or renamed ([[from, to], …]): the playlists follow them. */
+  const songsMoved = (pairs) => (pairs.length ? editLists((lists) => {
+    for (const l of lists) {
+      l.songs = [...new Set(l.songs.map((s) => {
+        for (const [from, to] of pairs) {
+          if (s === from) return to;
+          if (s.startsWith(from + '/')) return to + s.slice(from.length);
+        }
+        return s;
+      }))];
+    }
+  }) : null);
+  /** Files or folders taken out of the audio dump: out of the playlists too. */
+  const songsGone = (names) => editLists((lists) => {
+    for (const l of lists) l.songs = l.songs.filter((s) => !names.some((n) => s === n || s.startsWith(n + '/')));
+  });
+  const playlists = {
+    now: playlistsNow,
+    /** Songs (names in the audio dump) into a playlist, which is made if it isn't there. */
+    add: (name, songs) => editLists((lists) => {
+      const n = plName(name);
+      if (!n) throw Object.assign(new Error('Give the playlist a name'), { status: 400 });
+      let l = lists.find((x) => sameName(x.name, n));
+      if (!l) {
+        lists.push(l = { name: n, songs: [] });
+        lists.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+      }
+      for (const s of songs) if (!l.songs.includes(s)) l.songs.push(s);
+      return l.name;
+    }),
+    songs: async (name) => (await playlistsNow()).find((l) => sameName(l.name, plName(name)))?.songs || null,
+  };
+
   const routes = {
+    // ---- playlists (see above)
+    'GET /api/audio/playlists': async () => ({ lists: await playlistsNow() }),
+    // { op: 'create' | 'rename' | 'delete' | 'add' | 'remove', name, to, songs }
+    'POST /api/audio/playlists': async (req) => {
+      const { op, name, to, songs } = await readJSONBody(req);
+      const names = (Array.isArray(songs) ? songs : []).slice(0, 5000).map((s) => dumpName(s, 'audio'));
+      const out = await editLists((lists) => {
+        if (op === 'create' || op === 'add') {
+          const n = plName(name);
+          if (!n) throw Object.assign(new Error('Give the playlist a name'), { status: 400 });
+          let l = lists.find((x) => sameName(x.name, n));
+          if (!l) lists.push(l = { name: n, songs: [] });
+          else if (op === 'create' && !names.length) throw Object.assign(new Error('That name is taken'), { status: 409 });
+          for (const s of names) if (!l.songs.includes(s)) l.songs.push(s);
+          lists.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+          return l.name;
+        }
+        const l = findList(lists, name);
+        if (op === 'remove') l.songs = l.songs.filter((s) => !names.includes(s));
+        else if (op === 'delete') lists.splice(lists.indexOf(l), 1);
+        else if (op === 'rename') {
+          const n = plName(to);
+          if (!n) throw Object.assign(new Error('Give the playlist a name'), { status: 400 });
+          if (lists.some((x) => x !== l && sameName(x.name, n))) throw Object.assign(new Error('That name is taken'), { status: 409 });
+          l.name = n;
+        } else throw Object.assign(new Error('Unknown playlist change'), { status: 400 });
+        lists.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+        return l.name;
+      });
+      return { ok: true, name: out, lists: await playlistsNow() };
+    },
+
     // ---- dumps: folders of reusable images / PDFs, shown in the document editor's bottom drawers
     // ?dir=<folder> (even empty): that folder's subfolders and files. Without dir: every file, folders included
     // (for pickers that just want everything). Item names are paths inside the dump ("trips/beach.png").
@@ -143,6 +272,7 @@ module.exports = function createDumps({
       const dest = dumpRel(to, kind, { folder: true });
       if (dest && !(await fsp.stat(dumpAbs(kind, dest)).catch(() => null))?.isDirectory()) throw Object.assign(new Error('That folder isn’t there any more'), { status: 404 });
       const moved = [];
+      const pairs = [];
       for (const n of Array.isArray(names) ? names.slice(0, 2000) : []) {
         const e = await dumpEntry(n, kind);
         if (relParent(e.rel) === dest) continue; // already there
@@ -156,7 +286,9 @@ module.exports = function createDumps({
         } else target = await uniqueDumpPath(relJoin(dest, base), kind);
         await fsp.rename(e.full, target);
         moved.push(dumpRelOf(kind, target));
+        pairs.push([e.rel, moved[moved.length - 1]]);
       }
+      if (kind === 'audio') await songsMoved(pairs);
       return { ok: true, moved };
     },
     // Identical files in a dump: same size first (cheap), then a SHA-1 of the contents to be sure.
@@ -210,6 +342,7 @@ module.exports = function createDumps({
         if (sub == null || relParent(inside) === sub) return { ok: true, name: inside, path: file, already: true };
         const dest = await uniqueDumpPath(relJoin(sub, path.basename(file)), kind);
         await fsp.rename(file, dest);
+        if (kind === 'audio') await songsMoved([[inside, dumpRelOf(kind, dest)]]);
         return { ok: true, name: dumpRelOf(kind, dest), path: dest, moved: true };
       }
       const dest = await uniqueDumpPath(n, kind);
@@ -234,6 +367,7 @@ module.exports = function createDumps({
       let dest = path.join(bin, base);
       if (fs.existsSync(dest)) dest = path.join(bin, `${Date.now()}-${base}`);
       await fsp.rename(e.full, dest);
+      if (kind === 'audio') await songsGone([e.rel]);
       return { ok: true };
     },
     // `to` is a new name in the same folder, or a path inside the dump when it has a "/".
@@ -249,6 +383,7 @@ module.exports = function createDumps({
       if (e.isDir && (b + '/').toLowerCase().startsWith(e.rel.toLowerCase() + '/') && b.toLowerCase() !== e.rel.toLowerCase()) throw Object.assign(new Error('Can’t put a folder inside itself'), { status: 400 });
       await fsp.mkdir(path.dirname(target), { recursive: true });
       await fsp.rename(e.full, target);
+      if (kind === 'audio') await songsMoved([[e.rel, b]]);
       return { ok: true, name: b };
     },
     'POST /api/dump/reveal': async (req) => {
@@ -259,18 +394,16 @@ module.exports = function createDumps({
       else revealInExplorer(d.dir, { select: false });
       return { ok: true };
     },
-    // Puts a dump file on the Windows clipboard as a file (like Ctrl+C in Explorer), so it pastes into
+    // Puts a dump file on the clipboard as a file (like Ctrl+C in Explorer), so it pastes into
     // Explorer, Discord, email and so on.
     'POST /api/dump/clip': async (req) => {
       const { kind, name } = await readJSONBody(req);
       const full = dumpAbs(kind, dumpName(name, kind));
       if (!fs.existsSync(full)) throw Object.assign(new Error('File not found'), { status: 404 });
-      if (!IS_WIN) throw Object.assign(new Error('Copying files needs Windows'), { status: 501 });
-      const ps = `Set-Clipboard -LiteralPath '${full.replace(/'/g, "''")}'`;
-      await runProcess('powershell.exe', ['-NoProfile', '-NonInteractive', '-Sta', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], 15000);
+      await platform.copyFileToClipboard(full);
       return { ok: true };
     },
   };
 
-  return { routes, dumpRel, dumpName, dumpAbs, dumpRelOf };
+  return { routes, dumpRel, dumpName, dumpAbs, dumpRelOf, playlists };
 };

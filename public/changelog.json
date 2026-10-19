@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.1.5",
+    "date": "2026-10-19",
+    "notes": [
+      "Linux: Box-Deckspitter now runs on Linux. Start it with `sh Box-Deckspitter.sh`; the first start downloads its parts. Settings › Linux adds it to the app menu and can make it open your file types when you double-click them. Screenshots are Super+Shift+Q (on Wayland the desktop asks once whether it may take them). BoxTunnel's System sound, BoxTerminal (bash), BoxLog, StoragePeek, and the yt-dlp/ffmpeg installer all work there.",
+      "Playlists are now lists instead of folders: a song can be in several playlists. Right-click a song → Add to playlist, or drag it onto a playlist; \"Remove from …\" takes it out of just that one. Deleting a playlist with its songs keeps the ones that are also in other playlists.",
+      "BoxTape: songs you already have still go into the playlist you're downloading to, even when they're left unticked.",
+      "Music: long song titles scroll. Recommended songs under a playlist can be hidden. The player's window button opens the Music tab.",
+      "Paths shown in the app use the right slashes for your system.",
+      "README: sections for BoxStudio, BoxWave, BoxMap, BoxLog, BoxTerminal, BoxTicker, Browser, Weather, and the clock with alarms and timers; a short list of everything at the top; and a Linux section."
+    ]
+  },
+  {
     "version": "1.1.4",
     "date": "2026-10-19",
     "notes": [

@@ -126,7 +126,7 @@ export class DumpsPart {
       if (paths.length) { await this.copyToDump(paths, kind, sub); again(); }
     });
     const { folders = [], items = [] } = res;
-    if (!folders.length && !items.length) list.append(h('div', { class: 'empty-note' }, sub ? 'Empty folder. Drop files here, or Shift+drag them in.' : `Empty. Drop files here, or Shift+drag them in from Files. They live in Box-Deckspitter\\${folder}.`));
+    if (!folders.length && !items.length) list.append(h('div', { class: 'empty-note' }, sub ? 'Empty folder. Drop files here, or Shift+drag them in.' : `Empty. Drop files here, or Shift+drag them in from Files. They live in Box-Deckspitter${BDS.sep}${folder}.`));
     for (const f of folders) {
       const row = h('button', { class: 'file-row dir dump-row', title: `${f.base}\n${f.count} item${f.count === 1 ? '' : 's'}\nClick to open · drop files here to put them in it · F2 rename · Del remove` },
         h('span', { class: 'fr-icon' }, icon('folder', 'sm')),

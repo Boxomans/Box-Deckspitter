@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="/css/editors.css">
   <style id="print-page-style"></style>
   <script>
-    window.BDS = { token: '%%TOKEN%%', version: '%%VERSION%%' };
+    window.BDS = { token: '%%TOKEN%%', version: '%%VERSION%%', sep: /Windows/.test(navigator.userAgent) ? '\\' : '/' };
     try {
       var t = localStorage.getItem('bds-theme'); if (t) document.documentElement.dataset.theme = t;
       var c = JSON.parse(localStorage.getItem('bds-custom-theme') || 'null'); // a custom palette, put on before the app loads

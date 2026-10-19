@@ -4,14 +4,19 @@
 // clipboard is never touched.
 // Window positions come from a small PowerShell helper (Win32 calls), started on the first press and kept for a while;
 // it also captures any screen that has Windows HDR on, which the usual capture gets wrong (see HDR_CS).
+// Linux on Wayland: apps can't read the screen there, so the desktop's screenshot service takes the picture
+// (snip-portal.py; GNOME and KDE ask once, then remember), or failing that its "share your screen" picker. Wayland
+// doesn't let an app place its windows either, so there's one overlay, full screen, on the main display.
 
 const { BrowserWindow, desktopCapturer, globalShortcut, ipcMain, nativeImage, screen } = require('electron');
-const { spawn } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const KEY = 'Super+Shift+Q';
+const WAYLAND = process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland';
+const PORTAL_PY = path.join(__dirname, 'snip-portal.py');
 const HELPER_IDLE = 10 * 60 * 1000;
 
 // Top-level windows front to back (visible, not minimised, not hidden by Windows, with a title), the one in front and
@@ -388,6 +393,8 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
   /** Puts a window back in front (and un-minimises it). */
   const refocus = (hwnd) => (hwnd ? ask(`focus ${Math.trunc(Number(hwnd))}`) : Promise.resolve(null));
   function ask(cmd) {
+    // the helper is Windows-only: elsewhere there's no window list (a click takes the whole screen) and no HDR fix
+    if (process.platform !== 'win32') return Promise.resolve(null);
     clearTimeout(idle);
     idle = setTimeout(() => { try { helper?.kill(); } catch { /* gone */ } helper = null; }, HELPER_IDLE);
     if (!helper) helper = startHelper();
@@ -415,6 +422,35 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
       const sources = got.get(`${n.width}x${n.height}`) || [];
       return { display: d, image: (sources.find((s) => s.display_id === String(d.id)) || sources[i])?.thumbnail };
     }).filter((s) => s.image && !s.image.isEmpty());
+  }
+
+  /** Wayland: the whole desktop from the screenshot service, cut into one picture per display; null if it was
+   *  cancelled or refused. Without the service (no python3-gi, no portal) the usual capture asks through the picker. */
+  async function grabWayland() {
+    const res = await new Promise((resolve) => {
+      execFile('python3', [PORTAL_PY], { timeout: 100000 }, (err, stdout) => {
+        try { resolve(JSON.parse(String(stdout).trim().split('\n').pop())); } catch { resolve({ error: err ? 'nopython' : 'bad answer' }); }
+      });
+    });
+    if (res.error === 'cancelled' || res.error === 'refused') { log(`screenshot service: ${res.error}`); return null; }
+    if (!res.uri) { log(`screenshot service unavailable (${res.error}${res.detail ? ': ' + res.detail : ''}), using the screen picker`); return grabScreens(); }
+    let file = '';
+    try { file = decodeURIComponent(new URL(res.uri).pathname); } catch { return grabScreens(); }
+    const whole = nativeImage.createFromPath(file);
+    // the service saved it as a file of its own; the screenshot that's kept is the one cut out of it
+    try { fs.unlinkSync(file); } catch { /* left where it is */ }
+    if (whole.isEmpty()) return grabScreens();
+    // one picture spans every display: find each one's part by where it sits in the whole desktop
+    const displays = screen.getAllDisplays();
+    const minX = Math.min(...displays.map((d) => d.bounds.x)), minY = Math.min(...displays.map((d) => d.bounds.y));
+    const spanW = Math.max(...displays.map((d) => d.bounds.x + d.bounds.width)) - minX;
+    const { width: W, height: H } = whole.getSize();
+    const k = W / spanW;
+    return displays.map((d) => {
+      const x = Math.round((d.bounds.x - minX) * k), y = Math.round((d.bounds.y - minY) * k);
+      const w = Math.min(W - x, Math.round(d.bounds.width * k)), h = Math.min(H - y, Math.round(d.bounds.height * k));
+      return w > 0 && h > 0 ? { display: d, image: whole.crop({ x, y, width: w, height: h }) } : null;
+    }).filter(Boolean);
   }
 
   /** The screens Windows has in HDR, captured by the helper and made SDR (see HDR_CS); [] when there are none.
@@ -491,7 +527,7 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
     const win = new BrowserWindow({
       x: b.x, y: b.y, width: b.width, height: b.height, show: false, frame: false, resizable: false, movable: false,
       minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, alwaysOnTop: true, hasShadow: false,
-      enableLargerThanScreen: true, backgroundColor: '#000000', title: 'Screenshot',
+      enableLargerThanScreen: true, backgroundColor: '#000000', title: 'Screenshot', fullscreen: WAYLAND,
       webPreferences: { preload: OVERLAY_PRELOAD, sandbox: true, contextIsolation: true, spellcheck: false },
     });
     win.setAlwaysOnTop(true, 'screen-saver');
@@ -522,14 +558,15 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
     if (!refitOn) { screen.on('display-metrics-changed', refit); refitOn = true; }
     try {
       // the picture first (it's what was on screen at the press), the window list and the (hidden) overlays alongside
-      const ready = screen.getAllDisplays().map((d) => [d.id, overlayFor(d)]);
-      const [plain, list, hdr] = await Promise.all([grabScreens(), windowList(), grabHdr()]);
+      const ready = (WAYLAND ? [screen.getPrimaryDisplay()] : screen.getAllDisplays()).map((d) => [d.id, overlayFor(d)]);
+      const [plain, list, hdr] = await Promise.all([WAYLAND ? grabWayland() : grabScreens(), windowList(), grabHdr()]);
+      if (!plain) { closeOverlays(); busy = false; return; } // turned down at the screenshot service: nothing to say
       // an HDR screen's own picture replaces the usual (washed-out) one
       const shots = plain.map((p) => hdr.find((h) => h.display.id === p.display.id) || p);
       for (const h of hdr) if (!shots.some((p) => p.display.id === h.display.id)) shots.push(h);
       const f = list?.front;
       log(`front window: ${f ? `${f.cls || '?'} ${f.w}×${f.h}${f.full ? ', fullscreen' : ''}` : 'unknown'}; screens captured: ${shots.length}${hdr.length ? ` (${hdr.length} HDR)` : ''}`);
-      if (!shots.length) { closeOverlays(); busy = false; fail('Windows gave back no picture of the screen'); return; }
+      if (!shots.length) { closeOverlays(); busy = false; fail(process.platform === 'win32' ? 'Windows gave back no picture of the screen' : 'No picture of the screen came back'); return; }
       // a fullscreen app in front (a game…): the picture is already taken, so it can drop out of full screen under
       // the overlay; it's put back in front when the overlay closes
       const back = f?.full ? f.hwnd : null;
@@ -546,7 +583,7 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
         win.loaded.then(() => {
           if (win.isDestroyed()) return;
           // shown as a JPEG (quick to make); the saved file is cut from the full PNG-quality picture
-          win.webContents.send('bds:snip-data', { img: 'data:image/jpeg;base64,' + shot.image.toJPEG(88).toString('base64'), windows: local, hint });
+          win.webContents.send('bds:snip-data', { img: 'data:image/jpeg;base64,' + shot.image.toJPEG(88).toString('base64'), windows: local, hint: hint || (process.platform === 'win32' ? '' : 'Drag to grab an area · click for the whole screen · Esc to cancel') });
           win.showInactive();
           if (cursor.x >= b.x && cursor.y >= b.y && cursor.x < b.x + b.width && cursor.y < b.y + b.height) win.focus();
         });
@@ -560,12 +597,16 @@ module.exports = function createSnip({ dumpDir, notify, log = () => {} }) {
 
   return {
     /** The same overlay, but the chosen area goes to cb (BoxStudio's record-this-area key) instead of a file. */
-    pickArea(cb) { start({ pick: cb, hint: 'Drag the area to record · click a window · click the desktop for the whole screen · Esc to cancel' }); },
+    pickArea(cb) {
+      start({ pick: cb, hint: process.platform === 'win32' ? 'Drag the area to record · click a window · click the desktop for the whole screen · Esc to cancel'
+        : 'Drag the area to record · click for the whole screen · Esc to cancel' });
+    },
     /** Claim the key; false if something else on the PC has it. */
     register() {
       let ok = false;
       try { ok = globalShortcut.register(KEY, () => { start(); }); } catch { /* refused */ }
-      log(ok ? 'Win+Shift+Q ready' : 'Win+Shift+Q is taken by another program');
+      const name = process.platform === 'win32' ? 'Win+Shift+Q' : 'Super+Shift+Q';
+      log(ok ? `${name} ready` : `${name} is taken by another program`);
       return ok;
     },
     dispose() {

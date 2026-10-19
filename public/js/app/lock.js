@@ -55,7 +55,7 @@ export class LockPart {
       h('div', { class: 'applock-logo' }, icon('lock', 'xl')),
       h('div', { class: 'applock-title' }, 'Box-Deckspitter is locked'),
       pin, err, go,
-      h('div', { class: 'applock-hint faint' }, 'Forgot the PIN? Close the app, delete data\\applock.json in its folder, and start it again.')));
+      h('div', { class: 'applock-hint faint' }, `Forgot the PIN? Close the app, delete data${BDS.sep}applock.json in its folder, and start it again.`)));
     document.body.append(this.appLockEl);
     document.body.classList.add('app-locked');
     closeMenus();

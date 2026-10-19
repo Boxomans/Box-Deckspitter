@@ -9,7 +9,7 @@ import { pickSave, pickOpen } from './files.js';
 /** The Share dialog for one playlist: copy its code, or save it as a .plylst file. */
 export async function sharePlaylist(app, name) {
   let r;
-  try { r = await api.get(`/api/audio/share?folder=${encodeURIComponent(name)}`); } catch (e) { errorToast(e, 'Couldn’t share that playlist'); return; }
+  try { r = await api.get(`/api/audio/share?playlist=${encodeURIComponent(name)}`); } catch (e) { errorToast(e, 'Couldn’t share that playlist'); return; }
   const unlinked = r.count - r.linked;
   const code = h('textarea', { class: 'plylst-code mono', readonly: true, spellcheck: 'false', rows: 4 }, r.code);
   code.addEventListener('focus', () => code.select());

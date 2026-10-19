@@ -5,7 +5,7 @@ import { BaseEditor } from './base.js';
 import { h, clear } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { contextMenu, confirmDialog, promptDialog, showMenu, toast } from '../core/ui.js';
-import { tunnel, deviceName, isVirtual } from '../core/tunnel.js';
+import { tunnel, deviceName, isVirtual, LINUX } from '../core/tunnel.js';
 import { FX, VOICES, newFx } from '../core/tunnel-fx.js';
 
 const opt = (value, label, selected) => h('option', { value, selected: !!selected }, label);
@@ -54,8 +54,12 @@ export class TunnelEditor extends BaseEditor {
 
     const virt = outputs.filter((d) => d.id !== 'default' && isVirtual(d.label));
     clear(this.hintEl).append(icon('info', 'sm'), virt.length
-      ? h('span', {}, 'Each line mixes its inputs (say your mic and the system sound) into one. Lines only exist inside this app. To let other apps (Discord, OBS, games) hear one, send it to a virtual cable you have installed — found: ', h('b', {}, virt.map((d) => deviceName(d.label)).join(', ')), ' — and pick that cable as the microphone in the other app.')
-      : h('span', {}, 'Each line mixes its inputs (say your mic and the system sound) into one, and plays to your own devices. For other apps to pick a line as their microphone you need a virtual audio cable (VB-Audio Cable is free); once installed it shows up here as an output.'));
+      ? h('span', {}, 'Each line mixes its inputs (say your mic and the system sound) into one. Lines only exist inside this app. To let other apps (Discord, OBS, games) hear one, send it to a virtual cable you have installed — found: ', h('b', {}, virt.map((d) => deviceName(d.label)).join(', ')), LINUX ? ' — and pick “Monitor of” that output as the microphone in the other app.' : ' — and pick that cable as the microphone in the other app.')
+      : LINUX
+        ? h('span', {}, 'Each line mixes its inputs (say your mic and the system sound) into one, and plays to your own devices. For other apps to pick a line as their microphone, make a virtual output (once after each restart of the PC) with ',
+          h('code', {}, 'pactl load-module module-null-sink sink_name=BoxLine sink_properties=device.description=BoxLine'),
+          ', send the line to BoxLine, and pick “Monitor of BoxLine” as the microphone in the other app.')
+        : h('span', {}, 'Each line mixes its inputs (say your mic and the system sound) into one, and plays to your own devices. For other apps to pick a line as their microphone you need a virtual audio cable (VB-Audio Cable is free); once installed it shows up here as an output.'));
 
     clear(this.linesEl);
     this.rows = new Map();

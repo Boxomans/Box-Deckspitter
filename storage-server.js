@@ -9,6 +9,9 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
 
+// folder names: Windows ignores case, Linux doesn't (Photos and photos are two folders there)
+const fold = process.platform === 'win32' ? (s) => s.toLowerCase() : (s) => s;
+
 module.exports = function createStorage({
   APP_NAME, DATA, IS_WIN, PUBLIC, ROOT, listDrives, newJob, readJSONBody, requirePath, runCapture, startJob,
 }) {
@@ -77,7 +80,7 @@ module.exports = function createStorage({
       const parent = parentId >= 0 ? this.nodes[parentId] : null;
       const n = { id, name, parent, own: 0, logical: 0, count: 0, size: 0, total: 0, kids: new Map(), files: [], denied: false };
       this.nodes[id] = n;
-      if (parent) parent.kids.set(name.toLowerCase(), n);
+      if (parent) parent.kids.set(fold(name), n);
       return n;
     }
     counted(id, alloc, logical, count, denied) {
@@ -356,10 +359,10 @@ module.exports = function createStorage({
     const top = tree.nodes[0];
     let node = top;
     let cur = scan.root;
-    if (p && p.toLowerCase() !== scan.root.toLowerCase()) {
+    if (p && fold(p) !== fold(scan.root)) {
       const rel = path.relative(scan.root, p);
       for (const part of rel.split(path.sep).filter(Boolean)) {
-        node = node.kids.get(part.toLowerCase());
+        node = node.kids.get(fold(part));
         if (!node) throw Object.assign(new Error('Folder not in this scan'), { status: 404 });
         cur = path.join(cur, node.name);
       }
@@ -379,7 +382,7 @@ module.exports = function createStorage({
       if (gap > scan.driveUsed * 0.002) {
         extra.push(running
           ? { name: 'not scanned yet', size: gap, cat: 'pending' }
-          : { name: tree.admin ? 'System & reserved (shadow copies, metadata)' : 'Hidden / protected — rescan as admin', size: gap, cat: 'hidden' });
+          : { name: tree.admin ? 'System & reserved (shadow copies, metadata)' : IS_WIN ? 'Hidden / protected — rescan as admin' : 'Hidden / no permission to read', size: gap, cat: 'hidden' });
         size += gap;
       }
     }

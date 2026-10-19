@@ -2,7 +2,8 @@
 // mixer (EQ) running through Web Audio. Keeps playing while the panel is closed; media keys work too.
 // A queue (separate from the library, reorder by dragging) plays before the library carries on, and the
 // song, position, volume and play/pause survive closing the app, restarts and updates.
-// Playlists are the folders in the audio dump: pick one and the player (next, shuffle, loop) stays inside it.
+// Playlists are lists of songs in the audio dump (a song can be in several): pick one and the player (next, shuffle,
+// loop) stays inside it.
 // Full screen fills the window with the player, a big cover and a visualizer.
 
 import { api } from './api.js';
@@ -119,11 +120,54 @@ export function wheelSlider(r, step) {
     doneT = setTimeout(() => r.dispatchEvent(new Event('change')), 250);
   }, { passive: false });
 }
+/** A one-line title too long for its box drifts back and forth to show the rest (a pause at each end), and the mouse
+ *  wheel scrolls it by hand; it drifts on again a few seconds after the wheel stops. Call reset() when the text changes. */
+const marquees = new Set(); // the player's and the small player's titles: built once, shown and hidden as you go
+let marqueeRaf = 0, marqueeLast = 0;
+function marqueeTick(now) {
+  const dt = Math.min(0.1, (now - (marqueeLast || now)) / 1000);
+  marqueeLast = now;
+  let shown = false;
+  for (const m of marquees) {
+    const el = m.el;
+    if (!el.isConnected || !el.offsetParent) continue;
+    shown = true;
+    const over = el.scrollWidth - el.clientWidth;
+    el.classList.toggle('marquee-on', over > 1);
+    if (over <= 1 || now < m.holdUntil) continue;
+    m.pos = Math.max(0, Math.min(over, m.pos + m.dir * 28 * dt)); // px a second
+    el.scrollLeft = m.pos;
+    if ((m.dir > 0 && m.pos >= over) || (m.dir < 0 && m.pos <= 0)) { m.dir = -m.dir; m.holdUntil = now + 1600; }
+  }
+  // nothing on screen: stop until a title shows up again
+  marqueeRaf = shown ? requestAnimationFrame(marqueeTick) : 0;
+  if (!shown) marqueeLast = 0;
+}
+const marqueeKick = () => { if (!marqueeRaf) marqueeRaf = requestAnimationFrame(marqueeTick); };
+const marqueeSeen = typeof IntersectionObserver === 'function'
+  ? new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) marqueeKick(); }) : null;
+function marquee(el) {
+  const m = { el, pos: 0, dir: 1, holdUntil: performance.now() + 2000 };
+  el.classList.add('marquee');
+  el.addEventListener('wheel', (e) => {
+    const d = e.deltaY || e.deltaX;
+    const over = el.scrollWidth - el.clientWidth;
+    if (!d || over <= 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    m.pos = Math.max(0, Math.min(over, el.scrollLeft + (e.deltaMode === 1 ? d * 20 : d / 2)));
+    el.scrollLeft = m.pos;
+    m.holdUntil = performance.now() + 3000;
+  }, { passive: false });
+  marquees.add(m);
+  marqueeSeen?.observe(el);
+  marqueeKick();
+  return { reset() { m.pos = 0; m.dir = 1; el.scrollLeft = 0; m.holdUntil = performance.now() + 2000; marqueeKick(); } };
+}
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|weba)$/i;
 const fmt = (t) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00');
-// a song's name in the dump may have its playlist (folder) in front: "Road trip/Song.mp3"
+// a song's name in the dump may have folders in front: "Road trip/Song.mp3"
 const songTitle = (name) => stripExt(String(name || '').split('/').pop());
-const plOf = (name) => (String(name).includes('/') ? String(name).split('/')[0] : '');
 const likeKey = (name) => String(name || '').split('/').pop().toLowerCase();
 const LIKED = '\u0001liked'; // the liked songs, picked like a playlist (a folder name can't hold this character)
 
@@ -151,14 +195,22 @@ export function createMusic(app) {
     queue: Array.isArray(s.musicQueue) ? s.musicQueue.filter((x) => typeof x === 'string') : [], // file names, in play order
     libIdx: -1, // where the library is up to (queued songs don't move it)
     view: s.musicView === 'queue' ? 'queue' : 'library',
-    // null: every song · '': songs not in a playlist · 'name': that playlist (a folder in the audio dump) · LIKED: liked songs
+    // null: every song · '': songs not in a playlist · 'name': that playlist · LIKED: liked songs
     playlist: typeof s.musicPlaylist === 'string' ? s.musicPlaylist : null,
-    playlists: [],
-    // liked songs, by file name without the playlist, so a song stays liked when it moves between playlists
+    playlists: [], // their names
+    lists: new Map(), // playlist → Set of song names (a song can be in any number of them)
+    member: new Map(), // song name → the playlists it's in
+    // liked songs, by file name without the folders, so a song stays liked when it's moved
     liked: new Set(Array.isArray(s.musicLiked) ? s.musicLiked.filter((x) => typeof x === 'string') : []),
   };
   const isLiked = (name) => state.liked.has(likeKey(name));
-  const inList = (t) => !!t && (state.playlist == null || (state.playlist === LIKED ? isLiked(t.name) : plOf(t.name) === state.playlist));
+  const listsOf = (name) => state.member.get(name) || [];
+  const inPl = (name, p) => !!state.lists.get(p)?.has(name);
+  const realPl = () => (state.playlist && state.playlist !== LIKED ? state.playlist : null);
+  /** The playlist a song is shown under: the one picked when it's in it, otherwise the first it's in. */
+  const plOf = (name) => (realPl() && inPl(name, realPl()) ? realPl() : listsOf(name)[0] || '');
+  const inList = (t) => !!t && (state.playlist == null || (state.playlist === LIKED ? isLiked(t.name)
+    : state.playlist === '' ? !listsOf(t.name).length : inPl(t.name, state.playlist)));
   /** Like a song, or take the like back; liked songs have their own list (the ♥ Liked chip). */
   function toggleLike(name) {
     if (!name) return;
@@ -217,13 +269,13 @@ export function createMusic(app) {
   // ---------------------------------------------------------------- playlist
   async function refresh() {
     let items = [];
-    let folders = [];
+    let lists = [];
     let ok = false;
     try {
-      const [all, top] = await Promise.all([api.dump('audio'), api.dump('audio', '').catch(() => ({ folders: [] }))]);
+      const [all, pl] = await Promise.all([api.dump('audio'), api.get('/api/audio/playlists').catch(() => ({ lists: null }))]);
       items = all.items;
-      folders = top.folders || [];
-      ok = true;
+      lists = pl.lists;
+      ok = !!lists;
     } catch { /* ignore */ }
     const current = state.tracks[state.idx]?.name;
     const libName = state.tracks[state.libIdx]?.name;
@@ -231,11 +283,11 @@ export function createMusic(app) {
     state.idx = current ? state.tracks.findIndex((t) => t.name === current) : state.tracks.findIndex((t) => t.name === s.musicLast);
     state.libIdx = libName ? state.tracks.findIndex((t) => t.name === libName) : state.idx;
     if (ok) {
-      // playlists: the top folders (empty ones too)
-      const names = new Set(folders.map((f) => f.base));
-      for (const t of state.tracks) { const p = plOf(t.name); if (p) names.add(p); }
-      state.playlists = [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-      if (state.playlist && state.playlist !== LIKED && !names.has(state.playlist)) { state.playlist = null; app.saveSettings({ musicPlaylist: null }); }
+      state.lists = new Map(lists.map((l) => [l.name, new Set(l.songs)]));
+      state.member = new Map();
+      for (const l of lists) for (const n of l.songs) { if (!state.member.has(n)) state.member.set(n, []); state.member.get(n).push(l.name); }
+      state.playlists = lists.map((l) => l.name);
+      if (realPl() && !state.lists.has(state.playlist)) { state.playlist = null; app.saveSettings({ musicPlaylist: null }); }
     }
     if (ok) {
       // songs that were removed or renamed outside the player drop out of the queue
@@ -348,25 +400,27 @@ export function createMusic(app) {
       g.map((t, i) => {
         if (i === 0) return h('div', { class: 'music-dupe-keep' }, h('span', { class: 'music-dupe-tag' }, 'keep'), t.name);
         const cb = h('input', { type: 'checkbox', checked: true });
-        picks.push({ cb, t });
+        picks.push({ cb, t, keep: g[0] });
         return h('label', { class: 'music-dupe-extra' }, cb, h('span', {}, t.name), h('span', { class: 'faint mono' }, formatBytes(t.size)));
       }))));
     ui.el.classList.add('behind'); // the player floats above everything; let the dialog show on top
     const go = await modal({
       title: `Duplicate songs (${picks.length})`, wide: true,
-      body: h('div', {}, h('p', { class: 'dim', style: { marginTop: 0 } }, 'Ticked copies move to audio-dump\\.removed (nothing is deleted for good). The top song in each group stays.'), body),
+      body: h('div', {}, h('p', { class: 'dim', style: { marginTop: 0 } }, `Ticked copies move to audio-dump${BDS.sep}.removed (nothing is deleted for good). The top song in each group stays.`), body),
       buttons: [{ label: 'Cancel', value: false, ghost: true }, { label: 'Remove ticked copies', value: true, primary: true }],
     });
     ui.el.classList.remove('behind');
     if (!go) return;
     let n = 0;
-    for (const { cb, t } of picks) {
+    for (const { cb, t, keep } of picks) {
       if (!cb.checked) continue;
       const i = state.tracks.indexOf(t);
       if (i === state.idx) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
+      // the copy that stays takes over this one's playlists
+      for (const p of listsOf(t.name)) if (!inPl(keep.name, p)) await plChange('add', p, { songs: [keep.name] }).catch(() => {});
       try { await api.dumpRemove(t.name, 'audio'); n++; } catch (e) { errorToast(e, t.name); }
     }
-    if (n) toast(`Moved ${n} duplicate${n === 1 ? '' : 's'} to audio-dump\\.removed`, { type: 'ok', timeout: 3500 });
+    if (n) toast(`Moved ${n} duplicate${n === 1 ? '' : 's'} to audio-dump${BDS.sep}.removed`, { type: 'ok', timeout: 3500 });
     refresh();
   }
 
@@ -486,24 +540,28 @@ export function createMusic(app) {
   audio.volume = state.volume;
 
   async function addFiles(files) {
-    let n = 0;
+    const added = [];
     for (const f of files) {
       if (!AUDIO_RE.test(f.name || '')) continue;
-      try { await api.dumpAdd(intoPl(f.name), new Uint8Array(await f.arrayBuffer()), 'audio'); n++; } catch (e) { errorToast(e, f.name); }
+      try { added.push((await api.dumpAdd(f.name, new Uint8Array(await f.arrayBuffer()), 'audio')).name); } catch (e) { errorToast(e, f.name); }
     }
-    if (n) { toast(`Added ${n} song${n > 1 ? 's' : ''}`, { type: 'ok' }); refresh(); } else if (files.length) toast('Only audio files (mp3, m4a, wav, flac, ogg…) go in the audio dump.', { type: 'warn' });
+    if (added.length) await addedSongs(added); else if (files.length) toast('Only audio files (mp3, m4a, wav, flac, ogg…) go in the audio dump.', { type: 'warn' });
   }
   async function addFromDisk() {
     const paths = await pickOpen({ multi: true, title: 'Add songs to the audio dump', filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus'] }] });
-    let n = 0;
+    const added = [];
     for (const p of paths || []) {
-      try { const { bytes } = await api.read(p); await api.dumpAdd(intoPl(p.split(/[\\/]/).pop()), bytes, 'audio'); n++; } catch (e) { errorToast(e); }
+      try { const { bytes } = await api.read(p); added.push((await api.dumpAdd(p.split(/[\\/]/).pop(), bytes, 'audio')).name); } catch (e) { errorToast(e); }
     }
-    if (n) { toast(`Added ${n} song${n > 1 ? 's' : ''}`, { type: 'ok' }); refresh(); }
+    if (added.length) await addedSongs(added);
   }
-
-  /** A new song's name: inside the playlist that's picked, if one is. */
-  const intoPl = (name) => (state.playlist && state.playlist !== LIKED ? `${state.playlist}/${name}` : name);
+  /** New songs go in the audio dump, and into the playlist that's picked, if one is. */
+  async function addedSongs(names) {
+    const p = realPl();
+    if (p) await plChange('add', p, { songs: names }).catch((e) => errorToast(e));
+    toast(`Added ${names.length} song${names.length > 1 ? 's' : ''}${p ? ` to “${p}”` : ''}`, { type: 'ok' });
+    refresh();
+  }
 
   // ---------------------------------------------------------------- playlists
   function setPlaylist(p) {
@@ -550,42 +608,58 @@ export function createMusic(app) {
       app.saveSettings({ musicLast: t.name });
     }
   }
-  /** Move songs into a playlist ('' = out of any playlist). */
-  async function moveSongs(names, to) {
-    const changes = [];
-    for (const n of names) {
-      if (plOf(n) === to && n.split('/').length === (to ? 2 : 1)) continue;
-      try { const r = await api.dumpMove([n], to, 'audio'); if (r.moved?.[0]) changes.push([n, r.moved[0]]); } catch (e) { errorToast(e, songTitle(n)); }
-    }
-    await relocate(changes);
-    if (changes.length) toast(`${changes.length === 1 ? songTitle(changes[0][0]) : `${changes.length} songs`} → ${to ? `“${to}”` : 'no playlist'}`, { timeout: 1800 });
+  /** A change to the playlists on the server (see dumps-server.js): create, rename, delete, add, remove. */
+  const plChange = (op, name, more = {}) => api.post('/api/audio/playlists', { op, name, ...more });
+  /** Add songs to a playlist (they stay in any others they're in). */
+  async function addSongs(names, to) {
+    const fresh = names.filter((n) => !inPl(n, to));
+    if (!fresh.length) return toast(`${names.length === 1 ? songTitle(names[0]) : 'Those songs'} ${names.length === 1 ? 'is' : 'are'} already in “${to}”`, { timeout: 1800 });
+    try { await plChange('add', to, { songs: fresh }); } catch (e) { return errorToast(e); }
+    await refresh();
+    toast(`${fresh.length === 1 ? songTitle(fresh[0]) : `${fresh.length} songs`} → “${to}”`, { timeout: 1800 });
+  }
+  /** Take songs out of a playlist (they stay in the audio dump). */
+  async function removeSongs(names, from) {
+    try { await plChange('remove', from, { songs: names }); } catch (e) { return errorToast(e); }
+    await refresh();
+    toast(`${names.length === 1 ? songTitle(names[0]) : `${names.length} songs`} out of “${from}”`, { timeout: 1800 });
   }
   async function newPlaylist(songs = null) {
     const name = await askName('New playlist');
     if (!name) return;
-    try { await api.dumpFolder(name, 'audio'); } catch (e) { if (!/taken/i.test(e.message)) return errorToast(e); }
-    if (songs?.length) await moveSongs(songs, name);
-    else { await refresh(); setPlaylist(name); }
+    let made = name;
+    try { made = (await plChange(songs?.length ? 'add' : 'create', name, { songs: songs || [] })).name || name; } catch (e) { return errorToast(e); }
+    await refresh();
+    if (songs?.length) toast(`${songs.length === 1 ? songTitle(songs[0]) : `${songs.length} songs`} → “${made}”`, { timeout: 1800 });
+    else setPlaylist(made);
   }
   async function renamePlaylist(p) {
     const name = await askName('Rename playlist', p);
     if (!name || name === p) return;
-    try { await api.dumpRename(p, name, 'audio'); } catch (e) { return errorToast(e); }
-    if (state.playlist === p) { state.playlist = name; app.saveSettings({ musicPlaylist: name }); }
-    await relocate(state.tracks.filter((t) => plOf(t.name) === p).map((t) => [t.name, name + t.name.slice(p.length)]));
+    let made = name;
+    try { made = (await plChange('rename', p, { to: name })).name || name; } catch (e) { return errorToast(e); }
+    if (state.playlist === p) { state.playlist = made; app.saveSettings({ musicPlaylist: made }); }
+    if (s.tapePlaylist === p) app.saveSettings({ tapePlaylist: made });
+    if (recs.has(p)) { recs.set(made, recs.get(p)); recs.delete(p); }
+    refresh();
   }
   async function deletePlaylist(p, withSongs) {
-    const songs = state.tracks.filter((t) => plOf(t.name) === p);
+    const songs = state.tracks.filter((t) => inPl(t.name, p));
+    // with its songs: only the ones in no other playlist leave the audio dump
+    const only = songs.filter((t) => listsOf(t.name).length === 1);
+    const elsewhere = songs.length - only.length;
     ui?.el.classList.add('behind');
     const ok = !songs.length || await confirmDialog(withSongs ? `Remove “${p}” and its songs?` : `Delete the playlist “${p}”?`,
-      withSongs ? `Its ${songs.length} song${songs.length === 1 ? '' : 's'} move to audio-dump\\.removed with it (nothing is deleted for good).`
-        : `Its ${songs.length} song${songs.length === 1 ? ' stays' : 's stay'} in the audio dump, just not in a playlist.`,
-      { okLabel: withSongs ? 'Remove' : 'Delete playlist', danger: withSongs });
+      withSongs ? `${only.length ? `${only.length} song${only.length === 1 ? '' : 's'} move${only.length === 1 ? 's' : ''} to audio-dump/.removed (nothing is deleted for good).` : ''}${elsewhere ? ` ${elsewhere} that ${elsewhere === 1 ? 'is' : 'are'} in other playlists stay${elsewhere === 1 ? 's' : ''}.` : ''}`.trim()
+        : `Its ${songs.length} song${songs.length === 1 ? ' stays' : 's stay'} in the audio dump.`,
+      { okLabel: withSongs ? 'Remove' : 'Delete playlist', danger: withSongs && only.length > 0 });
     ui?.el.classList.remove('behind');
     if (!ok) return;
-    if (!withSongs) await moveSongs(songs.map((t) => t.name), '');
-    else if (plOf(state.tracks[state.idx]?.name || '') === p) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
-    try { await api.dumpRemove(p, 'audio'); } catch (e) { errorToast(e); }
+    if (withSongs) {
+      if (only.includes(state.tracks[state.idx])) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
+      for (const t of only) { try { await api.dumpRemove(t.name, 'audio'); } catch (e) { errorToast(e, songTitle(t.name)); } }
+    }
+    try { await plChange('delete', p); } catch (e) { errorToast(e); }
     if (state.playlist === p) setPlaylist(null);
     refresh();
   }
@@ -596,16 +670,19 @@ export function createMusic(app) {
     if (state.order.length) play(state.order[0]);
   }
   function renderPlaylists() {
-    const count = (p) => state.tracks.filter((t) => p == null || plOf(t.name) === p).length;
+    const count = (p) => state.tracks.filter((t) => p == null || (p === '' ? !listsOf(t.name).length : inPl(t.name, p))).length;
     const chip = (p, label) => {
       const b = h('button', { class: `chip music-pl ${state.playlist === p ? 'on' : ''}`, onclick: () => setPlaylist(p) },
-        p ? icon('folder', 'sm') : null, h('span', { class: 'music-pl-name' }, label), h('span', { class: 'mono faint' }, String(count(p))));
-      b.title = p == null ? 'Every song in the audio dump' : p === '' ? 'Songs that aren’t in a playlist' : `Playlist “${p}” · drop songs here to move them in · right-click for more`;
+        p ? icon('music', 'sm') : null, h('span', { class: 'music-pl-name' }, label), h('span', { class: 'mono faint' }, String(count(p))));
+      b.title = p == null ? 'Every song in the audio dump' : p === '' ? 'Songs that aren’t in a playlist' : `Playlist “${p}” · drop songs here to add them · right-click for more`;
       if (p != null) {
-        // drag a song from the list onto a playlist to move it there
+        // drag a song from the list onto a playlist to add it (onto No playlist: out of the one picked)
         b.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/bds-song')) { e.preventDefault(); b.classList.add('drop'); } });
         b.addEventListener('dragleave', () => b.classList.remove('drop'));
-        b.addEventListener('drop', (e) => { b.classList.remove('drop'); const n = e.dataTransfer.getData('text/bds-song'); if (n) { e.preventDefault(); moveSongs([n], p); } });
+        b.addEventListener('drop', (e) => { b.classList.remove('drop'); const n = e.dataTransfer.getData('text/bds-song'); if (!n) return;
+          e.preventDefault();
+          if (p) addSongs([n], p); else if (realPl() && inPl(n, realPl())) removeSongs([n], realPl());
+        });
       }
       if (p) {
         b.addEventListener('contextmenu', (e) => contextMenu(e, [
@@ -614,7 +691,6 @@ export function createMusic(app) {
           { sep: true },
           { label: 'Share…', icon: 'send', action: () => overDialog(() => sharePlaylist(app, p)) },
           { label: 'Rename…', icon: 'edit', action: () => renamePlaylist(p) },
-          { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('audio', p) },
           { sep: true },
           { label: 'Delete playlist (keep the songs)', icon: 'x', action: () => deletePlaylist(p, false) },
           { label: 'Remove playlist and its songs', icon: 'trash', action: () => deletePlaylist(p, true) },
@@ -893,15 +969,15 @@ export function createMusic(app) {
     const dupeBtn = h('button', { class: 'music-dupes', hidden: true, 'data-tip': 'Songs that are in the audio dump more than once', onclick: () => showDuplicates() });
     const pls = h('div', { class: 'music-pls' });
     pls.addEventListener('wheel', (e) => { if (e.deltaY && pls.scrollWidth > pls.clientWidth) { e.preventDefault(); pls.scrollLeft += e.deltaY; } }, { passive: false });
-    const fullB = h('button', { class: 'icon-btn music-full-btn', 'data-tip': 'Full screen', onclick: () => setFull(!full) }, icon('maximize', 'sm'));
+    // the big player lives in the Music tab: from the drop-down or the sidebar this opens the tab, and there it's full screen
+    const fullB = h('button', { class: 'icon-btn music-full-btn', onclick: () => { if (tabHost || full) return setFull(!full); if (!state.docked) setOpen(false); app.newDocument('music'); } }, icon('window', 'sm'));
     const head = h('div', { class: 'music-head' }, h('span', { class: 'music-note' }, '♪'), h('span', { class: 'mono' }, 'audio-dump/'), h('div', { class: 'grow' }),
       h('button', { class: 'icon-btn', 'data-tip': 'Add songs', onclick: () => addFromDisk() }, icon('plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': `${app.toolName?.('BoxTape') || 'BoxTape'}: songs from a YouTube or Spotify playlist`, onclick: () => app.newDocument('tape') }, icon('download', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Import a playlist a friend shared (a code or a .plylst file)', onclick: () => overDialog(async () => { if (await importPlaylist(app) && !state.docked) setOpen(false); }) }, icon('inbox', 'sm')),
       dupeBtn,
       h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => refresh() }, icon('refresh', 'sm')),
-      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio', state.playlist && state.playlist !== LIKED ? state.playlist : undefined) }, icon('external', 'sm')),
-      h('button', { class: 'icon-btn music-tab-btn', 'data-tip': 'Open as a tab', onclick: () => { setOpen(false); app.newDocument('music'); } }, icon('window', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': 'Open the folder', onclick: () => api.dumpReveal('audio') }, icon('external', 'sm')),
       fullB,
       h('button', { class: 'icon-btn', 'data-tip': 'Close (music keeps playing)', onclick: () => setOpen(false) }, icon('x', 'sm')));
     const tagsEl = h('div', { class: 'music-tags mono', hidden: true });
@@ -912,7 +988,7 @@ export function createMusic(app) {
     const parts = [head, nowEl, timeEl, controlsEl, volEl, eqWrap, tabs, pls, list];
     el.append(...parts);
     document.body.append(el);
-    ui = { el, title, tagsEl, sub, seek, cur, dur, playB, shuffleB, loopB, likeB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
+    ui = { el, title, titleScroll: marquee(title), tagsEl, sub, seek, cur, dur, playB, shuffleB, loopB, likeB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
     document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && !wide && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music, .music-opener')) setOpen(false); }, true);
     document.addEventListener('keydown', (e) => {
       if (full && e.key === 'Escape' && !document.querySelector('.modal-backdrop, .menu')) { e.preventDefault(); setFull(false); return; }
@@ -955,17 +1031,18 @@ export function createMusic(app) {
     const t = state.tracks[state.idx];
     const vis = visible();
     const plName = state.playlist == null ? '' : state.playlist === LIKED ? 'liked songs' : state.playlist || 'no playlist';
-    ui.title.textContent = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
+    const titleText = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
+    if (ui.title.textContent !== titleText) { ui.title.textContent = titleText; ui.titleScroll.reset(); }
     showTags(t);
     const upNext = state.queue[0] ? ` · up next: ${songTitle(state.queue[0])}` : '';
     const at = vis.indexOf(state.idx);
     ui.sub.textContent = t ? `${at >= 0 ? `${at + 1} of ${vis.length}` : plOf(t.name) ? `from “${plOf(t.name)}”` : 'not in this playlist'}${plName ? ` · ${plName}` : ''}${upNext}`
-      : state.tracks.length ? `${vis.length} song${vis.length === 1 ? '' : 's'}${plName ? ` in ${plName}` : ' in the audio dump'}` : 'drop mp3s here or put them in Box-Deckspitter\\audio-dump';
+      : state.tracks.length ? `${vis.length} song${vis.length === 1 ? '' : 's'}${plName ? ` in ${plName}` : ' in the audio dump'}` : `drop mp3s here or put them in Box-Deckspitter${BDS.sep}audio-dump`;
     clear(ui.libTab).append(state.playlist === LIKED ? 'Liked ' : state.playlist ? 'Playlist ' : 'Library ', h('span', { class: 'mono faint' }, String(vis.length)));
     ui.pls.hidden = state.view !== 'library' || !state.tracks.length && !state.playlists.length;
     if (!ui.pls.hidden) renderPlaylists();
-    ui.fullB.dataset.tip = full ? 'Leave full screen (Esc)' : 'Full screen';
-    clear(ui.fullB).append(icon(full ? 'x' : 'maximize', 'sm'));
+    ui.fullB.dataset.tip = full ? 'Leave full screen (Esc)' : tabHost ? 'Full screen' : 'Open the Music tab';
+    clear(ui.fullB).append(icon(full ? 'x' : tabHost ? 'maximize' : 'window', 'sm'));
     if (wide) {
       // each song gets its own cover from the theme's three accents: its own order, angle and a small hue nudge
       let hsh = 0;
@@ -998,7 +1075,7 @@ export function createMusic(app) {
       ui.list.append(h('div', { class: 'music-empty' }, 'No liked songs yet. Click the ', icon('heart', 'sm'), ' on a song, or under the song that’s playing.'));
     } else if (state.tracks.length && !vis.length) {
       ui.list.append(h('div', { class: 'music-empty' }, state.playlist ? 'Nothing in this playlist yet. Drag songs from All songs onto its name above, right-click a song → ' : 'Every song is in a playlist. ',
-        state.playlist ? h('b', {}, 'Move to playlist') : null, state.playlist ? ', or drop music files here.' : null));
+        state.playlist ? h('b', {}, 'Add to playlist') : null, state.playlist ? ', or drop music files here.' : null));
     }
     vis.forEach((i, k) => {
       const tr = state.tracks[i];
@@ -1010,11 +1087,12 @@ export function createMusic(app) {
       likeB.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(tr.name); });
       const row = h('button', { class: `music-track ${i === state.idx ? 'on' : ''}`, draggable: 'true', title: `${tr.name} · ${formatBytes(tr.size)}\nF2: rename · Del: remove · drag onto Queue to queue it` },
         h('span', { class: 'music-track-n mono' }, i === state.idx && !audio.paused ? '♪' : String(k + 1)),
-        nameEl, (state.playlist == null || state.playlist === LIKED) && plOf(tr.name) ? h('span', { class: 'music-track-pl' }, plOf(tr.name)) : null, likeB, qAdd);
+        nameEl, (state.playlist == null || state.playlist === LIKED) && plOf(tr.name)
+          ? h('span', { class: 'music-track-pl', title: listsOf(tr.name).join(' · ') }, plOf(tr.name) + (listsOf(tr.name).length > 1 ? ` +${listsOf(tr.name).length - 1}` : '')) : null, likeB, qAdd);
       row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/bds-song', tr.name); e.dataTransfer.effectAllowed = 'copy'; });
       const remove = async () => {
         if (i === state.idx) { audio.pause(); audio.removeAttribute('src'); audio.load(); state.idx = -1; }
-        try { await api.dumpRemove(tr.name, 'audio'); toast(`Moved ${tr.name} to audio-dump\\.removed`, { timeout: 3000 }); refresh(); } catch (err) { errorToast(err); }
+        try { await api.dumpRemove(tr.name, 'audio'); toast(`Moved ${tr.name} to audio-dump${BDS.sep}.removed`, { timeout: 3000 }); refresh(); } catch (err) { errorToast(err); }
       };
       hoverKeys(row, { nameEl, value: () => songTitle(tr.name), commit: (n) => renameTrack(i, n), remove });
       row.addEventListener('click', () => (i === state.idx ? toggle() : play(i)));
@@ -1024,19 +1102,77 @@ export function createMusic(app) {
         { label: 'Add to queue', icon: 'plus', action: () => enqueue(tr.name) },
         { label: isLiked(tr.name) ? 'Unlike' : 'Like', icon: isLiked(tr.name) ? 'heart-fill' : 'heart', action: () => toggleLike(tr.name) },
         { sep: true },
-        { label: 'Move to playlist', icon: 'folder', submenu: [
-          ...state.playlists.filter((p) => p !== plOf(tr.name)).map((p) => ({ label: p, action: () => moveSongs([tr.name], p) })),
-          ...(plOf(tr.name) ? [{ label: 'Out of the playlist', icon: 'x', action: () => moveSongs([tr.name], '') }] : []),
+        { label: 'Add to playlist', icon: 'music', submenu: [
+          ...state.playlists.map((p) => (inPl(tr.name, p) ? { label: p, icon: 'check', disabled: true } : { label: p, action: () => addSongs([tr.name], p) })),
           ...(state.playlists.length ? [{ sep: true }] : []),
           { label: 'New playlist…', icon: 'plus', action: () => newPlaylist([tr.name]) },
         ] },
+        ...(realPl() && inPl(tr.name, realPl()) ? [{ label: `Remove from “${realPl()}”`, icon: 'x', action: () => removeSongs([tr.name], realPl()) }] : []),
         { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => renameInline(row) },
         { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('audio', tr.name) },
         { label: 'Remove from audio dump', icon: 'trash', shortcut: 'Del', action: remove },
       ]));
       ui.list.append(row);
     });
+    if (state.playlist && state.playlist !== LIKED && vis.length) renderRecs();
     updateTime();
+  }
+
+  // ---------------------------------------------------------------- recommended songs, under a playlist
+  const recs = new Map(); // playlist → { status: 'loading' | 'done' | 'error', items, basedOn, note, error }
+  const recAdds = new Map(); // a song's Deezer link → 'adding' | 'added' | 'failed'
+  async function loadRecs(p) {
+    const r = { status: 'loading', items: [] };
+    recs.set(p, r);
+    try {
+      const paths = state.tracks.filter((t) => inPl(t.name, p) && t.path).map((t) => t.path);
+      Object.assign(r, await api.post('/api/music/recommend', { paths, have: state.tracks.map((t) => t.name) }), { status: 'done' });
+    } catch (e) { r.status = 'error'; r.error = e.message; }
+    if (recs.get(p) === r) render();
+  }
+  /** Find the song on YouTube and download it into the playlist (what BoxTape does with a shared playlist's songs). */
+  async function addRec(p, it) {
+    recAdds.set(it.url, 'adding');
+    render();
+    try {
+      const { id } = await api.post('/api/audio/grab', { items: [{ url: it.url, type: 'spotify', title: it.title, artist: it.artist, duration: it.duration }], playlist: p, parallel: 1 });
+      let j;
+      do { await new Promise((r) => setTimeout(r, 800)); j = await api.get(`/api/job?id=${id}`); } while (j.status === 'running');
+      const tr = j.tracks?.[0];
+      if (tr?.status !== 'done') throw new Error(tr?.error || j.error || 'it couldn’t be downloaded');
+      recAdds.set(it.url, 'added');
+      toast(`Added to “${p}”: ${it.title}`, { type: 'ok', timeout: 2000 });
+      await refresh();
+    } catch (e) { recAdds.set(it.url, 'failed'); errorToast(e, it.title); }
+    render();
+  }
+  function renderRecs() {
+    const p = state.playlist, on = !!app.settings.musicRecs;
+    const head = h('button', { class: `music-recs-head ${on ? 'on' : ''}`, title: on ? 'Hide the recommended songs'
+      : 'Show songs like this playlist’s: Deezer is asked for artists like the ones in it (only their names are sent)' },
+    icon(on ? 'chevron-down' : 'chevron-right', 'sm'), h('span', {}, 'Recommended songs'));
+    head.addEventListener('click', () => { app.saveSettings({ musicRecs: !on }); render(); });
+    ui.list.append(head);
+    if (!on) return;
+    if (!recs.has(p)) loadRecs(p);
+    const r = recs.get(p);
+    const again = (label) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); loadRecs(p); render(); } }, label);
+    if (r.status === 'loading') return ui.list.append(h('div', { class: 'music-empty' }, 'Finding songs like these…'));
+    if (r.status === 'error') return ui.list.append(h('div', { class: 'music-empty' }, `Couldn’t get recommendations (${r.error}). `, again('Try again')));
+    if (!r.items.length) return ui.list.append(h('div', { class: 'music-empty' }, r.note || 'Nothing new to recommend: you have these artists’ top songs already.'));
+    const fmt = (s) => (s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '');
+    for (const it of r.items) {
+      const st = recAdds.get(it.url);
+      const add = h('span', { class: `music-rec-add ${st || ''}`, role: 'button',
+        title: st === 'adding' ? 'Downloading…' : st === 'added' ? `In “${p}” now` : `Download it into “${p}” (found on YouTube)` },
+      icon(st === 'adding' ? 'download' : st === 'added' ? 'check' : 'plus', 'sm'));
+      add.addEventListener('click', () => { if (st !== 'adding' && st !== 'added') addRec(p, it); });
+      ui.list.append(h('div', { class: 'music-track music-rec', title: `${it.artist} – ${it.title}` },
+        h('span', { class: 'music-track-n' }, icon('sparkle', 'sm')),
+        h('span', { class: 'music-track-name' }, it.title, h('span', { class: 'music-rec-artist' }, ` · ${it.artist}`)),
+        h('span', { class: 'mono faint music-rec-dur' }, fmt(it.duration)), add));
+    }
+    ui.list.append(h('div', { class: 'music-recs-foot' }, `Based on ${r.basedOn.slice(0, 3).join(', ')}${r.basedOn.length > 3 ? ' and others' : ''} · `, again('Others')));
   }
 
   /** Drag-to-reorder for one list of rows. move(from, to) gets the new position (already adjusted for the removal). */
@@ -1141,7 +1277,7 @@ export function createMusic(app) {
     const tr = state.tracks[i];
     const ext = extOf(tr.name);
     const to = ext && !name.toLowerCase().endsWith('.' + ext.toLowerCase()) ? `${name}.${ext}` : name;
-    // a name without "/" stays in the same playlist
+    // a name without "/" stays in the same folder
     const r = await api.dumpRename(tr.name, to, 'audio');
     await relocate([[tr.name, r.name || to]]);
   }
@@ -1219,6 +1355,7 @@ export function createMusic(app) {
       playB: btn('play', 'Play / pause', () => toggle(), 'mm-play'),
       likeB: btn('heart', 'Like this song', () => toggleLike(state.tracks[state.idx]?.name), 'mm-like'),
     };
+    mini.titleScroll = marquee(mini.title);
     mini.el = h('div', { class: 'music-mini', tabindex: '0' },
       h('div', { class: 'mm-top' }, h('span', { class: 'mm-note' }, '♪'), h('div', { class: 'mm-text' }, mini.title, mini.sub),
         btn('x', 'Close the small player', () => setMini({ on: false }), 'mm-x')),
@@ -1239,7 +1376,8 @@ export function createMusic(app) {
   function paintMini() {
     if (!mini?.el.isConnected) return;
     const t = state.tracks[state.idx];
-    mini.title.textContent = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
+    const miniText = t ? songTitle(t.name) : state.tracks.length ? 'Pick a song' : 'No songs yet';
+    if (mini.title.textContent !== miniText) { mini.title.textContent = miniText; mini.titleScroll.reset(); }
     mini.sub.textContent = t ? (plOf(t.name) || 'audio-dump') : 'click to open the player';
     clear(mini.playB).append(icon(audio.paused ? 'play' : 'pause-bars', 'sm'));
     const liked = !!t && isLiked(t.name);
@@ -1350,7 +1488,7 @@ export function createMusic(app) {
     open: () => (state.docked ? (app.rightPanel !== 'music' && app.toggleRightPanel('music')) : setOpen(true)),
     dockInto, get docked() { return !!state.docked; },
     popOut, get miniOn() { return !!miniCfg().on && app.mainWindow !== false; }, foldMini: () => setMini({ on: false }),
-    /** Playlists (folders in the audio dump), for BoxTape's "save to". */
+    /** The playlists' names, for BoxTape's "save to". */
     get playlists() { return [...state.playlists]; },
     fullscreen: (on = true) => { if (!ui) build(); setFull(on); },
     showInTab,

@@ -1593,8 +1593,6 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .music-full { position: fixed; inset: 0; z-index: 790; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 25% 15%, color-mix(in srgb, var(--accent) 22%, var(--bg-0)) 0%, var(--bg-0) 65%); -webkit-app-region: no-drag; animation: music-full-in 0.22s ease-out; }
 .music-page { position: relative; height: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 18px; overflow: hidden; background: radial-gradient(ellipse at 25% 15%, color-mix(in srgb, var(--accent) 16%, var(--bg-0)) 0%, var(--bg-0) 65%); }
 .music-page .music-pop.full { width: min(1500px, 100%) !important; height: 100% !important; max-height: 1000px; }
-.music-stage .music-tab-btn { display: none; }
-.music-pop.docked .music-tab-btn { display: none; }
 .music-dock-note { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100%; padding: 20px; color: var(--text-3); font-size: 12px; text-align: center; }
 @keyframes music-full-in { from { opacity: 0; transform: scale(0.985); } }
 .music-viz { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 55%; opacity: 0.32; pointer-events: none; }
@@ -3154,3 +3152,21 @@ select optgroup.opt-hidden { margin-top: 5px; padding-top: 7px; border-top: 1px 
 
 /* dump panels: drag-to-pick, not text selection */
 .dump-list { user-select: none; }
+
+/* a song title too long for its box drifts to show the rest (and scrolls with the wheel) instead of ending in … */
+.marquee.marquee-on { text-overflow: clip; scrollbar-width: none; }
+.marquee::-webkit-scrollbar { display: none; }
+
+/* music player: recommended songs under a playlist */
+.music-recs-head { display: flex; align-items: center; gap: 6px; margin-top: 6px; padding: 7px 8px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; color: var(--text-3); font: inherit; font-size: 11.5px; font-weight: 600; text-align: left; cursor: pointer; }
+.music-recs-head:hover, .music-recs-head.on { color: var(--text); }
+.music-rec { cursor: default; }
+.music-rec .music-track-n { display: grid; place-items: center; color: var(--accent-2); }
+.music-rec-artist { color: var(--text-3); }
+.music-rec-dur { flex-shrink: 0; font-size: 10.5px; }
+.music-rec-add { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px; color: var(--text-3); cursor: pointer; }
+.music-rec-add:hover { background: var(--bg-3, var(--bg-1)); color: var(--accent); }
+.music-rec-add.adding { color: var(--accent); cursor: progress; animation: blink 1s ease-in-out infinite; }
+.music-rec-add.added { color: var(--ok, var(--accent)); cursor: default; }
+.music-recs-foot { padding: 6px 8px 10px; font-size: 11px; color: var(--text-3); }
+.music-recs-foot a { color: var(--accent); }

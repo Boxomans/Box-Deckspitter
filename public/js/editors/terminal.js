@@ -1,4 +1,4 @@
-// BoxTerminal: a shell window inside the app (Windows PowerShell, PowerShell 7 or Command Prompt on Windows),
+// BoxTerminal: a shell window inside the app (Windows PowerShell, PowerShell 7 or Command Prompt on Windows; bash elsewhere),
 // started in any folder you pick. Type a command and press Enter; Up/Down walk your history, Tab completes,
 // Shift+Enter adds a line, Ctrl+C stops what's running, Ctrl+L clears. It's a command shell, not a full terminal
 // emulator: programs that take over the screen or wait for a keypress (vim, less, "Press any key") won't work.

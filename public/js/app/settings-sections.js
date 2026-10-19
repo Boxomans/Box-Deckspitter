@@ -26,7 +26,7 @@ export class SettingsSectionsPart {
           mine ? h('button', { class: 'btn sm ghost', onclick: async () => { await api.resetSound(name).catch(errorToast); await this.sounds.reload(name, false); render(); } }, 'Default') : null));
       }
       if (Object.keys(custom).length) list.append(h('button', { class: 'btn sm ghost sound-reset-all', onclick: async () => {
-        if (!(await confirmDialog('Back to the default sounds?', 'All the UI sounds go back to the ones Box-Deckspitter came with. Your own files are deleted from data\\sounds.', { okLabel: 'Use the defaults' }))) return;
+        if (!(await confirmDialog('Back to the default sounds?', `All the UI sounds go back to the ones Box-Deckspitter came with. Your own files are deleted from data${BDS.sep}sounds.`, { okLabel: 'Use the defaults' }))) return;
         await api.resetSound(null).catch(errorToast);
         for (const n of Object.keys(custom)) await this.sounds.reload(n, false);
         render();
@@ -142,6 +142,8 @@ export class SettingsSectionsPart {
   }
 
   windowsSettings() {
+    const LINUX = this.info?.platform === 'linux';
+    const OS = LINUX ? 'Linux' : 'Windows';
     const status = h('span', { class: 'dim mono', style: { fontSize: '11px' } }, 'checking…');
     const actions = h('div', { class: 'row', style: { flexWrap: 'wrap' } });
     const post = (url, body) => fetch(url, { method: 'POST', headers: { 'X-BDS-Token': api.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
@@ -150,15 +152,16 @@ export class SettingsSectionsPart {
       let st;
       try { st = await fetch('/api/system/associations', { headers: { 'X-BDS-Token': api.token } }).then((r) => r.json()); } catch { st = { supported: false }; }
       clear(actions);
-      if (!st.supported) { status.textContent = 'Only available on Windows.'; return; }
-      status.textContent = st.count ? `● registered for ${st.count} file type${st.count === 1 ? '' : 's'}` : '○ not registered with Windows yet';
+      if (!st.supported) { status.textContent = 'Not available on this system.'; return; }
+      status.textContent = st.count ? `● registered for ${st.count} file type${st.count === 1 ? '' : 's'}` : `○ not registered with ${OS} yet`;
       if (st.moved) status.textContent += ' — the app folder moved, click “Choose file types” to update';
       actions.append(...[
-        h('button', { class: 'btn sm', onclick: () => this.fileTypesDialog(st.registered || {}, post).then(refresh) }, icon('file', 'sm'), st.count ? 'Change file types…' : 'Choose file types…'),
-        st.count ? h('button', { class: 'btn sm primary', onclick: () => post('/api/system/default-apps').catch(errorToast) }, 'Set as default…') : null,
+        h('button', { class: 'btn sm', onclick: () => this.fileTypesDialog(st.registered || {}, post, st).then(refresh) }, icon('file', 'sm'), st.count ? 'Change file types…' : 'Choose file types…'),
+        st.count && !st.linux ? h('button', { class: 'btn sm primary', onclick: () => post('/api/system/default-apps').catch(errorToast) }, 'Set as default…') : null,
         st.count ? h('button', { class: 'btn sm ghost', onclick: async () => {
-          if (!(await confirmDialog('Remove from Windows?', 'Box-Deckspitter will disappear from “Open with” and Default apps. Files you had set to open with it go back to Windows asking which app to use.', { okLabel: 'Remove', danger: true }))) return;
-          try { await post('/api/system/associations/remove'); toast('Removed from Windows', { type: 'ok' }); } catch (e) { errorToast(e); }
+          if (!(await confirmDialog(`Remove from ${OS}?`, st.linux ? 'Box-Deckspitter stops being the default for these file types and leaves “Open with”. They go back to the app your system picks.'
+            : 'Box-Deckspitter will disappear from “Open with” and Default apps. Files you had set to open with it go back to Windows asking which app to use.', { okLabel: 'Remove', danger: true }))) return;
+          try { await post('/api/system/associations/remove'); toast(`Removed from ${OS}`, { type: 'ok' }); } catch (e) { errorToast(e); }
           refresh();
         } }, 'Remove') : null].filter(Boolean));
     };
@@ -166,17 +169,20 @@ export class SettingsSectionsPart {
     const shortcutBtn = window.bdsShell?.createShortcuts ? h('button', { class: 'btn sm', onclick: async () => {
       try {
         const made = await window.bdsShell.createShortcuts();
-        toast(made.length ? 'Added to the Start menu and Desktop — right-click either one (or the open window’s taskbar button) → Pin to taskbar' : 'Couldn’t create the shortcuts', { type: made.length ? 'ok' : 'error', timeout: 6000 });
+        toast(!made.length ? 'Couldn’t create the shortcuts' : LINUX ? 'Added to your app menu (it can take a moment to show up)'
+          : 'Added to the Start menu and Desktop — right-click either one (or the open window’s taskbar button) → Pin to taskbar', { type: made.length ? 'ok' : 'error', timeout: 6000 });
       } catch (e) { errorToast(e); }
-    } }, icon('pin', 'sm'), 'Add to Start menu & Desktop') : null;
+    } }, icon('pin', 'sm'), LINUX ? 'Add to the app menu' : 'Add to Start menu & Desktop') : null;
+    const about = h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Open PDFs, documents, text and config files with Box-Deckspitter when you double-click them.');
+    if (LINUX) return h('div', { class: 'settings-group' }, h('h4', {}, 'Linux'), about, status, actions, shortcutBtn);
     return h('div', { class: 'settings-group' }, h('h4', {}, 'Windows'),
-      h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Open PDFs, documents, text and config files with Box-Deckspitter when you double-click them.'),
-      status, actions,
+      about, status, actions,
       shortcutBtn,
       shortcutBtn ? h('span', { class: 'faint', style: { fontSize: '11px' } }, 'To pin it: right-click Box-Deckspitter’s button on the taskbar while it’s open → Pin to taskbar.') : null);
   }
 
-  async fileTypesDialog(current, post) {
+  async fileTypesDialog(current, post, st = {}) {
+    const OS = st.linux ? 'Linux' : 'Windows';
     const GROUPS = [
       ['pdf', 'PDF documents', ['pdf'], true],
       ['doc', 'Word & rich text', ['docx', 'doc', 'odt', 'rtf'], true],
@@ -190,6 +196,8 @@ export class SettingsSectionsPart {
       ['image', 'Images', ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'], false],
       ['video', 'Videos', ['mp4', 'mkv', 'webm', 'mov', 'avi'], false],
     ];
+    // Linux has no file type for some of these (.ini, .ps1…): those aren't offered there
+    if (st.exts) for (const g of GROUPS) g[2] = g[2].filter((e) => st.exts.includes(e));
     const has = Object.keys(current).length;
     const boxes = GROUPS.map(([id, label, exts, def]) => {
       const cb = h('input', { type: 'checkbox' });
@@ -199,7 +207,8 @@ export class SettingsSectionsPart {
     const res = await modal({
       title: 'Open these with Box-Deckspitter', wide: true,
       body: h('div', { class: 'filetypes' },
-        h('div', { class: 'faint', style: { fontSize: '12px', marginBottom: '10px' } }, 'Box-Deckspitter registers itself with Windows for these types (just for your account, no admin needed). Then Windows asks you to confirm it as the default — apps aren’t allowed to do that part by themselves.'),
+        h('div', { class: 'faint', style: { fontSize: '12px', marginBottom: '10px' } }, st.linux ? 'Box-Deckspitter becomes the default app for these types (just for your account, no admin needed). Anything you don’t tick stays with the app it opens with now.'
+          : 'Box-Deckspitter registers itself with Windows for these types (just for your account, no admin needed). Then Windows asks you to confirm it as the default — apps aren’t allowed to do that part by themselves.'),
         ...boxes.map((b) => b.row)),
       buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Register', value: 'ok', primary: true }],
     });
@@ -208,16 +217,17 @@ export class SettingsSectionsPart {
     for (const b of boxes) if (b.cb.checked) groups[b.id] = b.exts;
     if (!Object.keys(groups).length) {
       await post('/api/system/associations/remove').catch(() => {});
-      return toast('No file types selected — removed from Windows.', { timeout: 3000 });
+      return toast(`No file types selected — removed from ${OS}.`, { timeout: 3000 });
     }
-    const done = toast('Registering with Windows…', { timeout: 0 });
+    const done = toast(`Registering with ${OS}…`, { timeout: 0 });
     try {
-      const st = await post('/api/system/associations', { groups });
+      const res = await post('/api/system/associations', { groups });
       done();
+      if (res.linux) return toast(`Box-Deckspitter now opens ${res.count} file types when you double-click them`, { type: 'ok', timeout: 5000 });
       const next = await modal({
         title: 'One more step',
         body: h('div', {},
-          h('p', {}, `Box-Deckspitter is now registered for ${st.count} file types and shows up in “Open with”.`),
+          h('p', {}, `Box-Deckspitter is now registered for ${res.count} file types and shows up in “Open with”.`),
           h('p', {}, 'To make it the default, Windows Settings will open on Box-Deckspitter’s page: click ', h('b', {}, 'Set default'), ' at the top (or pick it per file type).')),
         buttons: [{ label: 'Later', value: null, ghost: true }, { label: 'Open Default apps', value: 'go', primary: true }],
       });

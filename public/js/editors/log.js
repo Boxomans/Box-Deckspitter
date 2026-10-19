@@ -15,7 +15,7 @@ const MAX_ENTRIES = 400000;
 const LV = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'];
 const LV_CLASS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
 const RANGES = [['all', 'All time', 0], ['5m', 'Last 5 minutes', 300e3], ['15m', 'Last 15 minutes', 900e3], ['1h', 'Last hour', 3600e3], ['6h', 'Last 6 hours', 6 * 3600e3], ['24h', 'Last 24 hours', 86400e3], ['7d', 'Last 7 days', 7 * 86400e3]];
-const GROUPS = ['Active now', 'Games', 'Windows', 'Apps', 'Temp', 'Added', 'Event logs'];
+const GROUPS = ['Active now', 'Games', 'Windows', 'System', 'Apps', 'Temp', 'Added', 'Event logs'];
 const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 const ACTIVE_MS = 120000;
 const store = {
@@ -104,7 +104,7 @@ export class LogEditor extends BaseEditor {
     this.days = store.get('days', 14);
     this.f = { q: '', regex: false, cs: false, word: false, ex: '', levels: new Set([-1, 0, 1, 2, 3, 4, 5]), range: 'all', from: 0, to: 0, ctx: 0, dedupe: false, off: new Set() };
     { const st = store.get('filters', {}); this.f = { ...this.f, ...st }; }
-    this.catalog = { files: [], folders: [], logs: [], windows: true };
+    this.catalog = { files: [], folders: [], logs: [], windows: /Windows/.test(navigator.userAgent) };
     this.buildUI();
     this.renderSources();
     this.renderEmpty();
@@ -445,7 +445,7 @@ export class LogEditor extends BaseEditor {
       icon('list-check', 'xl'), h('div', { class: 'lg-empty-t' }, 'Pick some logs on the left, or start here'),
       h('div', { class: 'lg-quicks' },
         quick('play', 'Follow what’s being written now', 'Every log that changed in the last two minutes', () => this.quickActive()),
-        quick('alert', 'Windows problems', 'Errors and warnings from the Application and System logs', () => this.quickWindows()),
+        this.catalog.windows ? quick('alert', 'Windows problems', 'Errors and warnings from the Application and System logs', () => this.quickWindows()) : null,
         quick('drum', 'Recent game logs', 'Steam, Epic, Unity, Unreal, Minecraft and launchers', () => this.quickGames()))));
     this.empty.hidden = false;
   }
@@ -825,7 +825,7 @@ export class LogEditor extends BaseEditor {
     const pick = (label, key, vals, cur, after) => ({ label, submenu: vals.map(([v, l]) => ({ label: l, checked: cur === v, action: () => { this[key] = v; store.set(key, v); after?.(); } })) });
     return [
       pick('First read of each file', 'tail', [[262144, 'Last 256 KB'], [1048576, 'Last 1 MB'], [4194304, 'Last 4 MB'], [8388608, 'Last 8 MB']], this.tail),
-      pick('Windows event history', 'evHours', [[1, 'Last hour'], [6, 'Last 6 hours'], [24, 'Last 24 hours'], [168, 'Last 7 days'], [720, 'Last 30 days']], this.evHours, () => this.reloadEvents()),
+      !this.catalog.windows ? null : pick('Windows event history', 'evHours', [[1, 'Last hour'], [6, 'Last 6 hours'], [24, 'Last 24 hours'], [168, 'Last 7 days'], [720, 'Last 30 days']], this.evHours, () => this.reloadEvents()),
       pick('Look for log files changed in', 'days', [[1, 'the last day'], [7, 'the last week'], [14, 'the last 2 weeks'], [60, 'the last 2 months'], [365, 'the last year']], this.days, () => this.refreshCatalog(true)),
       { sep: true },
       { label: 'Show every source again', icon: 'eye', action: () => { this.f.off = new Set(); this.applyFilters(); } },

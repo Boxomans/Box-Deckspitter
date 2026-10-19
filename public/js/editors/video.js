@@ -403,7 +403,7 @@ export class VideoEditor extends BaseEditor {
         let input = this.bytes;
         if (!input) {
           const st = await api.stat(this.tab.path);
-          if (st.size > 1.8 * 1024 ** 3) throw new Error('This file is too big for the in-app engine. Install ffmpeg (winget install ffmpeg) for big files.');
+          if (st.size > 1.8 * 1024 ** 3) throw new Error('This file is too big for the in-app engine. Install ffmpeg for big files (BoxTape can install it for you).');
           this.setProgress(0, `reading ${formatBytes(st.size)}…`);
           input = (await api.read(this.tab.path)).bytes;
         }

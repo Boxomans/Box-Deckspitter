@@ -401,7 +401,7 @@ export class CutEditor extends BaseEditor {
         { label: 'Rename…', icon: 'edit', action: async () => { const n = await promptDialog('Rename folder', 'New name', f.base); if (n && n !== f.base) { try { await api.dumpRename(f.name, n, 'media'); this.refreshDump(true); } catch (err) { errorToast(err); } } } },
         { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('media', f.name) },
         { sep: true },
-        { label: 'Remove folder', icon: 'trash', action: async () => { try { await api.dumpRemove(f.name, 'media'); toast(`Moved ${f.base} to media-dump\\.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
+        { label: 'Remove folder', icon: 'trash', action: async () => { try { await api.dumpRemove(f.name, 'media'); toast(`Moved ${f.base} to media-dump${BDS.sep}.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
       ]));
       this.dumpDropTarget(card, f.name);
       G.append(card);
@@ -435,7 +435,7 @@ export class CutEditor extends BaseEditor {
         { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('media', it.name) },
         ...(sub ? [{ label: 'Move up a folder', icon: 'arrow-up', action: () => api.dumpMove([it.name], parts.slice(0, -1).join('/'), 'media').then(() => this.refreshDump(true), errorToast) }] : []),
         { sep: true },
-        { label: 'Remove from the dump', icon: 'trash', action: async () => { try { await api.dumpRemove(it.name, 'media'); toast(`Moved ${it.base} to media-dump\\.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
+        { label: 'Remove from the dump', icon: 'trash', action: async () => { try { await api.dumpRemove(it.name, 'media'); toast(`Moved ${it.base} to media-dump${BDS.sep}.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
       ]));
       G.append(card);
     }
@@ -705,7 +705,7 @@ export class CutEditor extends BaseEditor {
     this.dumpDir = '';
     this.dumpCount = h('span', { class: 'cut-dump-count' });
     this.tabProject = h('button', { class: 'cut-bin-tab on', onclick: () => this.showBin('project') }, 'Media');
-    this.tabDump = h('button', { class: 'cut-bin-tab cut-dump-target', title: 'The media dump (Box-Deckspitter\\media-dump) — drop things here to keep them', onclick: () => this.showBin('dump') }, 'Media dump', this.dumpCount);
+    this.tabDump = h('button', { class: 'cut-bin-tab cut-dump-target', title: `The media dump (Box-Deckspitter${BDS.sep}media-dump) — drop things here to keep them`, onclick: () => this.showBin('dump') }, 'Media dump', this.dumpCount);
     this.projActions = h('span', { class: 'cut-bin-actions' },
       h('button', { class: 'icon-btn', 'data-tip': 'Add video, audio or images', onclick: () => this.importDialog() }, icon('plus', 'sm')));
     this.dumpActions = h('span', { class: 'cut-bin-actions', hidden: true },
@@ -1593,7 +1593,7 @@ export class CutEditor extends BaseEditor {
     if (this.exporting) return;
     if (!this.allClips().length) return toast('Put something on the timeline first.', { type: 'warn' });
     const tools = await fetch('/api/tools', { headers: { 'X-BDS-Token': api.token } }).then((r) => r.json()).catch(() => ({}));
-    if (!tools.ffmpeg) return toast('Exporting needs ffmpeg: run "winget install Gyan.FFmpeg", then restart Box-Deckspitter.', { type: 'warn', timeout: 8000 });
+    if (!tools.ffmpeg) return toast(`Exporting needs ffmpeg: run "${tools.hints?.ffmpeg || 'winget install Gyan.FFmpeg'}", then restart Box-Deckspitter.`, { type: 'warn', timeout: 8000 });
     const base = this.tab.path ? stripExt(basename(this.tab.path)) : stripExt(this.tab.title);
     if (toDump) {
       try { target = (await api.dumpReserve(`${base.replace(/^\.+/, '') || 'video'}.mp4`, 'media')).path; } catch (e) { return errorToast(e, 'Export failed'); }

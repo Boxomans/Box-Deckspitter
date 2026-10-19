@@ -23,6 +23,14 @@ function songKey(s) {
     .trim();
 }
 
+/** The songs in the audio dump: songKey → the song's name there (to know which ones you have, and to put those
+ *  into the playlist a download goes to). */
+async function haveSongs() {
+  try { return new Map((await api.dump('audio')).items.map((it) => [songKey(stripExt(it.base || it.name)), it.name])); } catch { return new Map(); }
+}
+/** The name in the audio dump of the first of these that's there, or null. */
+const owned = (have, ...names) => { for (const n of names) { const f = n && have.get(songKey(n)); if (f) return f; } return null; };
+
 export class TapeEditor extends BaseEditor {
   static mode = 'tape';
 
@@ -42,7 +50,8 @@ export class TapeEditor extends BaseEditor {
     this.goBtn = h('button', { class: 'btn primary klep-go', onclick: () => this.fetch() }, icon('music', 'sm'), 'Get tracks');
     this.results = h('div', { class: 'tape-results' });
     this.progress = h('div', { class: 'tape-progress' });
-    const need = [!this.tools.ytdlp ? 'yt-dlp (winget install yt-dlp)' : null, !this.tools.ffmpeg ? 'ffmpeg (winget install Gyan.FFmpeg)' : null].filter(Boolean);
+    const hint = this.tools.hints || { ytdlp: 'winget install yt-dlp', ffmpeg: 'winget install Gyan.FFmpeg' };
+    const need = [!this.tools.ytdlp ? `yt-dlp (${hint.ytdlp})` : null, !this.tools.ffmpeg ? `ffmpeg (${hint.ffmpeg})` : null].filter(Boolean);
     this.pane.append(h('div', { class: 'klep-root' }, h('div', { class: 'klep-inner' },
       h('div', { class: 'klep-hero' },
         h('div', { class: 'klep-title' }, h('span', { class: 'g tape-g' }, this.app.toolLabel('BoxTape')), h('span', { class: 'klep-cursor' })),
@@ -50,7 +59,7 @@ export class TapeEditor extends BaseEditor {
         h('div', { class: 'klep-bar' }, this.input, this.goBtn),
         need.length
           ? this.needNote(need)
-          : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, 'Saves to Box-Deckspitter\\audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.')),
+          : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, `Saves to Box-Deckspitter${BDS.sep}audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.`)),
       this.progress,
       this.results)));
     setTimeout(() => this.input.focus(), 50);
@@ -86,14 +95,14 @@ export class TapeEditor extends BaseEditor {
   /** A playlist a friend shared (a code or a .plylst file, read by playlist-share.js) → its songs, set to go into a playlist
    *  of the same name. Songs that came with a link download from it; the rest are matched on YouTube by name. */
   async loadShared(pl) {
-    let have = new Set();
-    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
+    const have = await haveSongs();
     const items = pl.songs.map((s) => {
       const label = s.artist && !s.title.toLowerCase().includes(s.artist.toLowerCase()) ? `${s.artist} - ${s.title}` : s.title;
-      const already = have.has(songKey(label)) || have.has(songKey(s.title));
+      const haveName = owned(have, label, s.title);
+      const already = !!haveName;
       return s.url
-        ? { type: 'ytdlp', url: s.url, title: label, uploader: s.artist || null, already }
-        : { type: 'spotify', url: 'https://www.youtube.com/', title: s.title, artist: s.artist, duration: 0, label, uploader: s.artist || null, already, noArtist: !s.artist };
+        ? { type: 'ytdlp', url: s.url, title: label, uploader: s.artist || null, already, haveName }
+        : { type: 'spotify', url: 'https://www.youtube.com/', title: s.title, artist: s.artist, duration: 0, label, uploader: s.artist || null, already, haveName, noArtist: !s.artist };
     });
     this.items = items;
     this.title = pl.name;
@@ -122,7 +131,8 @@ export class TapeEditor extends BaseEditor {
       for (const it of bare) {
         it.artist = a; it.uploader = a || null;
         it.label = a && !it.title.toLowerCase().includes(a.toLowerCase()) ? `${a} - ${it.title}` : it.title;
-        it.already = this.haveSongs.has(songKey(it.label)) || this.haveSongs.has(songKey(it.title));
+        it.haveName = owned(this.haveSongs, it.label, it.title);
+        it.already = !!it.haveName;
       }
       this.renderShared();
     };
@@ -132,7 +142,7 @@ export class TapeEditor extends BaseEditor {
       box, h('button', { class: 'btn sm', onclick: apply }, 'Set artist')));
   }
 
-  /** The "BoxTape needs yt-dlp and ffmpeg" note, with a button that installs them with winget. */
+  /** The "BoxTape needs yt-dlp and ffmpeg" note, with a button that installs them (winget on Windows, downloads on Linux). */
   needNote(need) {
     const msg = h('span', {}, `BoxTape needs ${need.join(' and ')}.`);
     const btn = this.tools.canInstall ? h('button', { class: 'btn sm primary', onclick: () => this.installTools(btn, msg) }, icon('download', 'sm'), 'Install them for me') : null;
@@ -156,7 +166,8 @@ export class TapeEditor extends BaseEditor {
       clear(this.pane);
       await this.load(); // draws BoxTape again, now without the note
     } catch (e) {
-      msg.textContent = `${e.message} (or install by hand: winget install yt-dlp and winget install Gyan.FFmpeg)`;
+      const hint = this.tools.hints || { ytdlp: 'winget install yt-dlp', ffmpeg: 'winget install Gyan.FFmpeg' };
+      msg.textContent = /by hand/.test(e.message) ? e.message : `${e.message} (or install by hand: ${hint.ytdlp} and ${hint.ffmpeg})`;
       spin.replaceWith(btn);
       btn.disabled = false;
     }
@@ -173,13 +184,13 @@ export class TapeEditor extends BaseEditor {
 
   /** A list of songs ("Artist - Title" or just a title, one per entry) → each is matched on YouTube while downloading. */
   async fromList(entries) {
-    let have = new Set();
-    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
+    const have = await haveSongs();
     const items = entries.slice(0, 300).map((line) => {
       const m = /^(.+?)\s+[-–—]\s+(.+)$/.exec(line);
       const artist = m ? m[1].trim() : '';
       const title = m ? m[2].trim() : line;
-      return { type: 'spotify', url: 'https://www.youtube.com/', title, artist, duration: 0, label: artist ? `${artist} - ${title}` : title, uploader: artist || null, already: have.has(songKey(artist ? `${artist} - ${title}` : title)) };
+      const haveName = owned(have, artist ? `${artist} - ${title}` : title);
+      return { type: 'spotify', url: 'https://www.youtube.com/', title, artist, duration: 0, label: artist ? `${artist} - ${title}` : title, uploader: artist || null, already: !!haveName, haveName };
     });
     const n = items.filter((x) => x.already).length;
     return { title: `${items.length} songs from your list`, items, notes: [`Each song is matched to the best YouTube upload when it downloads.${n ? ` ${n} already in your audio dump start unticked.` : ''}`] };
@@ -188,14 +199,14 @@ export class TapeEditor extends BaseEditor {
   /** A YouTube (or other yt-dlp) link or playlist → its videos; ones already in the audio dump start unticked. */
   async fromLink(url) {
     const res = await post('/api/klep/scan', { url, mode: 'ytdlp', playlist: 'on' });
-    let have = new Set();
-    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
+    const have = await haveSongs();
     // downloads are named after the video title, cut to 120 bytes, so a long title is looked for both whole and cut
     const cut = (t) => { const b = new TextEncoder().encode(t); return b.length <= 120 ? t : new TextDecoder().decode(b.slice(0, 120)).replace(/�$/, ''); };
     const items = res.items || [];
     for (const it of items) {
       const t = String(it.title || '');
-      if (t && (have.has(songKey(t)) || have.has(songKey(cut(t))))) it.already = true;
+      const haveName = t && owned(have, t, cut(t));
+      if (haveName) { it.already = true; it.haveName = haveName; }
     }
     const n = items.filter((x) => x.already).length;
     res.notes = [...(res.notes || []), ...(n ? [`${n} song${n === 1 ? ' is' : 's are'} already in your audio dump, so ${n === 1 ? 'it starts' : 'they start'} unticked.`] : [])];
@@ -206,14 +217,14 @@ export class TapeEditor extends BaseEditor {
   async fromSpotify(url) {
     const res = await post('/api/spotify/tracks', { url });
     // songs already in the audio dump start unticked
-    let have = new Set();
-    try { have = new Set((await api.dump('audio')).items.map((it) => songKey(stripExt(it.base || it.name)))); } catch { /* ignore */ }
+    const have = await haveSongs();
     const items = res.items.map((t) => {
       const artist = String(t.artist || '').split(',')[0].trim();
+      const haveName = owned(have, `${artist} - ${t.title}`);
       return {
         type: 'spotify', url: t.id ? `https://open.spotify.com/track/${t.id}` : 'https://open.spotify.com/',
         title: t.title, artist: t.artist, duration: t.duration, label: `${artist} - ${t.title}`,
-        uploader: t.artist, already: have.has(songKey(`${artist} - ${t.title}`)),
+        uploader: t.artist, already: !!haveName, haveName,
       };
     });
     const notes = [];
@@ -235,7 +246,7 @@ export class TapeEditor extends BaseEditor {
           h('li', {}, 'Create app → any name, Redirect URI http://127.0.0.1, tick “Web API”.'),
           h('li', {}, 'Open the app’s Settings and copy the Client ID and Client Secret here.')),
         id, secret,
-        h('div', { class: 'faint', style: { fontSize: '11px' } }, 'Kept in Box-Deckspitter\\data\\secrets.json on this PC; it’s only ever sent to Spotify.')),
+        h('div', { class: 'faint', style: { fontSize: '11px' } }, `Kept in Box-Deckspitter${BDS.sep}data${BDS.sep}secrets.json on this PC; it’s only ever sent to Spotify.`)),
       buttons: [{ label: 'Remove key', value: 'remove', ghost: true }, { label: 'Cancel', value: null, ghost: true }, { label: 'Save', value: 'save', primary: true }],
     });
     if (!ok) return;
@@ -255,9 +266,13 @@ export class TapeEditor extends BaseEditor {
     const goBtn = h('button', { class: 'btn primary', onclick: () => this.download() }, icon('download', 'sm'), h('span', {}));
     const update = () => {
       const n = this.boxes.filter((b) => b.checked).length;
-      count.textContent = `${n} of ${this.items.length} selected`;
-      goBtn.lastChild.textContent = n ? `Download ${n} as MP3` : 'Download as MP3';
-      goBtn.disabled = !n;
+      // songs you already have (and didn't tick) go into the playlist without downloading again
+      const have = this.ownedFor().length;
+      count.textContent = `${n} of ${this.items.length} selected${have ? ` + ${have} you have` : ''}`;
+      goBtn.lastChild.textContent = n ? `Download ${n} as MP3` : have ? `Add ${have} to the playlist` : 'Download as MP3';
+      if (have) goBtn.dataset.tip = `${have === 1 ? 'The song' : `The ${have} songs`} you already have (unticked) go${have === 1 ? 'es' : ''} into “${this.destPlaylist()}” too, without downloading again`;
+      else delete goBtn.dataset.tip;
+      goBtn.disabled = !n && !have;
       all.checked = n === this.items.length;
     };
     all.addEventListener('change', () => { for (const b of this.boxes) b.checked = all.checked; update(); });
@@ -290,15 +305,15 @@ export class TapeEditor extends BaseEditor {
       } }, icon('check', 'sm'), 'Only new songs')
       : null;
     R.append(h('div', { class: 'klep-results-head' }, h('label', { class: 'check' }, all, count), newOnly,
-      this.title ? h('span', { class: 'faint klep-pagetitle' }, '· ' + this.title) : null, h('div', { class: 'grow' }), this.destPicker(), this.lanes, this.retries, goBtn), list);
+      this.title ? h('span', { class: 'faint klep-pagetitle' }, '· ' + this.title) : null, h('div', { class: 'grow' }), this.destPicker(update), this.lanes, this.retries, goBtn), list);
     update();
   }
 
   /**
-   * Where the songs go: the audio dump itself, or one of its playlists (folders), or a new playlist —
-   * named after the playlist being downloaded, or one you name.
+   * Where the songs go: the audio dump itself, and maybe one of the music player's playlists, or a new playlist —
+   * named after the playlist being downloaded, or one you name. onChange: called when the pick changes.
    */
-  destPicker() {
+  destPicker(onChange) {
     const sel = h('select', { class: 'tape-dest', title: 'Which playlist in the music player these songs go into' });
     const clean = (n) => String(n || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/^[. ]+|[. ]+$/g, '').replace(/\s+/g, ' ').slice(0, 80);
     const fill = (playlists, pick) => {
@@ -313,28 +328,47 @@ export class TapeEditor extends BaseEditor {
     let playlists = this.app.music?.playlists || [];
     // a shared playlist goes into one of its own name
     fill(playlists, this.shared ? clean(this.title) : this.app.settings.tapePlaylist || '');
-    api.dump('audio', '').then((r) => { playlists = (r.folders || []).map((f) => f.base); fill(playlists, sel.value || this.app.settings.tapePlaylist || ''); }).catch(() => {});
+    get('/api/audio/playlists').then((r) => { if (!r.lists) return; playlists = r.lists.map((l) => l.name); fill(playlists, sel.value || this.app.settings.tapePlaylist || ''); onChange?.(); }).catch(() => {});
     let last = sel.value;
     sel.addEventListener('change', async () => {
       if (sel.value === '\u0000new') {
-        const n = clean(await promptDialog('New playlist', 'BoxTape saves these songs into it', '', { placeholder: 'e.g. Road trip' }));
+        const n = clean(await promptDialog('New playlist', 'BoxTape puts these songs in it', '', { placeholder: 'e.g. Road trip' }));
         if (!n) { sel.value = last; return; }
         if (!playlists.includes(n)) playlists = [...playlists, n].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
         fill(playlists, n);
       }
       last = sel.value;
       this.app.saveSettings({ tapePlaylist: sel.value });
+      onChange?.();
     });
     this.dest = sel;
     return sel;
   }
 
-  /** Queue the ticked tracks as one batch. Batches run one after another; each keeps its own progress card. */
-  download() {
+  /** The playlist picked to download into ('' = none). */
+  destPlaylist() { return this.dest && this.dest.value !== '\u0000new' ? this.dest.value : ''; }
+  /** The unticked songs that are already in the audio dump: their names there, when a playlist is picked. */
+  ownedFor() {
+    if (!this.destPlaylist()) return [];
+    return [...new Set((this.boxes || []).filter((b) => !b.checked && b._item.haveName).map((b) => b._item.haveName))];
+  }
+
+  /** Queue the ticked tracks as one batch. Batches run one after another; each keeps its own progress card.
+   *  Songs you already have (unticked) go straight into the playlist picked. */
+  async download() {
     const picked = this.boxes.filter((b) => b.checked).map((b) => b._item);
+    const folder = this.destPlaylist();
+    const have = this.ownedFor();
+    if (!picked.length && !have.length) return;
+    if (have.length) {
+      try {
+        await post('/api/audio/playlists', { op: 'add', name: folder, songs: have });
+        this.app.music?.refresh();
+        if (!picked.length) return toast(`${have.length} song${have.length === 1 ? '' : 's'} you already had → “${folder}”`, { type: 'ok' });
+      } catch (e) { errorToast(e, 'Couldn’t add the songs you already have to the playlist'); }
+    }
     if (!picked.length) return;
     const name = this.title ? `“${this.title}”` : `${picked.length} track${picked.length > 1 ? 's' : ''}`;
-    const folder = this.dest && this.dest.value !== '\u0000new' ? this.dest.value : '';
     const batch = { picked, name, folder, state: 'queued', jobId: null };
     batch.titleEl = h('b', {});
     batch.counter = h('span', { class: 'mono faint', style: { fontSize: '11px' } });
@@ -395,7 +429,7 @@ export class TapeEditor extends BaseEditor {
           : { url: it.url, type: 'ytdlp', title: it.title })),
         parallel,
         retries: Number(this.retries?.value ?? this.app.settings.tapeRetries ?? 3),
-        folder: batch.folder || '',
+        playlist: batch.folder || '',
       });
       batch.jobId = id;
       cancel.onclick = () => post('/api/job/cancel', { id });

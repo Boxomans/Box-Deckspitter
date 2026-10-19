@@ -1,3 +1,7 @@
 # kept out of the zip the in-app updater downloads
 .github export-ignore
 .gitattributes export-ignore
+
+# shell scripts run on Linux: keep them LF on every checkout
+*.sh text eol=lf
+*.py text eol=lf

@@ -1,4 +1,4 @@
-// BoxSpaces (folder workspaces): file index, text search, git status, recycle-bin delete.
+// BoxSpaces (folder workspaces): file index, text search, git status, delete to the recycle bin / trash.
 
 'use strict';
 
@@ -6,7 +6,7 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
 
-module.exports = function createSpaces({ IS_WIN, findExe, ok, psQuote, readJSONBody, requirePath, runCapture }) {
+module.exports = function createSpaces({ findExe, ok, platform, readJSONBody, requirePath, runCapture }) {
   const SKIP_DIRS = new Set(['node_modules', '.git', '.hg', '.svn', '__pycache__', '.venv', 'venv', '.next', '.nuxt', '.cache', '.gradle', '.idea', 'bin', 'obj', 'target', '.pytest_cache', '.mypy_cache', 'dist-newstyle', '$RECYCLE.BIN', 'System Volume Information']);
   const BIN_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.pdf', '.zip', '.7z', '.rar', '.gz', '.exe', '.dll', '.so', '.dylib', '.woff', '.woff2', '.ttf', '.otf', '.mp4', '.mov', '.mkv', '.webm', '.mp3', '.wav', '.flac', '.docx', '.xlsx', '.pptx', '.psd', '.class', '.jar', '.pyc', '.o', '.obj', '.lib', '.bin', '.iso', '.db', '.sqlite']);
 
@@ -84,13 +84,6 @@ module.exports = function createSpaces({ IS_WIN, findExe, ok, psQuote, readJSONB
     } catch { return null; }
   }
 
-  function recycle(target) {
-    if (!IS_WIN) return fsp.rm(target, { recursive: true, force: false });
-    const isDir = fs.statSync(target).isDirectory();
-    const s = `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::${isDir ? 'DeleteDirectory' : 'DeleteFile'}(${psQuote(target)}, 'OnlyErrorDialogs', 'SendToRecycleBin')`;
-    return runCapture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', s], 60000);
-  }
-
   const routes = {
     'GET /api/files': async (req, q) => {
       const root = requirePath(q.get('root'));
@@ -108,7 +101,7 @@ module.exports = function createSpaces({ IS_WIN, findExe, ok, psQuote, readJSONB
       const { path: p } = await readJSONBody(req);
       const target = requirePath(p);
       if (path.parse(target).root === target) throw Object.assign(new Error('Refusing to delete a drive root'), { status: 400 });
-      await recycle(target);
+      await platform.trash(target); // the recycle bin / trash, never deleted outright
       return { ok: true };
     },
   };

@@ -63,7 +63,7 @@ export class SecureNotesEditor extends BaseEditor {
     let st;
     try { st = await call('status'); } catch (e) { return this.screen('Secure notes', h('p', { class: 'sn-error' }, e.message)); }
     this.st = st;
-    if (!st.platform) return this.renderUnavailable('Secure notes need Windows.');
+    if (!st.platform) return this.renderUnavailable(st.platformNote || 'Secure notes need Windows.');
     if (!st.exists) return this.renderSetup();
     if (st.unlocked) return this.renderOpen();
     if (st.needsKey) return this.renderKeyCheck(msg);

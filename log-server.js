@@ -99,7 +99,7 @@ module.exports = function createLog({ requirePath, readJSONBody, readJSON, write
       add(pdata, 'Apps', 3);
       add(E.TEMP || path.join(local, 'Temp'), 'Temp', 2, () => 'Temp');
     } else {
-      add('/var/log', 'Windows', 3, () => 'System');
+      add('/var/log', 'System', 3, () => 'System');
       add(path.join(home, '.local', 'share'), 'Games', 3);
       add(path.join(home, '.config'), 'Apps', 3);
       add(path.join(home, '.cache'), 'Apps', 2);
