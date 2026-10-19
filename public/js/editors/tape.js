@@ -93,19 +93,43 @@ export class TapeEditor extends BaseEditor {
       const already = have.has(songKey(label)) || have.has(songKey(s.title));
       return s.url
         ? { type: 'ytdlp', url: s.url, title: label, uploader: s.artist || null, already }
-        : { type: 'spotify', url: 'https://www.youtube.com/', title: s.title, artist: s.artist, duration: 0, label, uploader: s.artist || null, already };
+        : { type: 'spotify', url: 'https://www.youtube.com/', title: s.title, artist: s.artist, duration: 0, label, uploader: s.artist || null, already, noArtist: !s.artist };
     });
     this.items = items;
     this.title = pl.name;
     this.shared = true;
     this.input.value = '';
-    const n = items.filter((x) => x.already).length;
+    this.haveSongs = have;
+    this.renderShared();
+  }
+
+  /** The shared playlist's list, and for songs that came with neither a link nor an artist, a box to give them one
+   *  (YouTube is searched with it, and the file is named with it). */
+  renderShared() {
+    const items = this.items, n = items.filter((x) => x.already).length;
     const byName = items.filter((x) => x.type === 'spotify').length;
-    this.render({ title: pl.name, items, notes: [
+    const bare = items.filter((x) => x.noArtist);
+    for (const [i, b] of (this.boxes || []).entries()) if (items[i] === b._item) b._item.preselect = b.checked; // keep the ticks
+    this.render({ title: this.title, items, notes: [
       `A shared playlist: ${items.length} song${items.length === 1 ? '' : 's'}. They go into a playlist of the same name unless you pick another.`,
       byName ? `${byName} came without a link, so ${byName === 1 ? 'it’s' : 'they’re'} matched on YouTube by name when ${byName === 1 ? 'it downloads' : 'they download'}.` : null,
       n ? `${n} song${n === 1 ? ' is' : 's are'} already in your audio dump, so ${n === 1 ? 'it starts' : 'they start'} unticked.` : null,
     ].filter(Boolean) });
+    if (!bare.length) return;
+    const box = h('input', { type: 'text', class: 'tape-artist', placeholder: 'Artist', value: bare.find((x) => x.artist)?.artist || '' });
+    const apply = () => {
+      const a = box.value.trim();
+      for (const it of bare) {
+        it.artist = a; it.uploader = a || null;
+        it.label = a && !it.title.toLowerCase().includes(a.toLowerCase()) ? `${a} - ${it.title}` : it.title;
+        it.already = this.haveSongs.has(songKey(it.label)) || this.haveSongs.has(songKey(it.title));
+      }
+      this.renderShared();
+    };
+    box.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
+    this.results.prepend(h('div', { class: 'klep-note tape-artist-row' }, icon('info', 'sm'),
+      h('span', {}, `${bare.length === 1 ? '1 song came' : `${bare.length} songs came`} with no link and no artist. Name the artist so YouTube finds the right ${bare.length === 1 ? 'one' : 'ones'}:`),
+      box, h('button', { class: 'btn sm', onclick: apply }, 'Set artist')));
   }
 
   /** The "BoxTape needs yt-dlp and ffmpeg" note, with a button that installs them with winget. */

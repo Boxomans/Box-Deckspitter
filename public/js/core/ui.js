@@ -631,7 +631,7 @@ export function draggedPaths(e) {
   try { const v = JSON.parse(e.dataTransfer.getData(PATHS_MIME) || '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch { return []; }
 }
 
-export function rubberSelect(container, { rows = '.file-row', scroller = container, menu, onDelete, onOpen } = {}) {
+export function rubberSelect(container, { rows = '.file-row', scroller = container, menu, onDelete, onOpen, osDrag = false } = {}) {
   const all = () => [...container.querySelectorAll(rows)].filter((r) => r._item !== undefined);
   // scroller may be given as a function, for lists that aren't on the page yet
   const sc = () => (typeof scroller === 'function' ? scroller() : scroller) || container;
@@ -695,6 +695,9 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
       raf = requestAnimationFrame(autoScroll);
     };
     let lastX = sx;
+    // no text selection (file names) while the box is out: it would turn the next press into a text drag
+    const noSelect = (se) => se.preventDefault();
+    document.addEventListener('selectstart', noSelect, true);
     const move = (ev) => {
       lastX = ev.clientX;
       lastY = ev.clientY;
@@ -702,6 +705,7 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
         if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
         box = h('div', { class: 'rubber-box' });
         document.body.append(box);
+        getSelection()?.removeAllRanges();
         try { container.setPointerCapture(e.pointerId); } catch { /* ignore */ }
         raf = requestAnimationFrame(autoScroll);
       }
@@ -710,6 +714,7 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
     const up = () => {
       removeEventListener('pointermove', move, true);
       removeEventListener('pointerup', up, true);
+      document.removeEventListener('selectstart', noSelect, true);
       cancelAnimationFrame(raf);
       if (!box) return;
       box.remove();
@@ -729,6 +734,8 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
     if (!row?.draggable || !container.contains(row) || e.dataTransfer.types.length) return;
     const items = (row.classList.contains('picked') ? picked().map((r) => r._item) : [row._item]).filter(draggableItem);
     if (!items.length) { e.preventDefault(); return; }
+    // osDrag (the dumps): a real file drag, so it also drops into Explorer, the desktop and other programs
+    if (osDrag && window.bdsShell?.startDrag) { e.preventDefault(); window.bdsShell.startDrag(items.map((it) => it.path)); return; }
     setDraggedPaths(e, items.map((it) => it.path));
     justDragged = true;
     setTimeout(() => { justDragged = false; }, 60);
@@ -737,6 +744,8 @@ export function rubberSelect(container, { rows = '.file-row', scroller = contain
   container.addEventListener('click', (e) => {
     if (justDragged) { e.preventDefault(); e.stopImmediatePropagation(); return; }
     const row = e.target.closest(rows);
+    // a click on the empty space clears the picks
+    if (!row && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.target.closest('button, a, input, textarea, select, [contenteditable]')) { setPicked([]); return; }
     if (!row || row._item === undefined || !container.contains(row)) return;
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault(); e.stopPropagation();

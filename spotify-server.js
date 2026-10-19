@@ -112,6 +112,10 @@ async function fromApi({ type, id }, { clientId, clientSecret }) {
 // accents come off Latin letters; Japanese, Korean, Cyrillic etc. stay (recomposed, so ド is still one letter)
 const norm = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const CJK = /[぀-ヿ㐀-鿿가-힯]/;
+/** A title spelled out a letter at a time ("-H-O-E-D-O-W-N-", "D A N K"): its words are all single letters, so it's
+ *  matched as one squashed string instead. */
+const squash = (s) => norm(s).replace(/ /g, '');
+const spelled = (s) => { const w = norm(s).split(' ').filter(Boolean); return w.length >= 3 && w.filter((x) => x.length === 1).length / w.length >= 0.7; };
 /** How much of one wanted word is in a title: whole-word for spaced scripts; for Japanese/Chinese/Korean (no spaces), the
  *  share of its two-character pieces that turn up (so 夏の終りの… still matches 夏の終わりの…). */
 function wordHit(w, t) {
@@ -136,10 +140,10 @@ function artistFit(c, want) {
   const a = norm(String(want.artist || '').split(',')[0]);
   if (!a) return 0;
   const ch = norm(c.channel || c.uploader);
-  const songW = norm(want.title).split(' ').filter((w) => w.length > 1 || CJK.test(w));
+  const songW = spelled(want.title) ? [squash(want.title)] : norm(want.title).split(' ').filter((w) => w.length > 1 || CJK.test(w));
   // the title's other parts (split at " - ", " | ", 「 」 …) once the part naming the song is taken out
   const parts = String(c.title || '').split(/\s[-–—|:]\s|[|「」『』【】]/).map(norm).filter(Boolean);
-  const songAt = parts.findIndex((p) => songW.length && songW.every((w) => wordHit(w, p) >= 0.5));
+  const songAt = parts.findIndex((p) => songW.length && songW.every((w) => wordHit(w, p) >= 0.5 || p.replace(/ /g, '').includes(w)));
   const slot = parts.length > 1 ? parts.filter((_, i) => i !== songAt).join(' ') : '';
   const has = (x) => x.includes(a) || x.split(' ').includes(a);
   if (has(ch) || (slot && has(slot)) || new RegExp(`\\bby ${a}\\b`).test(norm(c.title))) return 1;
@@ -163,7 +167,10 @@ function score(c, want) {
     s += d <= 3 ? 40 : d <= 8 ? 28 : d <= 15 ? 12 : d <= 30 ? -10 : -80;
   } else if (want.duration) s -= 15; // only a penalty when we know how long the song should be (typed songs don't)
   const words = wantT.split(' ').filter((w) => w.length > 1 || CJK.test(w));
-  const hit = words.reduce((n, w) => n + wordHit(w, t), 0) / (words.length || 1);
+  // spelled out: only an upload spelled out the same way, or one by the right artist (an ordinary "Hoedown" by someone
+  // else isn't it)
+  const hit = spelled(want.title) ? (squash(c.title).includes(squash(want.title)) && (spelled(c.title) || (firstArtist && artistFit(c, want) > 0)) ? 1 : 0)
+    : words.reduce((n, w) => n + wordHit(w, t), 0) / (words.length || 1);
   s += Math.round(hit * 35);
   // the artist: a same-named song by someone else is the commonest wrong match, so a missing artist costs, not just a
   // missing bonus (see artistFit).
@@ -195,7 +202,8 @@ module.exports = function createSpotify({ secrets, saveSecrets, readJSONBody, ru
     if (!exe) throw err(400, 'yt-dlp is not installed (winget install yt-dlp)');
     const artist = String(want.artist || '').split(',')[0].trim();
     const search = async (q) => {
-      const json = JSON.parse(await runCapture(exe, ['-J', '--flat-playlist', '--no-warnings', '--', `ytsearch8:${q.replace(/["\n]/g, ' ')}`], timeoutMs));
+      // a word starting with "-" would tell YouTube to leave results with it out
+      const json = JSON.parse(await runCapture(exe, ['-J', '--flat-playlist', '--no-warnings', '--', `ytsearch8:${q.replace(/["\n]/g, ' ').replace(/(^|\s)-+/g, '$1')}`], timeoutMs));
       return (json.entries || []).filter((e) => e && (e.url || e.id)).map((e) => ({
         url: e.url && /^https?:/.test(e.url) ? e.url : `https://www.youtube.com/watch?v=${e.id}`, title: e.title, duration: e.duration, channel: e.channel || e.uploader,
       })).map((c) => ({ ...c, score: score(c, want) })).filter((c) => artistFit(c, want) >= 0).sort((a, b) => b.score - a.score)[0];

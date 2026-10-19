@@ -37,7 +37,6 @@ const KEEP_BACKUPS = 10;
 const CLIPBOARD_CLEAR_MS = 20000;
 const LIMITS = { title: 300, username: 500, password: 2000, url: 2000, notes: 200000, entries: 5000 };
 const DPAPI_ENTROPY = 'Box-Deckspitter secure notes device key v1';
-const OLD_DPAPI_ENTROPY = 'Box-DocSpitter secure notes device key v1'; // device keys sealed before 1.1.1 (no "2:" in front): read once, then sealed again
 
 const b64 = (b) => Buffer.from(b).toString('base64');
 const unb64 = (s) => Buffer.from(String(s || ''), 'base64');
@@ -171,16 +170,9 @@ module.exports = function createSecureNotes({ dir, clipboard, onLockChange = () 
     if (!fs.existsSync(DEVICE)) throw fail('This PC’s key for Secure notes is missing. Open them with your secure key.', 'device');
     try {
       const saved = fs.readFileSync(DEVICE, 'utf8').trim();
-      const old = !saved.startsWith('2:');
-      const key = await dpapi('unprotect', unb64(old ? saved : saved.slice(2)), old ? OLD_DPAPI_ENTROPY : DPAPI_ENTROPY);
+      if (!saved.startsWith('2:')) throw new Error('old key');
+      const key = await dpapi('unprotect', unb64(saved.slice(2)), DPAPI_ENTROPY);
       if (key.length !== 32) throw new Error('bad key');
-      if (old) {
-        try {
-          const tmp = DEVICE + '.tmp';
-          fs.writeFileSync(tmp, '2:' + b64(await dpapi('protect', key)));
-          fs.renameSync(tmp, DEVICE);
-        } catch { /* still sealed the old way: tried again next time */ }
-      }
       return key;
     } catch (e) {
       if (e.code === 'platform') throw e;

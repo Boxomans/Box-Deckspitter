@@ -38,20 +38,20 @@ export const FEATS = [
 ];
 
 /** Points a flown strike earns, to spend on jets in the hangar: 100 for the objective (only the first time
- *  for a mission, so flying it again doesn't farm them), 50 more with every jet home, 20 just for flying; twice that
- *  on a large mission; 25 for each new badge. Returns [[what, points]]. */
+ *  for a mission, so flying it again doesn't farm them), 25 more with every jet home, 10 just for flying; twice that
+ *  on a large mission; 12 for each new badge. Returns [[what, points]]. */
 export function strikePoints(r, large, repeat, badges) {
-  const x = large ? 2 : 1, out = [['Flown', 20 * x]];
-  if (r.won && !repeat) out.push(['Objective destroyed', 100 * x]);
-  if (r.won && !repeat && !r.lost) out.push(['Every jet home', 50 * x]);
-  if (badges) out.push([`New badge${badges === 1 ? '' : 's'} (${badges})`, 25 * badges]);
+  const x = large ? 2 : 1, out = [['Flown', 10 * x]];
+  if (r.won && !repeat) out.push(['Objective destroyed', 50 * x]);
+  if (r.won && !repeat && !r.lost) out.push(['Every jet home', 25 * x]);
+  if (badges) out.push([`New badge${badges === 1 ? '' : 's'} (${badges})`, 12 * badges]);
   return out;
 }
 
 /** Points for a record from before they existed: the strikes already flown count (as normal missions). */
 export function startPoints(store) {
   const st = store.stats || {};
-  return 20 * (st.flown || 0) + 100 * (st.won || 0) + 50 * (st.flawless || 0) + 25 * Object.keys(store.badges || {}).length;
+  return 10 * (st.flown || 0) + 50 * (st.won || 0) + 25 * (st.flawless || 0) + 12 * Object.keys(store.badges || {}).length;
 }
 
 /** A hangar for a record from before there was one: the hangar jets already in the saved packages are kept. */

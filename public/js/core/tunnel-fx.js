@@ -34,6 +34,8 @@ export const VOICES = [
   { name: 'Stadium', fx: [['reverb', 3.2], ['echo', 520]] },
 ];
 
+export const REVERB_MIX = 40;
+const clampMix = (m) => (Number.isFinite(+m) && m !== null ? Math.max(0, Math.min(100, +m)) : REVERB_MIX);
 export const newFx = (type, v) => ({ key: Math.random().toString(36).slice(2, 10), type, v: v ?? FX[type].def, on: true });
 export const fxLabel = (f) => `${FX[f.type]?.name || f.type} ${+(+f.v).toFixed(FX[f.type]?.step < 1 ? 1 : 0)}${FX[f.type]?.unit === '%' ? '%' : ` ${FX[f.type]?.unit || ''}`}`;
 
@@ -95,8 +97,10 @@ export function buildFx(ctx, f, pitchOk = true) {
   } else if (t === 'reverb') {
     const conv = ctx.createConvolver();
     conv.buffer = impulse(ctx, f.v);
-    input.connect(gainOf(ctx, 0.8)).connect(output);
-    input.connect(conv).connect(gainOf(ctx, 0.5)).connect(output);
+    // f.mix: how strong it is, 0-100% (BoxWave sets it; 40 otherwise): more of the room, less of the dry sound
+    const mix = clampMix(f.mix);
+    input.connect(gainOf(ctx, 1 - mix / 200)).connect(output);
+    input.connect(conv).connect(gainOf(ctx, mix / 80)).connect(output);
     let last = f.v;
     set = (v) => { if (Math.abs(v - last) > 0.05) { last = v; conv.buffer = impulse(ctx, +v); } };
   } else if (t === 'distort') {

@@ -41,6 +41,84 @@ export const PRESETS = {
 export const hzToPos = (hz) => Math.round((Math.log(hz / MIN_HZ) / Math.log(MAX_HZ / MIN_HZ)) * 1000);
 export const posToHz = (pos) => Math.round(MIN_HZ * Math.pow(MAX_HZ / MIN_HZ, pos / 1000));
 export const hzLabel = (hz) => (hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)}k` : String(hz));
+
+/** The current theme's colours for the visualizer and the EQ curve (custom themes included). */
+function vizColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name, fb) => cs.getPropertyValue(name).trim() || fb;
+  return { a: v('--accent-3', '#6ee7e0'), b: v('--accent', '#b48cff'), c: v('--accent-2', '#ff7ac6'), grid: v('--text-3', '#8d84a0') };
+}
+const themeGradient = (g, W) => {
+  const k = vizColors(), grad = g.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, k.a); grad.addColorStop(0.5, k.b); grad.addColorStop(1, k.c);
+  return grad;
+};
+
+/** An EQ's response curve on a canvas: st = { eq, low, high }; ac = an audio context whose filters to use (a scratch
+ *  one otherwise). Shared by the music mixer and the browser equalizer. */
+export function drawEqCurve(curve, st, ac) {
+  const c = curve.getContext('2d');
+  const W = curve.width, H = curve.height;
+  c.clearRect(0, 0, W, H);
+  const yOf = (db) => H / 2 - (db / 24) * (H / 2 - 8);
+  const k = vizColors();
+  c.strokeStyle = k.grid;
+  c.lineWidth = 1;
+  c.globalAlpha = 0.2;
+  for (const db of [-18, -12, -6, 0, 6, 12, 18]) { c.beginPath(); c.moveTo(0, yOf(db)); c.lineTo(W, yOf(db)); c.stroke(); }
+  for (const hz of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) { const x = (hzToPos(hz) / 1000) * W; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
+  c.globalAlpha = 0.8;
+  c.fillStyle = k.grid;
+  c.font = '9px IBM Plex Mono, monospace';
+  for (const hz of [100, 1000, 10000]) c.fillText(hzLabel(hz), (hzToPos(hz) / 1000) * W + 3, H - 4);
+  c.globalAlpha = 1;
+  // combined response of every filter (uses the real filters when audio has started; otherwise a scratch graph)
+  const N = 200;
+  const freqs = new Float32Array(N);
+  for (let i = 0; i < N; i++) freqs[i] = posToHz((i / (N - 1)) * 1000);
+  const total = new Float32Array(N).fill(1);
+  const scratch = ac || new OfflineAudioContext(1, 1, 44100);
+  const make = (type, f, q, g) => { const b = scratch.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; b.gain.value = g; return b; };
+  const chain = [
+    make('highpass', st.low <= MIN_HZ + 1 ? 1 : st.low, 0.9, 0),
+    ...BANDS.map(([f, type], i) => make(type, f, type === 'peaking' ? 1.4 : 0.7, st.eq[i])),
+    make('lowpass', st.high >= MAX_HZ - 50 ? 24000 : st.high, 0.9, 0),
+  ];
+  const mag = new Float32Array(N), ph = new Float32Array(N);
+  for (const f of chain) { f.getFrequencyResponse(freqs, mag, ph); for (let i = 0; i < N; i++) total[i] *= mag[i]; }
+  c.beginPath();
+  for (let i = 0; i < N; i++) {
+    const db = Math.max(-24, Math.min(24, 20 * Math.log10(Math.max(total[i], 1e-6))));
+    const x = (i / (N - 1)) * W, y = yOf(db);
+    if (i) c.lineTo(x, y); else c.moveTo(x, y);
+  }
+  c.strokeStyle = themeGradient(c, W);
+  c.lineWidth = 2.5;
+  c.stroke();
+  c.lineTo(W, H); c.lineTo(0, H); c.closePath();
+  c.fillStyle = k.b;
+  c.globalAlpha = 0.08;
+  c.fill();
+  c.globalAlpha = 1;
+}
+
+/** The mouse wheel moves a slider: `step` per notch (up is more), half that with Shift held. Fires the
+ *  slider's own input event at once and its change event once the wheel stops, as dragging would. */
+export function wheelSlider(r, step) {
+  let doneT = 0;
+  r.addEventListener('wheel', (e) => {
+    const d = e.deltaY || e.deltaX;
+    if (!d) return;
+    e.preventDefault();
+    const min = Number(r.min), max = Number(r.max), was = Number(r.value);
+    const v = Math.max(min, Math.min(max, was + (d < 0 ? 1 : -1) * (e.shiftKey ? step / 2 : step)));
+    if (v === was) return;
+    r.value = String(v);
+    r.dispatchEvent(new Event('input'));
+    clearTimeout(doneT);
+    doneT = setTimeout(() => r.dispatchEvent(new Event('change')), 250);
+  }, { passive: false });
+}
 const AUDIO_RE = /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus|weba)$/i;
 const fmt = (t) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00');
 // a song's name in the dump may have its playlist (folder) in front: "Road trip/Song.mp3"
@@ -624,17 +702,6 @@ export function createMusic(app) {
   }
   // leaving the window's full screen (Esc, F11) leaves the full-screen player too
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && full) setFull(false); });
-  /** The current theme's colours for the visualizer and the EQ curve (custom themes included). */
-  function vizColors() {
-    const cs = getComputedStyle(document.documentElement);
-    const v = (name, fb) => cs.getPropertyValue(name).trim() || fb;
-    return { a: v('--accent-3', '#6ee7e0'), b: v('--accent', '#b48cff'), c: v('--accent-2', '#ff7ac6'), grid: v('--text-3', '#8d84a0') };
-  }
-  const themeGradient = (g, W) => {
-    const k = vizColors(), grad = g.createLinearGradient(0, 0, W, 0);
-    grad.addColorStop(0, k.a); grad.addColorStop(0.5, k.b); grad.addColorStop(1, k.c);
-    return grad;
-  };
 
   function drawViz() {
     if (!wide) return;
@@ -691,6 +758,15 @@ export function createMusic(app) {
     let seeking = false;
     seek.addEventListener('input', () => { seeking = true; cur.textContent = fmt((seek.value / 1000) * (audio.duration || 0)); });
     seek.addEventListener('change', () => { if (audio.duration) audio.currentTime = (seek.value / 1000) * audio.duration; seeking = false; });
+    // the wheel skips 5 s a notch (1 s with Shift), up is forward
+    seek.addEventListener('wheel', (e) => {
+      const d = e.deltaY || e.deltaX;
+      if (!d || !audio.duration) return;
+      e.preventDefault();
+      audio.currentTime = Math.max(0, Math.min(audio.duration - 0.05, audio.currentTime + (d < 0 ? 1 : -1) * (e.shiftKey ? 1 : 5)));
+      seek.value = String((audio.currentTime / audio.duration) * 1000);
+      cur.textContent = fmt(audio.currentTime);
+    }, { passive: false });
     const cur = h('span', { class: 'mono' }, '0:00');
     const dur = h('span', { class: 'mono' }, '0:00');
     const btn = (ic, tip, fn, cls = '') => h('button', { class: `icon-btn music-btn ${cls}`, 'data-tip': tip, onclick: fn }, icon(ic));
@@ -700,54 +776,11 @@ export function createMusic(app) {
     const playB = h('button', { class: 'music-play', 'data-tip': 'Play / pause (Space when this is open)', onclick: () => toggle() }, icon('play'));
     const vol = h('input', { type: 'range', class: 'music-vol', min: '0', max: '1', step: '0.01', value: String(state.volume) });
     vol.addEventListener('input', () => setVolume(Number(vol.value)));
+    wheelSlider(vol, 0.05);
     // mixer: response curve + low/high cut + 10 bands + presets
     const eqWrap = h('div', { class: 'music-eq', hidden: !s.musicMixerOpen });
     const curve = h('canvas', { class: 'music-curve', width: '620', height: '150' });
-    const drawCurve = () => {
-      const c = curve.getContext('2d');
-      const W = curve.width, H = curve.height;
-      c.clearRect(0, 0, W, H);
-      const yOf = (db) => H / 2 - (db / 24) * (H / 2 - 8);
-      const k = vizColors();
-      c.strokeStyle = k.grid;
-      c.lineWidth = 1;
-      c.globalAlpha = 0.2;
-      for (const db of [-18, -12, -6, 0, 6, 12, 18]) { c.beginPath(); c.moveTo(0, yOf(db)); c.lineTo(W, yOf(db)); c.stroke(); }
-      for (const hz of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) { const x = (hzToPos(hz) / 1000) * W; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
-      c.globalAlpha = 0.8;
-      c.fillStyle = k.grid;
-      c.font = '9px IBM Plex Mono, monospace';
-      for (const hz of [100, 1000, 10000]) c.fillText(hzLabel(hz), (hzToPos(hz) / 1000) * W + 3, H - 4);
-      c.globalAlpha = 1;
-      // combined response of every filter (uses the real filters when audio has started; otherwise a scratch graph)
-      const N = 200;
-      const freqs = new Float32Array(N);
-      for (let i = 0; i < N; i++) freqs[i] = posToHz((i / (N - 1)) * 1000);
-      const total = new Float32Array(N).fill(1);
-      const scratch = ctx || new OfflineAudioContext(1, 1, 44100);
-      const make = (type, f, q, g) => { const b = scratch.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; b.gain.value = g; return b; };
-      const chain = [
-        make('highpass', state.low <= MIN_HZ + 1 ? 1 : state.low, 0.9, 0),
-        ...BANDS.map(([f, type], i) => make(type, f, type === 'peaking' ? 1.4 : 0.7, state.eq[i])),
-        make('lowpass', state.high >= MAX_HZ - 50 ? 24000 : state.high, 0.9, 0),
-      ];
-      const mag = new Float32Array(N), ph = new Float32Array(N);
-      for (const f of chain) { f.getFrequencyResponse(freqs, mag, ph); for (let i = 0; i < N; i++) total[i] *= mag[i]; }
-      c.beginPath();
-      for (let i = 0; i < N; i++) {
-        const db = Math.max(-24, Math.min(24, 20 * Math.log10(Math.max(total[i], 1e-6))));
-        const x = (i / (N - 1)) * W, y = yOf(db);
-        if (i) c.lineTo(x, y); else c.moveTo(x, y);
-      }
-      c.strokeStyle = themeGradient(c, W);
-      c.lineWidth = 2.5;
-      c.stroke();
-      c.lineTo(W, H); c.lineTo(0, H); c.closePath();
-      c.fillStyle = k.b;
-      c.globalAlpha = 0.08;
-      c.fill();
-      c.globalAlpha = 1;
-    };
+    const drawCurve = () => drawEqCurve(curve, state, ctx);
     // switching theme redraws the curve in the new colours
     new MutationObserver(() => { if (curve.isConnected) drawCurve(); })
       .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
@@ -763,6 +796,7 @@ export function createMusic(app) {
     };
     lowR.addEventListener('input', () => { setCuts({ low: posToHz(Number(lowR.value)) }, false); showCuts(); markPreset(); drawCurve(); });
     lowR.addEventListener('change', () => setCuts({}, true));
+    wheelSlider(lowR, 20); wheelSlider(highR, 20);
     highR.addEventListener('input', () => { setCuts({ high: posToHz(Number(highR.value)) }, false); showCuts(); markPreset(); drawCurve(); });
     highR.addEventListener('change', () => setCuts({}, true));
     const eqSliders = BANDS.map(([freq], i) => {
@@ -772,6 +806,7 @@ export function createMusic(app) {
       r.addEventListener('input', () => { setEq(i, Number(r.value), false); show(); markPreset(); drawCurve(); });
       r.addEventListener('change', () => setEq(i, Number(r.value)));
       r.addEventListener('dblclick', () => { setEq(i, 0); show(); markPreset(); drawCurve(); });
+      wheelSlider(r, 1);
       show();
       return { show, el: h('div', { class: 'music-eq-band' }, val, h('div', { class: 'music-eq-track' }, r), h('span', { class: 'mono faint music-eq-hz' }, hzLabel(freq))) };
     });

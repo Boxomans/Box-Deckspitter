@@ -305,13 +305,16 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   const DRAG_DIRS = [path.join(ROOT, 'media-dump'), path.join(ROOT, 'image-dump'), path.join(ROOT, 'doc-dump')].map((d) => d.toLowerCase() + path.sep);
   const DRAG_ICON = path.join(ROOT, 'public', 'assets', 'icon-256.png');
   ipcMain.on('bds:drag', (e, file) => {
-    const full = path.resolve(String(file || ''));
-    if (!DRAG_DIRS.some((d) => full.toLowerCase().startsWith(d)) || !fs.existsSync(full)) return;
+    // one file, or several (picked in the dump panel)
+    const files = (Array.isArray(file) ? file : [file]).slice(0, 200).map((f) => path.resolve(String(f || '')))
+      .filter((f) => DRAG_DIRS.some((d) => f.toLowerCase().startsWith(d)) && fs.existsSync(f));
+    if (!files.length) return;
+    const full = files[0];
     let img = /\.(png|jpe?g|gif|bmp)$/i.test(full) ? nativeImage.createFromPath(full) : null;
     if (!img || img.isEmpty()) img = nativeImage.createFromPath(DRAG_ICON);
     const size = img.getSize();
     if (size.width > 96) img = img.resize({ width: 96 });
-    e.sender.startDrag({ file: full, icon: img });
+    e.sender.startDrag(files.length > 1 ? { file: full, files, icon: img } : { file: full, icon: img });
   });
 
   // Copy a picture to the system clipboard (doesn't depend on the page's clipboard permission).

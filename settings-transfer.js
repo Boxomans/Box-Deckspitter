@@ -11,7 +11,6 @@ const crypto = require('crypto');
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 const KIND = 'box-deckspitter-setup';
-const OLD_KIND = 'box-docspitter-setup'; // exports made before the rename still import
 // settings that belong to this PC or this session, not to "your setup". Easter egg game progress (tomcat*) is
 // yours: it always goes with the export.
 const LOCAL_ONLY = new Set(['explorerDir', 'spaces', 'musicLast', 'musicPos', 'musicPlaying', 'musicQueue', 'musicShuffleOrder', 'lastSeenVersion', 'welcomed', 'browserTabs', 'browserActive', 'browserPinned',
@@ -87,7 +86,7 @@ module.exports = function createTransfer({ root, data, version, settings, saveSe
     const names = Object.values(zip.files).filter((f) => !f.dir).map((f) => f.name);
     let manifest;
     try { manifest = JSON.parse(await zip.file('manifest.json').async('string')); } catch { manifest = null; }
-    if (manifest?.kind !== KIND && manifest?.kind !== OLD_KIND) throw err(400, 'That .zip isn’t a Box-Deckspitter export.');
+    if (manifest?.kind !== KIND) throw err(400, 'That .zip isn’t a Box-Deckspitter export.');
     if (names.some((n) => !allowed.has(n) && !BG_RE.test(n))) throw err(400, 'That export has files in it that don’t belong; not importing it.');
     let s = {};
     if (zip.file('settings.json')) {

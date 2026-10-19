@@ -13,6 +13,10 @@ const PREFIX = 'PLYLST1:';
 const MAX_SONGS = 500;
 const TYPE = 'box-deckspitter-playlist';
 
+/** "NA" is what yt-dlp and some taggers write for a field they didn't have: as a whole artist, or tacked on the end
+ *  of a title ("Song-NA", "Song - NA"), it isn't part of the name. */
+const noNA = (v) => String(v || '').replace(/^\s*N\/?A\s*$/, '').replace(/[\s_-]+N\/?A$/, '').trim();
+
 /** The ID3v2 frames a shared song needs: title, artist and the link it was downloaded from (yt-dlp writes that as a
  *  "purl" TXXX frame and as the comment). Only frame headers and those small frames are read, so cover art is skipped. */
 async function readLinkTags(file) {
@@ -103,9 +107,9 @@ function decode(text) {
   for (const s of raw) {
     if (!s || songs.length >= MAX_SONGS) continue;
     const url = /^https?:\/\/\S+$/i.test(s.url || '') && String(s.url).length <= 600 ? String(s.url) : '';
-    const title = str(s.title, 200);
+    const title = noNA(str(s.title, 200));
     if (!url && !title) continue;
-    songs.push({ url, title, artist: str(s.artist, 120) });
+    songs.push({ url, title, artist: noNA(str(s.artist, 120)) });
   }
   if (!songs.length) throw Object.assign(new Error('That playlist has no songs in it.'), { status: 400 });
   return { name: str(name, 80) || 'Shared playlist', songs };
@@ -129,7 +133,7 @@ module.exports = function createPlaylistShare({ dumpAbs, dumpRel, readJSONBody, 
       const t = /\.mp3$/i.test(n) ? await readLinkTags(path.join(dir, n)).catch(() => ({})) : {};
       if (t.url) linked++;
       // without a title tag, the file name ("Artist - Song") stands in
-      songs.push({ url: t.url || '', title: t.title || base, artist: t.artist || '' });
+      songs.push({ url: t.url || '', title: noNA(t.title || base), artist: noNA(t.artist || '') });
     }
     // in the code, an artist already in the title is left out
     const s = songs.map((x) => {

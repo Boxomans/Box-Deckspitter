@@ -28,20 +28,26 @@ export const DECK_MAX_KMH = 1100;
  *  it's kept from mission to mission (still paid for from each mission's budget) until it's lost (see strike/badges.js). */
 export const AIRCRAFT = {
   f16: { id: 'f16', name: 'F-16C Viper', cost: 35, stations: 4, kmh: { cruise: 850, fast: 1050, dash: 1250 }, range: 1500, rcs: 1.2, ecm: 0.12, cm: 0.18, radar: { km: 110 },
-    weapons: ['harm', 'jdam', 'jdamer', 'sdb', 'jsow', 'mako', 'cbu', 'mald', 'aim120', 'aim9x'], what: 'Cheap and nimble. Four bomb stations.' },
+    weapons: ['harm', 'jdam', 'jdamer', 'sdb', 'jsow', 'mako', 'cbu', 'mald', 'aim120', 'aim9x'], what: 'Cheap and nimble. Four bomb stations.',
+    good: 'Cheap HARM shooter and package filler: hunts radars for little money', bad: 'Only four stations, short legs and a small radar' },
   f15e: { id: 'f15e', name: 'F-15E Strike Eagle', cost: 55, points: 100, stations: 7, kmh: { cruise: 870, fast: 1100, dash: 1400 }, range: 2400, rcs: 4, ecm: 0.18, cm: 0.18, radar: { km: 150 },
-    weapons: ['jdam', 'jdamer', 'sdb', 'jsow', 'mako', 'cbu', 'mald', 'aim120', 'aim9x'], what: 'The heavy hauler: seven stations and the longest legs. A big radar return.' },
+    weapons: ['jdam', 'jdamer', 'sdb', 'jsow', 'mako', 'cbu', 'mald', 'aim120', 'aim9x'], what: 'The heavy hauler: seven stations and the longest legs. A big radar return.',
+    good: 'Hauling bombs a long way: most stations of any fighter, fastest dash, longest range', bad: 'The biggest radar return: SAMs see it first. No HARMs. Costs hangar points' },
   f18e: { id: 'f18e', name: 'F/A-18E Super Hornet', cost: 45, stations: 5, kmh: { cruise: 820, fast: 1000, dash: 1150 }, range: 1700, rcs: 1.5, ecm: 0.2, cm: 0.2, radar: { km: 120 },
-    weapons: ['harm', 'jdam', 'jdamer', 'sdb', 'jsow', 'mako', 'cbu', 'mald', 'aim120', 'aim9x'], what: 'Five stations and good self-protection.' },
+    weapons: ['harm', 'jdam', 'jdamer', 'sdb', 'jsow', 'mako', 'cbu', 'mald', 'aim120', 'aim9x'], what: 'Five stations and good self-protection.',
+    good: 'All-rounder that survives: strong jammer and decoys, carries HARMs and bombs', bad: 'The slowest fighter at full speed, and middling range' },
   ea18g: { id: 'ea18g', name: 'EA-18G Growler', cost: 65, stations: 2, kmh: { cruise: 800, fast: 960, dash: 1100 }, range: 1600, rcs: 1.5, ecm: 0.3, cm: 0.2,
     weapons: ['harm', 'pod'], jam: { km: 160, factor: 0.55, pk: 0.7 },
-    what: 'Jams every radar within 160 km: they see the package later and their missiles miss more. Two stations: HARMs, or the NGJ pod that blinds one site outright.' },
+    what: 'Jams every radar within 160 km: they see the package later and their missiles miss more. Two stations: HARMs, or the NGJ pod that blinds one site outright.',
+    good: 'Protecting the whole package: its jamming helps every jet near it', bad: 'Carries no bombs and no air-to-air missiles; only two stations. Expensive for what it drops' },
   f35a: { id: 'f35a', name: 'F-35A Lightning II', cost: 80, points: 300, stations: 4, kmh: { cruise: 880, fast: 1080, dash: 1300 }, range: 2200, rcs: 0.005, ecm: 0.25, cm: 0.18, lo: 0.55, radar: { km: 170 },
     weapons: ['jdam', 'sdb', 'jsow', 'mako', 'aim120', 'aim9x'],
-    what: 'A stealth fighter: four stations, all in its bays. Radars see it at about a fifth of the range they see an F-16, and their missiles lock on less well. Less stealthy than the B-21, but it keeps up with fighters.' },
+    what: 'A stealth fighter: four stations, all in its bays. Radars see it at about a fifth of the range they see an F-16, and their missiles lock on less well. Less stealthy than the B-21, but it keeps up with fighters.',
+    good: 'Getting in unseen, and the best radar for air-to-air', bad: 'Only four stations, no HARMs or cluster bombs. Pricey, and costs hangar points' },
   b21: { id: 'b21', name: 'B-21 Raider', cost: 700, points: 800, stations: 8, bay: 2, kmh: { cruise: 850, fast: 920, dash: 980 }, range: 9000, rcs: 0.001, ecm: 0.3, cm: 0.15, lo: 0.4,
     weapons: ['jdam', 'sdb', 'jsow', 'cbu'],
-    what: 'Stealth bomber. Eight bays, each carrying twice what a fighter’s station does, and the range to reach anything. Radars see it at about an eighth of a fighter’s range, and their missiles struggle to hold a lock. Subsonic: it slows any package it flies with, and the jets with it can still be seen. Costs more than a normal mission’s whole budget.' },
+    what: 'Stealth bomber. Eight bays, each carrying twice what a fighter’s station does, and the range to reach anything. Radars see it at about an eighth of a fighter’s range, and their missiles struggle to hold a lock. Subsonic: it slows any package it flies with, and the jets with it can still be seen. Costs more than a normal mission’s whole budget.',
+    good: 'The stealthiest, the biggest bomb load and the range to reach anything', bad: 'Slow (subsonic), no air-to-air at all, large missions only' },
 };
 export const AIRCRAFT_ORDER = ['f16', 'f18e', 'f15e', 'f35a', 'ea18g', 'b21'];
 /** How fast a package of these jet types flies at a speed setting: as fast as its slowest jet. */

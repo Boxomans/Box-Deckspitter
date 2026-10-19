@@ -81,7 +81,7 @@ export class DumpsPart {
     h('div', { class: 'explorer-path' },
       h('button', { class: 'icon-btn', 'data-tip': 'Up one folder (Mouse 4)', disabled: !sub, onclick: () => again(parts.slice(0, -1).join('/')) }, icon('arrow-up', 'sm')),
       crumbs),
-    h('div', { class: 'dump-panel-hint faint' }, 'Right-click copies · Shift+right-click for more · Shift+drag to carry or move into a folder · Ctrl+right-click sends to the open tool'),
+    h('div', { class: 'dump-panel-hint faint' }, 'Right-click copies · Shift+right-click for more · Shift+drag to carry into a folder, a tool or another program · Ctrl+right-click sends to the open tool'),
     body);
     const remove = async (items) => {
       for (const it of items) { try { await api.dumpRemove(it.name, kind); } catch (e) { errorToast(e, it.base || it.name); } }
@@ -93,8 +93,10 @@ export class DumpsPart {
       await api.dumpRename(it.name, to, kind);
       again();
     };
-    const picker = rubberSelect(list, {
+    // the whole panel body, so a drag-to-pick can start in the empty space below the files too
+    const picker = rubberSelect(body, {
       scroller: () => body,
+      osDrag: true,
       menu: (items) => {
         const files = items.filter((x) => !x.isDir);
         return [

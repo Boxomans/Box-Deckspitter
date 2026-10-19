@@ -4,7 +4,7 @@
 import { $, $$, h, clear, uid, dirname } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
-import { showMenu, contextMenu, choiceDialog, toast, errorToast } from '../core/ui.js';
+import { showMenu, contextMenu, choiceDialog, toast, errorToast, hoverKeys, renameInline, promptDialog } from '../core/ui.js';
 import { MODE_ICON, MODE_LABEL, iconForName } from '../core/filetypes.js';
 import { TOOL_MODES, TOOL_KINDS, TOOL_OF_MODE } from '../core/tools.js';
 
@@ -56,6 +56,10 @@ export class TabsPart {
       h('span', { class: 'tab-icon' }, icon(t.mode ? (t.mode === 'code' ? iconForName(t.title) : MODE_ICON[t.mode]) : 'file', 'sm')),
       h('span', { class: 'tab-title' }, t.title),
       h('button', { class: 'tab-close', title: 'Close (Alt+W)', onclick: (e) => { e.stopPropagation(); this.closeTab(t); } }, icon('x', 'sm')));
+      // an image not saved to a file yet: F2 names it (the name it goes to the media dump and is saved under)
+      const nameable = !t.path && (t.mode === 'paint' || t.mode === 'image');
+      const renameTab = (n) => { n = String(n).replace(/[\\/:*?"<>|]/g, '').trim(); if (n && n !== t.title) this.setTabMeta(t, { title: n }); };
+      if (nameable) hoverKeys(el, { nameEl: el.querySelector('.tab-title'), value: () => t.title, commit: renameTab });
       el.addEventListener('mousedown', (e) => { if (e.button === 1) { e.preventDefault(); this.closeTab(t); } });
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || e.target.closest('.tab-close')) return;
@@ -64,6 +68,7 @@ export class TabsPart {
       });
       el.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: t.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => this.pinTab(t, !t.pinned) },
+        ...(nameable ? [{ label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { if (!renameInline(el)) promptDialog('Rename', 'Name', t.title).then((n) => n && renameTab(n)); } }] : []),
         { sep: true },
         { label: 'Close', action: () => this.closeTab(t) },
         { label: 'Close others', action: () => this.closeAll(t, { keepPinned: true }) },

@@ -1099,10 +1099,36 @@ export class DocEditor extends BaseEditor {
         const parts = text.replace(/\r\n?/g, '\n').split('\n');
         this.exec('insertHTML', parts.map((p) => escapeHtml(p)).join('<br>'));
       } else this.exec('insertText', text);
+      this.splitTallBlocks();
       return;
     }
     const clean = sanitizeHtml(htmlData.replace(/^[\s\S]*<!--StartFragment-->|<!--EndFragment-->[\s\S]*$/g, ''));
     this.exec('insertHTML', clean);
+    this.splitTallBlocks();
+  }
+
+  /** A paragraph taller than a page can't be moved onto the next page, so it runs over the margins and the gap between
+   *  sheets. After a paste, one like that made of lines (a long pasted text) becomes a paragraph per line. */
+  splitTallBlocks() {
+    const d = pageDims(this.pageSetup), m = this.pageSetup.margins;
+    const contentH = Math.max(96, (d.h - m.top - m.bottom) * 96);
+    const tall = [...this.body.children].filter((el) => /^(P|DIV|H[1-6])$/.test(el.tagName) && !el.classList.contains('page-break') && !el.classList.contains('toc')
+      && [...el.children].some((c) => c.tagName === 'BR') && el.getBoundingClientRect().height / (this.scale || 1) > contentH);
+    if (!tall.length) return;
+    const sel = this.getSelOffsets();
+    for (const el of tall) {
+      const parts = [];
+      let cur = el.cloneNode(false);
+      for (const n of [...el.childNodes]) {
+        if (n.nodeType === 1 && n.tagName === 'BR') { parts.push(cur); cur = el.cloneNode(false); } else cur.append(n);
+      }
+      if (cur.childNodes.length) parts.push(cur);
+      for (const p of parts) { p.removeAttribute('id'); if (!p.textContent && !p.querySelector('img')) p.append(h('br')); }
+      if (el.id) parts[0].id = el.id;
+      el.replaceWith(...parts);
+    }
+    if (sel) this.setSelOffsets(sel);
+    this.contentChanged();
   }
 
   async onDrop(e) {

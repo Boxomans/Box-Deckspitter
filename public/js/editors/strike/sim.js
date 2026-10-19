@@ -185,7 +185,7 @@ export class StrikeSim extends Base {
       const f = { k, name: 'AB'[k], route: r, leg: 0, decoysOut: false, done: null,
         pos: { x: p0.x, y: p0.y, alt: ALTS[p0.alt].m, kmh: packageKmh(pk.map((a) => a.type), p0.spd) } };
       f.jets = pk.map((a) => ({
-        id: this.jets.length, f, type: a.type, A: AIRCRAFT[a.type], alive: true, fuel: 0, x: p0.x, y: p0.y, alt: f.pos.alt, rcs: AIRCRAFT[a.type].rcs,
+        id: this.jets.length, f, type: a.type, A: AIRCRAFT[a.type], nm: `${AIRCRAFT[a.type].name} (package ${f.name})`, alive: true, fuel: 0, x: p0.x, y: p0.y, alt: f.pos.alt, rcs: AIRCRAFT[a.type].rcs,
         stations: a.stations.map((s) => ({ ...s })), spent: 0,
       }));
       this.jets.push(...f.jets);
@@ -229,7 +229,7 @@ export class StrikeSim extends Base {
       const name = s.sam ? `${SAMS[s.sam].long} site` : s.name;
       if (j.alive && !st.locked && dist(j, s) <= MUNITIONS.pod.km) {
         st.locked = true;
-        this.event(`The ${j.A.name}’s NGJ pod blinds the ${name}: its radars see nothing while the Growler flies.`, 'good', s);
+        this.event(`The NGJ pod on the ${j.nm} blinds the ${name}: its radars see nothing while the Growler flies.`, 'good', s);
       } else if (!j.alive && st.locked && !st.freed) {
         st.freed = true;
         if (!this.blinded(s)) this.event(`The ${name} can see again: the Growler jamming it is gone.`, 'warn', s);
@@ -269,7 +269,7 @@ export class StrikeSim extends Base {
     const band = ALTS[a.alt].burn * SPEEDS[a.spd].burn * this.cover(p).burn;
     for (const j of f.jets) if (j.alive) {
       j.fuel += (step * band) / j.A.range;
-      if (j.fuel >= 1) { j.alive = false; this.lost.push({ jet: j, why: 'fuel' }); this.event(`${j.A.name} ran out of fuel; the crew ejected.`, 'loss', p); }
+      if (j.fuel >= 1) { j.alive = false; this.lost.push({ jet: j, why: 'fuel' }); this.event(`${j.nm} ran out of fuel; the crew ejected.`, 'loss', p); }
     }
     while (step > 0 && f.route[f.leg + 1]) {
       const n = f.route[f.leg + 1];
@@ -293,7 +293,7 @@ export class StrikeSim extends Base {
       j.alive = false;
       this.burst(j.x, j.y, 'kill');
       this.lost.push({ jet: j, why: 'radiation' });
-      this.event(`${j.A.name}: the crew died of radiation.`, 'loss', j);
+      this.event(`${j.nm}: the crew died of radiation.`, 'loss', j);
     }
     // decoys go when the route says so
     if (a.decoys && !f.decoysOut) this.launchDecoys(f);
@@ -453,7 +453,7 @@ export class StrikeSim extends Base {
       b.missiles--; b.cool = this.t + 6;
       this.aams.push({ id: ++this.nid, red: true, from: b, target: tg, x: b.x, y: b.y, kmh: R77.kmh, max: rk(tg) * 1.3, flown: 0, lost: 0, pitbull: R77.pitbull, pk: R77.pk, name: R77.name });
       tg.engaged = (tg.engaged || 0) + 1;
-      this.event(`${b.F.name} fires an ${R77.name} at the ${tg.A.name} (${pkg(tg)}).`, 'warn', b);
+      this.event(`${b.F.name} fires an ${R77.name} at the ${tg.nm}.`, 'warn', b);
     }
     for (const b of live) if (!b.seen && ours.some((j) => this.jetSees(j, b))) {
       b.seen = true;
@@ -472,7 +472,7 @@ export class StrikeSim extends Base {
         tg.seen = true;
         this.aams.push({ id: ++this.nid, red: false, from: j, target: tg, x: j.x, y: j.y, kmh: mu.kmh, max: R(tg) * 1.3, flown: 0, lost: 0, pitbull: mu.ir ? Infinity : mu.pitbull, pk: mu.pk, name: mu.short });
         tg.engaged = (tg.engaged || 0) + 1;
-        this.event(`${j.A.name}: ${mu.short} away at an ${tg.F.name}.`, 'info', tg);
+        this.event(`${j.nm}: ${mu.short} away at an ${tg.F.name}.`, 'info', tg);
         break;
       }
     }
@@ -508,8 +508,8 @@ export class StrikeSim extends Base {
         tg.alive = false;
         this.lost.push({ jet: tg, why: a.from.F.name });
         this.burst(tg.x, tg.y, 'kill');
-        this.event(`${tg.A.name} shot down by an ${a.name} from an ${a.from.F.name}.`, 'loss', tg);
-      } else { this.burst(tg.x, tg.y, 'miss'); this.event(`An ${a.name} missed the ${tg.A.name}.`, 'good', tg); }
+        this.event(`${tg.nm} shot down by an ${a.name} from an ${a.from.F.name}.`, 'loss', tg);
+      } else { this.burst(tg.x, tg.y, 'miss'); this.event(`An ${a.name} missed the ${tg.nm}.`, 'good', tg); }
       return;
     }
     const F = tg.F, pk = a.pk * (1 - F.ecm) * (1 - F.cm) * (F.lo ?? 1);
@@ -517,7 +517,7 @@ export class StrikeSim extends Base {
       tg.alive = false;
       this.airKills = (this.airKills || 0) + 1;
       this.burst(tg.x, tg.y, 'hit');
-      this.event(`Splash: ${F.name} shot down by an ${a.name} from the ${a.from.A.name}.`, 'kill', tg);
+      this.event(`Splash: ${F.name} shot down by an ${a.name} from the ${a.from.nm}.`, 'kill', tg);
     } else { this.burst(tg.x, tg.y, 'miss'); this.event(`Our ${a.name} missed the ${F.name}.`, 'info', tg); }
   }
 
@@ -539,8 +539,8 @@ export class StrikeSim extends Base {
       tg.alive = false;
       this.lost.push({ jet: tg, why: S.long });
       this.burst(tg.x, tg.y, 'kill');
-      this.event(`${tg.A.name} shot down by a ${S.long}.`, 'loss', tg);
-    } else { this.burst(tg.x, tg.y, 'miss'); this.event(`A ${S.name} missile missed (${tg.A.name} defended).`, 'good', tg); }
+      this.event(`${tg.nm} shot down by a ${S.long}.`, 'loss', tg);
+    } else { this.burst(tg.x, tg.y, 'miss'); this.event(`A ${S.name} missile missed (${tg.nm} defended).`, 'good', tg); }
   }
   missed(ms, why) { this.event(`A ${SAMS[this.site[ms.site].sam].name} missile ${why}.`, 'good'); }
 
@@ -591,7 +591,7 @@ export class StrikeSim extends Base {
     }
     st.n -= n;
     this.used += mu.cost * n;
-    this.event(`${j.A.name}: ${n > 1 ? n + '× ' : ''}${mu.short} away at the ${lower(targetName(t))} (${s.name.replace(/ site .*/, ' site')}).`, 'info', at);
+    this.event(`${j.nm}: ${n > 1 ? n + '× ' : ''}${mu.short} away at the ${lower(targetName(t))} (${s.name.replace(/ site .*/, ' site')}).`, 'info', at);
   }
 
   stepWeapons(dt) {

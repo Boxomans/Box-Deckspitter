@@ -1,4 +1,4 @@
-// Box-DocSpitter boot file. It does three small jobs and then loads the real app window (shell.js):
+// Box-Deckspitter boot file. It does three small jobs and then loads the real app window (shell.js):
 //   1. installs an update the app downloaded (data/update/pending.json), backing up every file it replaces;
 //   2. watches that the updated version actually starts (the page reports "ready") and, if it doesn't,
 //      puts the previous version back and restarts it;
@@ -24,7 +24,7 @@ const ROLLBACK_FLAG = path.join(UPD, 'rollback.flag'); // written by Settings â†
 const READY_TIMEOUT = 90 * 1000;
 
 // Paths an update may never touch, whatever the download says.
-const PROTECTED = [/^data(\/|$)/i, /^(image|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-docspitter\.exe$/i];
+const PROTECTED = [/^data(\/|$)/i, /^(image|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-deckspitter\.exe$/i];
 const isSafeRel = (rel) => typeof rel === 'string' && rel.length > 0 && rel.length < 400 && !rel.includes('\0') && !path.isAbsolute(rel)
   && !/^[a-z]:/i.test(rel) && !rel.split(/[\\/]/).includes('..') && !PROTECTED.some((re) => re.test(rel.replace(/\\/g, '/')));
 const abs = (rel) => path.join(ROOT, ...rel.split(/[\\/]/));
@@ -36,7 +36,7 @@ function writeJSON(f, v) {
   fs.renameSync(f + '.tmp', f);
 }
 const rm = (f) => { try { fs.rmSync(f, { recursive: true, force: true }); } catch { /* ignore */ } };
-const log = (m) => { try { console.log(`[Box-DocSpitter boot] ${m}`); } catch { /* no console */ } };
+const log = (m) => { try { console.log(`[Box-Deckspitter boot] ${m}`); } catch { /* no console */ } };
 
 /** Replace one file without ever leaving it half-written. */
 function putFile(src, rel) {
@@ -111,7 +111,7 @@ function pruneBackups(keep = 3) {
 
 // The single-instance lock lives in Electron's data folder, so that has to point inside the app folder first
 // (portable: nothing in %APPDATA%). A factory reset can't delete that folder while it's in use, so it finishes here.
-app.setName('Box-DocSpitter');
+app.setName('Box-Deckspitter');
 const USER_DATA = path.join(DATA, 'electron');
 const RESET_FLAG = path.join(DATA, '.reset-electron');
 if (fs.existsSync(RESET_FLAG)) {
@@ -133,7 +133,7 @@ function rollBack(reason, relaunch) {
     log(`update to ${t.version} didn't start (${reason}); back on ${man.from}`);
   } catch (e) {
     writeJSON(RESULT, { ok: false, rolledBack: false, version: t.version, reason: `${reason}; restoring the backup also failed: ${e.message}`, at: Date.now(), seen: false });
-    dialog.showErrorBox('Box-DocSpitter', `The update didn't start and the previous version couldn't be put back automatically.\n\nRun "Restore previous version.bat" in the Box-DocSpitter folder.\n\n${e.message}`);
+    dialog.showErrorBox('Box-Deckspitter', `The update didn't start and the previous version couldn't be put back automatically.\n\nRun "Restore previous version.bat" in the Box-Deckspitter folder.\n\n${e.message}`);
   }
   if (relaunch) { app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--rollback') }); app.exit(0); }
 }
@@ -213,7 +213,7 @@ try {
   if (trial) rollBack('the app window code failed to load: ' + e.message, true);
   else {
     app.whenReady().then(() => {
-      dialog.showErrorBox('Box-DocSpitter', `Box-DocSpitter couldn't start.\n\n${e.stack || e.message}\n\nIf this started after an update, run "Restore previous version.bat".`);
+      dialog.showErrorBox('Box-Deckspitter', `Box-Deckspitter couldn't start.\n\n${e.stack || e.message}\n\nIf this started after an update, run "Restore previous version.bat".`);
       app.exit(1);
     });
   }

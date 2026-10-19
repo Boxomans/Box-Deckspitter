@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.1.4",
+    "date": "2026-10-19",
+    "notes": [
+      "Deep Strike: added new content.",
+      "Music: the mouse wheel moves the mixer's EQ bands and low/high cut sliders, the volume, and the seek bar (5 s a notch). Hold Shift for finer steps.",
+      "Browser equalizer: shows the EQ's response curve, like the music mixer. The mouse wheel moves the EQ bands and low/high cut sliders; hold Shift for finer steps.",
+      "Browser: page zoom from 50% to 250%, with Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+mouse wheel, or ⋮ → Zoom.",
+      "Browser: favorites. The star at the right end of the address bar adds or removes the page. Each favorite is a button showing the site's logo after the address bar; click to open it, middle-click or Ctrl+click for a new tab. From ten on they scroll with the mouse wheel. Hover one and press F2 to give it a picture of your own as its logo (Ctrl+F2 puts the site's back, Delete removes it). Right-click for more. Favorites are kept in the settings export.",
+      "Media and doc dump panels: drag-to-pick can start in the empty space below the files, and a click on the empty space clears the picks. Shift+drag now carries files into other programs too (Explorer, the desktop, chat apps), several at once when they're picked.",
+      "Images: hover an unsaved image's tab and press F2, or right-click it → Rename…, to name it. Send to media dump uses that name.",
+      "BoxWave: Effects → Effect → Reverb… opens a window with two sliders, Room size (0.3–6 s) and Strength (0–100%). It remembers the last settings.",
+      "Documents: a long pasted text no longer runs over the page margins and the gap between pages. A pasted block taller than a page becomes one paragraph per line.",
+      "Music: shared playlists drop the \"NA\" that some taggers leave on a song's title or artist. Song searches no longer skip words that start with a dash, and titles spelled out letter by letter are matched more carefully.",
+      "BoxTape: when a shared playlist is opened and some songs have no artist, a box above the list sets the artist for all of them.",
+      "The last traces of the app's old name are gone. Setup exports made before 1.1.1 can no longer be imported, and Secure notes not opened since before 1.1.1 open with your secure key instead of the passphrase."
+    ]
+  },
+  {
     "version": "1.1.3",
     "date": "2026-10-18",
     "notes": [
@@ -54,7 +72,7 @@
       "Music: the full-screen visualizer, the mixer's EQ curve and each song's cover now use the colours of whichever theme is on, instead of always being purple and pink or a random rainbow. Every song still gets its own mix of them.",
       "Every theme now colours the bits that used to stay purple and pink whatever theme was on: the music player's play button, the video and audio trimmer, find highlights, PDF form fields and selection boxes, and the code editor's cursor, selection and find marks.",
       "Music fixes: once a song stopped, the bass bars on the visualizer crept up on their own (the mixer was letting a silent low rumble build up and sending it to the speakers too); and with the mixer open the full-screen player no longer cuts off the top of the song cover.",
-      "Box-DocSpitter is now Box-Deckspitter: the name, the BOX//DECKSPITTER header, window titles, menus, dialogs and the launcher (Box-Deckspitter.exe). Shortcuts that pointed at the old launcher are moved over the first time the new version starts. Settings, files and secure notes are untouched.",
+      "The app is now called Box-Deckspitter: the name, the BOX//DECKSPITTER header, window titles, menus, dialogs and the launcher (Box-Deckspitter.exe). Shortcuts that pointed at the old launcher are moved over the first time the new version starts. Settings, files and secure notes are untouched.",
       "BoxStudio, on the home page: a screen recorder built around scenes. A scene stacks screens, windows, cameras, pictures, videos, text and colour on a canvas at the resolution you set, each with its own position, size, rotation, crop and flip. Sound from the PC and from one or more microphones is mixed with a volume for each. Global hotkeys start, pause and stop recording and take a still from any program, and Win+Shift+K outlines part of the screen to record just that region. Recordings are saved as MP4, MKV, WebM or MOV in the media dump or a folder you choose.",
       "BoxWave, in the Toolbox: an audio editor. Open a sound or record from a microphone, select part of the waveform and cut, copy, paste, delete, trim, silence, amplify, normalize, fade, reverse or change its speed, all with undo. BoxTunnel's effects can be applied to it. Export as WAV, MP3, FLAC, OGG, Opus or M4A (everything except WAV needs ffmpeg). Sound files have Open in BoxWave on their right-click menu.",
       "BoxTunnel effects: any input, a microphone for example, can run through pitch shift, robot, wobble, echo, reverb, distortion, radio, telephone, megaphone, bass and treble. Presets combine them into voices (Deep voice, Chipmunk, Robot, Alien, Demon, Monster, Radio, Telephone, Megaphone, Cave and Stadium), and a monitor switch plays the processed sound back so you can hear it while you adjust.",
@@ -88,7 +106,7 @@
     "version": "1.0.48",
     "date": "2026-10-16",
     "notes": [
-      "Screenshots: press Win+Shift+Q anywhere in Windows while Box-DocSpitter is running. Drag to grab an area or click a window, and it's saved straight into the media dump (never the clipboard). When a fullscreen app such as a game is in front, its whole screen is saved at once, without an overlay."
+      "Screenshots: press Win+Shift+Q anywhere in Windows while Box-Deckspitter is running. Drag to grab an area or click a window, and it's saved straight into the media dump (never the clipboard). When a fullscreen app such as a game is in front, its whole screen is saved at once, without an overlay."
     ]
   },
   {
@@ -254,7 +272,7 @@
       "BoxTunnel: audio lines (BoxAudioLine1, 2, …). Each line mixes any number of inputs (mics or line-in, everything the system is playing, other lines), each with its own volume, mute, level meter and noise gate, through an optional compressor, and plays the mix to any output. Listen lets you hear what's going through a line. Send a line to a virtual audio cable and other apps can use it as a microphone.",
       "BoxVidKlep is now called BoxKlep. A custom name or card position you gave it carries over, and an existing Downloads\\BoxVidKlep folder keeps being used.",
       "Setup export no longer carries this PC's pinned tabs, pinned browser tabs or BoxTunnel lines, so importing on another PC doesn't pin the wrong things or point at missing devices.",
-      "There's a Box-DocSpitter Discord now: Help → Join the Discord, or the button at the bottom of Settings.",
+      "There's a Box-Deckspitter Discord now: Help → Join the Discord, or the button at the bottom of Settings.",
       "Improved entertainment feature."
     ]
   },
@@ -379,7 +397,7 @@
     "version": "1.0.18",
     "date": "2026-10-12",
     "notes": [
-      "Box-DocSpitter now starts from Box-DocSpitter.exe instead of the old .vbs script (drag files onto it to open them; on a fresh copy it still sets up the app files first). The app keeps the .exe up to date itself.",
+      "Box-Deckspitter now starts from Box-Deckspitter.exe instead of the old .vbs script (drag files onto it to open them; on a fresh copy it still sets up the app files first). The app keeps the .exe up to date itself.",
       "The right sidebar folds away when nothing is docked in it, giving the page more room, and slides back out when you drag a button toward it."
     ]
   },
@@ -450,7 +468,7 @@
       "It's quick: chroma key runs on the graphics card and export overlaps drawing, encoding and saving frames.",
       "Videos the app can't play directly (AVI, WMV, MKV, some MOV) are converted to an editing copy automatically; missing files can be found again from the media list.",
       "The quick trimmer is still there (Tools → Quick trim a video, or open any video file), now with an “Open in video editor” button.",
-      "Box-DocSpitter checks for updates when it starts and shows a note in the bottom right if one is out (dismiss it with ×; you can turn the check off in Settings → Updates).",
+      "Box-Deckspitter checks for updates when it starts and shows a note in the bottom right if one is out (dismiss it with ×; you can turn the check off in Settings → Updates).",
       "The status bar shows which folder this copy is running from (click it to open the folder).",
       "Fixed: choosing many file types in Settings → Windows failed with “spawn ENAMETOOLONG”."
     ]

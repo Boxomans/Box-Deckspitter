@@ -2167,6 +2167,17 @@ body.app-locked > *:not(.applock) { visibility: hidden !important; }
 .bw-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--bg-0); border-bottom: 1px solid var(--line); }
 .bw-addr-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--bg-2); }
 .bw-addr-wrap:focus-within { border-color: var(--accent-line); box-shadow: var(--focus); }
+.bw-star { display: flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--text-3); cursor: pointer; }
+.bw-star:hover { color: var(--text); background: var(--bg-3); }
+.bw-star.on { color: var(--accent); }
+.bw-star.on svg { fill: currentColor; }
+/* favorites: logos after the address bar; past ten they scroll (mouse wheel) instead of squeezing the bar */
+.bw-favs { display: flex; align-items: center; gap: 2px; flex: none; max-width: calc(10 * 28px + 9 * 2px); overflow-x: auto; scrollbar-width: none; }
+.bw-favs::-webkit-scrollbar { display: none; }
+.bw-favs[hidden] { display: none; }
+.bw-favb { display: flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-2); cursor: pointer; }
+.bw-favb:hover { background: var(--bg-3); }
+.bw-favb img { width: 16px; height: 16px; object-fit: contain; pointer-events: none; }
 .bw-addr { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
 .bw-lock { display: flex; align-items: center; flex: none; font-size: 11px; color: var(--text-3); }
 .bw-lock:empty { display: none; }
@@ -3101,6 +3112,10 @@ select optgroup.opt-hidden { margin-top: 5px; padding-top: 7px; border-top: 1px 
 .ds-story { margin: 0; color: #c3d2dd; line-height: 1.55; font-family: Georgia, 'Times New Roman', serif; font-size: 13px; }
 .ds-tip { position: absolute; z-index: 3; max-width: 320px; padding: 8px 10px; background: rgba(10, 17, 23, 0.94); border: 1px solid #2c3f4d; color: #cfe0ec; pointer-events: none; display: flex; flex-direction: column; gap: 4px; line-height: 1.4; }
 .ds-tip[hidden], .ds-legend[hidden] { display: none; }
+.ds-ptpop { position: absolute; z-index: 4; width: 240px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
+.ds-ptpop .ds-leg { background: rgba(10, 17, 23, 0.96); }
+.ds-menu { position: absolute; z-index: 5; top: 24px; left: 50%; transform: translateX(-50%); width: min(440px, calc(100% - 32px)); max-height: calc(100% - 48px); overflow: auto; background: #0e161d; border: 1px solid #2c3f4d; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
+.ds-menu-h { position: sticky; top: 0; z-index: 1; display: flex; gap: 6px; align-items: center; padding: 8px 10px; background: #0e161d; border-bottom: 1px solid #22313c; }
 .ds-tip-h { display: flex; gap: 6px; align-items: center; color: #e8eef3; font-weight: 600; letter-spacing: 0.06em; }
 .ds-tip-what { color: #9fb2c0; }
 .ds-tip-line { color: #cfe0ec; font-size: 11px; }
@@ -3129,3 +3144,13 @@ select optgroup.opt-hidden { margin-top: 5px; padding-top: 7px; border-top: 1px 
 .lyrics-panel .ly-line:hover { color: var(--text-2); }
 .lyrics-panel .ly-line.on { color: var(--accent); font-weight: 600; }
 .lyrics-panel .ly-note { padding: 20px 0; text-align: center; }
+.tape-artist-row { align-items: center; flex-wrap: wrap; }
+.tape-artist-row .tape-artist { width: 180px; }
+
+/* BoxWave reverb: room size + strength */
+.wv-rv { display: flex; flex-direction: column; gap: 10px; min-width: 340px; }
+.wv-rv-row { display: grid; grid-template-columns: 80px 1fr 56px; align-items: center; gap: 10px; }
+.wv-rv-row .mono { text-align: right; }
+
+/* dump panels: drag-to-pick, not text selection */
+.dump-list { user-select: none; }

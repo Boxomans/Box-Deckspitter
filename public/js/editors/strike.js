@@ -7,7 +7,7 @@ import { BaseEditor } from './base.js';
 import { h, clear } from '../core/dom.js';
 import { confirmDialog, toast } from '../core/ui.js';
 import { ALTS, ALT_ORDER, SPEEDS, SPEED_ORDER, DECK_MAX_KMH, AIRCRAFT, AIRCRAFT_ORDER, MUNITIONS, SAMS, SNIFFER, TARGETS, AIRFIELD_RADAR, FIGHTERS, HANGAR_MUNITIONS, untargeted, reach, packageKmh } from './strike/data.js';
-import { Proj, loadWorld, horizon, dist, toSegment, whereIs, zoneAt, doseRate, arcPoint, inField, STORM_S, DEAD_S, THEATRE } from './strike/geo.js';
+import { Proj, loadWorld, horizon, dist, toSegment, whereIs, zoneAt, doseRate, arcPoint, arcSpan, STORM_S, DEAD_S, THEATRE } from './strike/geo.js';
 import { makeMission, REGIONS, TYPE_NAME, targetName, targetXY, alive, targetHp, lower, isRadar, searchRadars, fcRadars } from './strike/mission.js';
 import { SnifferSim, StrikeSim, DT, CLIMB, DESCEND, climbRate } from './strike/sim.js';
 import { MapView, COL } from './strike/view.js';
@@ -174,6 +174,7 @@ export class StrikeEditor extends BaseEditor {
 
   setPhase(p, { keep = false } = {}) {
     this.stopLoop();
+    this.closePop();
     this.phase = p;
     this.sel = null;
     if (p !== 'debrief') this.sim = null;
@@ -186,7 +187,14 @@ export class StrikeEditor extends BaseEditor {
       this.speed = Math.max(this.speed, 8);
     }
     if (p === 'brief') {
-      for (const k of [0, 1]) if (!this.routes[k]) this.routes[k] = [{ ...m.origin, alt: 'med', spd: 'cruise' }, { ...m.origin, alt: 'med', spd: 'cruise', home: true }];
+      for (const k of [0, 1]) {
+        if (this.routes[k]) continue;
+        const o = k ? this.beside(m.origin) : m.origin; // B starts next to A on the arc
+        this.routes[k] = [{ x: o.x, y: o.y, alt: 'med', spd: 'cruise' }, { x: o.x, y: o.y, alt: 'med', spd: 'cruise', home: true }];
+      }
+      // a plan saved when both packages shared one origin: an unused B moves next to A
+      const [ra, rb] = this.routes;
+      if (rb.length === 2 && !this.pkgs[1].length && dist(ra[0], rb[0]) < 1) { const o = this.beside(ra[0]); for (const q of rb) { q.x = o.x; q.y = o.y; } }
       this.plan = null;
     }
     if (p === 'strike') {
@@ -252,6 +260,7 @@ export class StrikeEditor extends BaseEditor {
     const total = this.earned.reduce((n, [, p]) => n + p, 0);
     this.save({ points: this.points() + total, ...(r.won && !wonList.includes(key) ? { wonMissions: [...wonList, key].slice(-200) } : {}) });
     toast(`+${total} points · ${this.points().toLocaleString('en-US')} to spend in the hangar`, { type: 'ok', timeout: 5000 });
+    this.renderTop(); this.renderMenu();
   }
 
   /** Points to spend, and the hangar: how many of each hangar jet and hangar munition are owned (kept between missions
@@ -264,16 +273,18 @@ export class StrikeEditor extends BaseEditor {
   spareMu(id) { return MUNITIONS[id].points ? this.owned(id) - this.loaded(this.pkgs.flat(), id) : Infinity; }
   loaded(jets, id) { return jets.reduce((n, a) => n + a.stations.reduce((k, s) => k + (s.mu === id ? s.n || 0 : 0), 0), 0); }
 
-  async buyJet(id) {
+  /** Buy one hangar jet or munition: asks first, unless Shift is held. */
+  async buyJet(id, quick = false) {
     const A = AIRCRAFT[id] || MUNITIONS[id], jet = !!AIRCRAFT[id];
     if (this.points() < A.points) return;
     const keep = jet ? 'It stays in the hangar from mission to mission (each mission’s budget still pays for flying it) until it’s lost.'
       : id === 'pod' ? 'It stays in the hangar from mission to mission (each mission’s budget still pays for flying it) until the Growler carrying it is lost.'
         : 'It stays in the hangar from mission to mission (each mission’s budget still pays for it) until it’s fired or its jet is lost.';
-    if (!(await confirmDialog(`Buy one ${A.name}?`, `${A.points.toLocaleString('en-US')} of your ${this.points().toLocaleString('en-US')} points. ${keep}`, { okLabel: 'Buy' }))) return;
+    if (!quick && !(await confirmDialog(`Buy one ${A.name}?`, `${A.points.toLocaleString('en-US')} of your ${this.points().toLocaleString('en-US')} points. ${keep}`, { okLabel: 'Buy' }))) return;
     this.save({ points: this.points() - A.points, hangar: { ...(this.store().hangar || {}), [id]: this.owned(id) + 1 } });
     toast(`${A.name} in the hangar (${this.owned(id)})`, { type: 'ok', timeout: 5000 });
     this.renderPanel();
+    this.renderMenu();
   }
 
   /** Hangar munitions fired on the strike, or still on a jet that was lost, are gone. */
@@ -314,17 +325,28 @@ export class StrikeEditor extends BaseEditor {
     }
   }
 
+  /** A jet's hover text: what it's best and worst at, then its numbers. */
+  jetTip(A) {
+    const n = (v) => v.toLocaleString('en-US');
+    return [A.name, `Best at: ${A.good}`, `Weak at: ${A.bad}`, '',
+      `Top speed ${n(A.kmh.dash)} km/h · cruise ${n(A.kmh.cruise)} km/h`,
+      `Range ${n(A.range)} km · ${A.stations} ${A.bay ? 'bays' : 'stations'}`,
+      `Radar ${A.radar ? `${A.radar.km} km` : 'none (no air-to-air missiles)'} · radar return ${A.rcs} m²`,
+      `Jammer ${Math.round(A.ecm * 100)}% · decoys ${Math.round(A.cm * 100)}%${A.jam ? ` · area jamming ${A.jam.km} km` : ''}`,
+      `${money(A.cost)} a mission${A.points ? ` · ${n(A.points)} hangar points` : ''}`].join('\n');
+  }
+
   /** HANGAR: the points to spend and the jets owned, each bought one at a time. */
   hangarSection() {
     const pts = this.points();
     const rows = [...AIRCRAFT_ORDER.filter((id) => AIRCRAFT[id].points), ...HANGAR_MUNITIONS].map((id) => {
       const A = AIRCRAFT[id] || MUNITIONS[id], n = this.owned(id);
-      return h('div', { class: `ds-kv ds-hangar${n ? ' on' : ''}`, title: A.what },
+      return h('div', { class: `ds-kv ds-hangar${n ? ' on' : ''}`, title: AIRCRAFT[id] ? this.jetTip(A) : A.what },
         h('span', {}, `${A.name}${n ? ` ×${n}` : ''}`),
-        h('button', { class: 'ds-btn sm', disabled: pts < A.points, onclick: () => this.buyJet(id) }, `BUY · ${A.points.toLocaleString('en-US')} pts`));
+        h('button', { class: 'ds-btn sm', disabled: pts < A.points, title: 'Shift+click buys without asking', onclick: (e) => this.buyJet(id, e.shiftKey) }, `BUY · ${A.points.toLocaleString('en-US')} pts`));
     });
     return this.section(`HANGAR · ${pts.toLocaleString('en-US')} POINTS`,
-      h('div', { class: 'faint sm' }, 'Strikes earn points: more for destroying the objective and bringing everyone home, double on large missions, and for each new badge. A jet or NGJ pod bought here is kept from mission to mission until it’s lost, a Mako until it’s fired; each mission’s budget still pays for them.'),
+      h('div', { class: 'faint sm' }, 'Strikes earn points: more for destroying the objective and bringing everyone home, double on large missions, and for each new badge. A jet or NGJ pod bought here is kept from mission to mission until it’s lost, a Mako until it’s fired; each mission’s budget still pays for them. Shift+click BUY to skip the question.'),
       ...rows);
   }
 
@@ -359,6 +381,36 @@ export class StrikeEditor extends BaseEditor {
       class: `ds-feat${got[f.id] ? ' on' : ''}`, title: `${f.what}${got[f.id] ? ` · earned ${new Date(got[f.id]).toLocaleDateString()}` : ''}`,
     }, `${got[f.id] ? '★' : '☆'} ${f.name}`)));
     return this.section(`BADGES (${n} of ${list.length + FEATS.length})`, ...rows, h('div', { class: 'ds-h2' }, 'FEATS'), feats);
+  }
+
+  /** HANGAR & BADGES (top bar): a card over the map with the hangar and the badges, a tab each. */
+  openMenu(tab = this.menuTab || 'hangar') {
+    this.menuTab = tab;
+    this.menu = h('div', { class: 'ds-menu' });
+    this.mapwrap.append(this.menu);
+    this.menuKey = (e) => { if (e.key === 'Escape') this.closeMenu(); };
+    addEventListener('keydown', this.menuKey);
+    this.renderMenu();
+    this.renderTop();
+  }
+
+  renderMenu() {
+    if (!this.menu) return;
+    const tab = (id, label) => h('button', { class: `ds-btn sm${this.menuTab === id ? ' on' : ''}`, onclick: () => { this.menuTab = id; this.renderMenu(); } }, label);
+    const top = this.menu.scrollTop;
+    clear(this.menu).append(
+      h('div', { class: 'ds-menu-h' }, tab('hangar', 'HANGAR'), tab('badges', 'BADGES'), h('div', { class: 'grow' }),
+        h('button', { class: 'ds-x', title: 'Close (Esc)', onclick: () => this.closeMenu() }, '×')),
+      this.menuTab === 'badges' ? this.badgeSection() : this.hangarSection());
+    this.menu.scrollTop = top;
+    this.renderTop();
+  }
+
+  closeMenu() {
+    if (!this.menu) return;
+    this.menu.remove(); this.menu = null;
+    removeEventListener('keydown', this.menuKey);
+    this.renderTop();
   }
 
   // ---------------------------------------------------------------- the loop
@@ -415,6 +467,7 @@ export class StrikeEditor extends BaseEditor {
     this.clockEl = h('span', { class: 'ds-clock' }, this.sim ? clock(this.sim.t) : '');
     clear(this.top).append(h('span', { class: 'ds-title' }, 'DEEP STRIKE'), h('span', { class: 'ds-code' }, `OBJECTIVE ${this.mission?.code || ''}`),
       h('div', { class: 'ds-steps' }, ...steps), h('div', { class: 'grow' }),
+      h('button', { class: `ds-btn sm${this.menu ? ' on' : ''}`, title: 'The hangar (points to spend on jets and munitions) and your badges', onclick: () => (this.menu ? this.closeMenu() : this.openMenu()) }, `HANGAR & BADGES · ${this.points().toLocaleString('en-US')} PTS`),
       h('button', { class: `ds-btn sm${this.showTerrain ? ' on' : ''}`, title: 'Terrain overlay (T): the biomes, and what each does to a low package. Hover the map to see.', onclick: () => this.toggleTerrain() }, 'TERRAIN'),
       ...ctl, this.clockEl);
   }
@@ -520,8 +573,6 @@ export class StrikeEditor extends BaseEditor {
       this.section(null, h('div', { class: 'ds-row' }, regionSel, sizeSel), h('div', { class: 'ds-row' }, typeSel, h('button', { class: 'ds-btn', onclick: () => this.newMission() }, 'NEW MISSION')),
         h('button', { class: 'ds-btn primary wide', onclick: () => this.setPhase('sniffer') }, 'FLY THE SNIFFER →')),
       st.flown ? this.section('RECORD', h('div', { class: 'ds-note' }, `${st.flown} flown · ${st.won || 0} objectives destroyed · ${st.jetsLost || 0} jets lost · ${money(st.spent || 0)} spent`)) : null,
-      this.hangarSection(),
-      this.badgeSection(),
     ];
   }
 
@@ -619,7 +670,7 @@ export class StrikeEditor extends BaseEditor {
         h('div', { class: 'ds-kv' }, h('span', {}, `${money(cost)} of ${money(m.budget)}`), over ? h('b', { class: 'bad' }, 'over budget') : h('span', { class: 'faint' }, `${money(m.budget - cost)} left`)),
         this.objectiveLine()),
       this.packageSection(0), this.packageSection(1),
-      this.section('ROUTES', h('div', { class: 'ds-note' }, 'Shift+click the map to add the next turn point (after the selected one) to the package picked above: click a package’s section to pick it. Or click a line to put a point in it; drag points to move them, right-click one to remove it. Click a point to set the height and speed of the leg that starts there, or scroll on it holding Alt for the height, Z for the speed.'),
+      this.section('ROUTES', h('div', { class: 'ds-note' }, 'Shift+click the map to add the next turn point (after the selected one) to the package picked above: click a package’s section to pick it. Or click a line to put a point in it; drag points to move them, right-click one to remove it. Click a point (or Shift+right-click it for a box by the point) to set the height and speed of the leg that starts there, or scroll on it holding Alt for the height, Z for the speed.'),
         ...[0, 1].filter((k) => this.pkgs[k].length || this.routes[k].length > 2).flatMap((k) => [
           h('div', { class: 'ds-kv' }, h('span', { style: k ? { color: B_COL } : null }, `Route ${PKG_NAME[k]}`), h('b', {}, `${Math.round(routeKm(this.routes[k]))} km`)),
           ...this.fuels(k).map(([t, f]) => h('div', { class: 'ds-kv' }, h('span', {}, `Fuel, ${AIRCRAFT[t].name}${both ? ` (${PKG_NAME[k]})` : ''}`), h('b', { class: f > 1 ? 'bad' : f > 0.85 ? 'warn' : '' }, `${Math.round(f * 100)}%`)))]),
@@ -642,7 +693,7 @@ export class StrikeEditor extends BaseEditor {
       ...AIRCRAFT_ORDER.map((id) => { // a locked jet, or one costing more than the whole budget (the B-21 on a normal mission), can't be bought
         const left = this.spare(id), none = left <= 0, no = none || AIRCRAFT[id].cost > this.mission.budget;
         const tag = AIRCRAFT[id].points ? (this.owned(id) ? ` · ${Math.max(0, left)} of ${this.owned(id)} in the hangar` : ' · buy one in the hangar') : '';
-        return h('option', { value: id, disabled: no }, `${AIRCRAFT[id].name} · ${money(AIRCRAFT[id].cost)}${tag}${!none && no ? ' · large missions' : ''}`);
+        return h('option', { value: id, disabled: no, title: this.jetTip(AIRCRAFT[id]) }, `${AIRCRAFT[id].name} · ${money(AIRCRAFT[id].cost)}${tag}${!none && no ? ' · large missions' : ''}`);
       }));
     add.addEventListener('change', () => {
       if (!add.value) return;
@@ -741,7 +792,7 @@ export class StrikeEditor extends BaseEditor {
       pk.splice(i + 1, 0, copy); this.changed();
     } }, '⧉');
     return h('div', { class: 'ds-jet' },
-      h('div', { class: 'ds-jet-h' }, h('b', { style: k ? { color: B_COL } : null }, `${k ? 'B' : ''}${i + 1}. ${A.name}`), h('span', { class: 'faint' }, money(jetCost(a))), dup, rm),
+      h('div', { class: 'ds-jet-h' }, h('b', { style: k ? { color: B_COL } : null, title: this.jetTip(A) }, `${k ? 'B' : ''}${i + 1}. ${A.name}`), h('span', { class: 'faint' }, money(jetCost(a))), dup, rm),
       ...a.stations.map((st, k) => this.stationRow(a, st, k)));
   }
 
@@ -829,7 +880,42 @@ export class StrikeEditor extends BaseEditor {
       i > 0 && i > first ? h('button', { class: 'ds-btn sm', onclick: () => this.removeNode(i, k) }, 'Remove this point') : null);
   }
 
-  changed() { this.renderPanel(); this.view.request(); if (this.phase === 'brief') this.saveCur(); }
+  changed() { this.renderPanel(); this.renderPop(); this.view.request(); if (this.phase === 'brief') this.saveCur(); }
+
+  /** Shift+right-click on a route point: a small box by it with its leg's height, speed, decoys and removal. */
+  openPop(hit, px, py) {
+    this.closePop();
+    if (hit?.node == null) return;
+    const r = this.routes[hit.pk], first = this.firstEditable(hit.pk);
+    if (first == null || hit.node < first || r[hit.node].home) return;
+    this.sel = { node: hit.node, pk: hit.pk }; this.active = hit.pk || 0;
+    this.pop = h('div', { class: 'ds-ptpop' });
+    this.pop.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.popAt = { px, py };
+    this.mapwrap.append(this.pop);
+    this.renderPanel(); this.renderPop(); this.view.request();
+    this.popKey = (e) => { if (e.key === 'Escape') this.closePop(); };
+    this.popAway = (e) => { if (!this.pop?.contains(e.target)) this.closePop(); };
+    addEventListener('keydown', this.popKey);
+    addEventListener('pointerdown', this.popAway, true);
+  }
+
+  renderPop() {
+    if (!this.pop) return;
+    const ed = this.legEditor();
+    if (!ed.classList.contains('ds-leg')) { this.closePop(); return; } // the point's gone (removed, or flown past)
+    clear(this.pop).append(ed);
+    const W = this.mapwrap.clientWidth, H = this.mapwrap.clientHeight;
+    this.pop.style.left = `${Math.max(4, Math.min(W - this.pop.offsetWidth - 4, this.popAt.px + 12))}px`;
+    this.pop.style.top = `${Math.max(4, Math.min(H - this.pop.offsetHeight - 4, this.popAt.py + 12))}px`;
+  }
+
+  closePop() {
+    if (!this.pop) return;
+    this.pop.remove(); this.pop = null;
+    removeEventListener('keydown', this.popKey);
+    removeEventListener('pointerdown', this.popAway, true);
+  }
 
   async launch(worst) {
     const short = AIRCRAFT_ORDER.find((id) => this.spare(id) < 0); // a saved plan with more hangar jets than are left
@@ -871,8 +957,8 @@ export class StrikeEditor extends BaseEditor {
         s.done ? null : h('div', { class: 'ds-row' }, h('button', { class: 'ds-btn', title: 'Stop the strike here and go to the debrief', onclick: () => this.endStrike() }, 'END MISSION'))),
       ...s.flights.map(pkgSec),
       s.done ? null : this.section(two ? 'ROUTES' : 'ROUTE', h('div', { class: 'ds-note' }, two
-        ? 'Edit the routes ahead as they fly (pausing gives you time): Shift+click adds the next point to the package picked above (click its section to pick it), click a line ahead to insert one, drag or right-click the points ahead.'
-        : 'Edit the route ahead as it flies (pausing gives you time): Shift+click adds the next point after the selected one, click a line ahead to insert one, drag or right-click the points ahead.'), this.legEditor()),
+        ? 'Edit the routes ahead as they fly (pausing gives you time): Shift+click adds the next point to the package picked above (click its section to pick it), click a line ahead to insert one, drag or right-click the points ahead, Shift+right-click one to set its leg.'
+        : 'Edit the route ahead as it flies (pausing gives you time): Shift+click adds the next point after the selected one, click a line ahead to insert one, drag or right-click the points ahead, Shift+right-click one to set its leg.'), this.legEditor()),
       this.logSection(18),
     ];
   }
@@ -915,7 +1001,7 @@ export class StrikeEditor extends BaseEditor {
         h('div', { class: 'ds-kv' }, h('span', {}, 'Total'), h('b', {}, money(lostCost + s.used))),
         ...s.lost.map((l) => h('div', { class: 'ds-log loss' }, `${l.jet.A.name}: ${l.why === 'fuel' ? 'out of fuel' : l.why === 'radiation' ? 'crew killed by radiation' : 'shot down by a ' + l.why}`))),
       this.earned ? this.section(`POINTS (+${this.earned.reduce((n, [, p]) => n + p, 0)})`, ...this.earned.map(([w, p]) => h('div', { class: 'ds-kv' }, h('span', {}, w), h('b', {}, `+${p}`))),
-        h('div', { class: 'faint sm' }, `${this.points().toLocaleString('en-US')} to spend in the hangar (on the mission screen)`)) : null,
+        h('div', { class: 'faint sm' }, `${this.points().toLocaleString('en-US')} to spend in the hangar (HANGAR & BADGES, top right)`)) : null,
       this.section(`DESTROYED (${killed.length})`, ...(killed.length ? killed.map((t) => h('div', { class: 'ds-log kill' }, t)) : [h('div', { class: 'faint' }, 'Nothing.')])),
       this.section('THE DEFENCES, REVEALED', ...m.sites.filter((x) => x.sam).map((x) => h('div', { class: 'ds-srow' },
         h('span', { class: 'ds-dot', style: { background: RING_COL[SAMS[x.sam].ring] } }), h('span', { class: 'grow' }, `${SAMS[x.sam].long}${this.plan.mission.known[x.id] ? '' : ' (never found)'}`),
@@ -951,7 +1037,7 @@ export class StrikeEditor extends BaseEditor {
   hit(px, py) {
     const v = this.view;
     if (this.routes?.[0] && (this.phase === 'brief' || this.phase === 'strike')) {
-      const pref = this.sel?.pk || 0; // the origin is in both routes: the package already selected gets it
+      const pref = this.sel?.pk || 0; // where both packages' points overlap (the origins, say), the one already selected gets it
       for (const k of [pref, 1 - pref]) {
         const r = this.routes[k];
         if (!r || (this.phase === 'strike' && !this.sim.flight(k))) continue;
@@ -984,14 +1070,17 @@ export class StrikeEditor extends BaseEditor {
       e.preventDefault();
       const r = c.getBoundingClientRect();
       const hit = this.hit(e.clientX - r.left, e.clientY - r.top);
+      if (e.shiftKey) { this.openPop(hit, e.clientX - r.left, e.clientY - r.top); return; }
       if (hit?.node > 0 && this.routeEditable(hit.pk) && hit.node > this.firstEditable(hit.pk)) this.removeNode(hit.node, hit.pk);
     });
     c.addEventListener('pointerdown', (e) => {
+      this.closePop();
       if (e.button === 2) return;
       c.focus();
       const r = c.getBoundingClientRect();
       const px = e.clientX - r.left, py = e.clientY - r.top;
-      if (e.button === 0 && this.overOrigin(px, py)) { this.dragOrigin(e, r); return; }
+      const ok = e.button === 0 ? this.overOrigin(px, py) : null;
+      if (ok != null) { this.dragOrigin(e, r, px, py, ok); return; }
       const hit = e.button === 0 ? this.hit(px, py) : null;
       const dragNode = hit?.node != null && this.routeEditable(hit.pk) && hit.node > 0 && hit.node > this.firstEditable(hit.pk) ? hit.node : null;
       let moved = false, lx = e.clientX, ly = e.clientY;
@@ -1069,26 +1158,64 @@ export class StrikeEditor extends BaseEditor {
       h('span', { class: 'faint' }, `${Math.round(b.deck.see * 100)}%`))), h('div', { class: 'faint sm' }, 'radar range on a package at deck height · hover for more'));
   }
 
-  /** In the planner, on a mission with an origin arc: is the pointer on the origin? */
-  overOrigin(px, py) {
-    const m = this.mission;
-    return this.phase === 'brief' && m?.arc && Math.hypot(this.view.sx(m.origin.x) - px, this.view.sy(m.origin.y) - py) < 11;
+  /** Each package's origin (where its route starts and ends): [{ k, x, y }]. In the air and after, only the packages
+   *  that flew. Before the planner, the mission's one origin. */
+  origins() {
+    const m = this.live || this.mission;
+    if (!this.routes?.[0] || this.phase === 'sniffer') return [{ k: 0, x: m.origin.x, y: m.origin.y }];
+    return [0, 1].filter((k) => this.routes[k] && (this.phase === 'brief' || !this.sim?.flight || this.sim.flight(k)))
+      .map((k) => ({ k, x: this.routes[k][0].x, y: this.routes[k][0].y }));
   }
 
-  /** Drag the origin along its arc; both routes start and end there. Not past the field's edge. */
-  dragOrigin(e, r) {
-    const c = this.canvas, m = this.mission, P = m.sites.find((s) => s.id === m.primary);
+  /** A point on the origin arc about 40 km along from o (back the other way at the arc's end): where B's origin starts. */
+  beside(o) {
+    const m = this.mission, arc = m.arc && this.arcOf(m), P = m.sites.find((s) => s.id === m.primary);
+    if (!arc || !P) return o;
+    const a = Math.atan2(o.y - P.y, o.x - P.x), off = Math.atan2(Math.sin(a - arc.a), Math.cos(a - arc.a)), step = 40 / arc.r;
+    return arcPoint(P, arc, arc.a + (off + step <= arc.hi ? off + step : off - step));
+  }
+
+  /** In the planner, on a mission with an origin arc: the package whose origin is under the pointer (the picked package
+   *  first, where they're on top of each other), or null. */
+  overOrigin(px, py) {
+    const m = this.mission;
+    if (this.phase !== 'brief' || !m?.arc) return null;
+    const pref = this.sel?.pk || 0, os = this.origins().sort((a, b) => (b.k === pref) - (a.k === pref));
+    return os.find((o) => Math.hypot(this.view.sx(o.x) - px, this.view.sy(o.y) - py) < 11)?.k ?? null;
+  }
+
+  /** A mission's origin arc, cut to the part over the field (worked out once for a mission saved before that). */
+  arcOf(m) {
+    if (m.arc && m.arc.lo == null) Object.assign(m.arc, arcSpan(this.world, m.sites.find((s) => s.id === m.primary), m.arc));
+    return m.arc;
+  }
+
+  /** Drag package k's origin along the arc; its route starts and ends there (package A's is also the mission's own,
+   *  where the sniffer flies from next time). A click without a drag selects it instead (the first leg's height and speed). */
+  dragOrigin(e, r, px, py, k = 0) {
+    const c = this.canvas, m = this.mission, P = m.sites.find((s) => s.id === m.primary), arc = this.arcOf(m);
+    let moved = false;
+    this.endDrag?.(); // one that never heard its button let go
     c.setPointerCapture(e.pointerId);
     const move = (ev) => {
-      const a = Math.atan2(this.view.wy(ev.clientY - r.top) - P.y, this.view.wx(ev.clientX - r.left) - P.x), p = arcPoint(P, m.arc, a);
-      if (!inField(this.world, p.x, p.y)) return;
-      m.origin.x = p.x; m.origin.y = p.y;
-      for (const rt of this.routes) if (rt) for (const q of [rt[0], rt[rt.length - 1]]) { q.x = p.x; q.y = p.y; }
+      if (!(ev.buttons & 1)) { up(ev); return; }
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
+      moved = true;
+      const a = Math.atan2(this.view.wy(ev.clientY - r.top) - P.y, this.view.wx(ev.clientX - r.left) - P.x), p = arcPoint(P, arc, a);
+      if (k === 0) { m.origin.x = p.x; m.origin.y = p.y; }
+      const rt = this.routes[k];
+      for (const q of [rt[0], rt[rt.length - 1]]) { q.x = p.x; q.y = p.y; }
       this.view.request();
     };
-    const up = () => { c.removeEventListener('pointermove', move); c.removeEventListener('pointerup', up); this.changed(); };
+    const up = (ev) => {
+      c.removeEventListener('pointermove', move); c.removeEventListener('pointerup', up); c.removeEventListener('lostpointercapture', up);
+      this.endDrag = null;
+      if (moved) this.changed(); else if (ev.type === 'pointerup') this.click(px, py, this.hit(px, py), ev);
+    };
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
+    c.addEventListener('lostpointercapture', up); // the button let go somewhere the canvas didn't hear it
+    this.endDrag = () => up({ type: 'end' });
   }
 
   /** A known site under the pointer: its name as the target list words it. Otherwise, with the terrain overlay on: what
@@ -1096,7 +1223,7 @@ export class StrikeEditor extends BaseEditor {
   hover(e) {
     const r = this.canvas.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
-    this.canvas.style.cursor = this.overOrigin(px, py) ? 'grab' : '';
+    this.canvas.style.cursor = this.overOrigin(px, py) != null ? 'grab' : '';
     const at = this.mission && this.hit(px, py)?.site, s = at && (this.live || this.mission).sites.find((x) => x.id === at);
     if (s) {
       const m = this.live || this.mission, obj = m.objective.site === s.id;
@@ -1204,21 +1331,27 @@ export class StrikeEditor extends BaseEditor {
       if (r?.[node] && r[node + 1] && !r[node].home) this.drawDetection(ctx, v, k, node);
     }
     this.drawSites(ctx, v, m, reveal);
-    // the origin, and in the planner the arc it can be dragged along
-    const o = m.origin;
+    // the origins, and in the planner the arc they can be dragged along
     if (this.phase === 'brief' && m.arc) {
       const P = m.sites.find((s) => s.id === m.primary);
       ctx.beginPath();
-      ctx.arc(v.sx(P.x), v.sy(P.y), m.arc.r * v.scale, m.arc.a - m.arc.half, m.arc.a + m.arc.half);
+      const arc = this.arcOf(m);
+      ctx.arc(v.sx(P.x), v.sy(P.y), arc.r * v.scale, arc.a + arc.lo, arc.a + arc.hi);
       ctx.setLineDash([2, 5]); ctx.lineWidth = 1.5; ctx.strokeStyle = `${COL.friend}99`; ctx.stroke(); ctx.setLineDash([]);
-      for (const s of [-1, 1]) {
-        const q = arcPoint(P, m.arc, m.arc.a + s * m.arc.half), ux = Math.cos(m.arc.a + s * m.arc.half), uy = Math.sin(m.arc.a + s * m.arc.half);
+      for (const end of [arc.lo, arc.hi]) {
+        const q = arcPoint(P, arc, arc.a + end), ux = Math.cos(arc.a + end), uy = Math.sin(arc.a + end);
         ctx.beginPath(); ctx.moveTo(v.sx(q.x) - ux * 5, v.sy(q.y) - uy * 5); ctx.lineTo(v.sx(q.x) + ux * 5, v.sy(q.y) + uy * 5); ctx.stroke();
       }
     }
-    ctx.fillStyle = COL.friend;
-    ctx.beginPath(); ctx.moveTo(v.sx(o.x), v.sy(o.y) - 7); ctx.lineTo(v.sx(o.x) + 6, v.sy(o.y) + 5); ctx.lineTo(v.sx(o.x) - 6, v.sy(o.y) + 5); ctx.closePath(); ctx.fill();
-    v.label('ORIGIN', o.x, o.y, COL.friend, { dx: 10 });
+    const os = this.origins(), two = os.length > 1;
+    for (const o of os) {
+      const same = two && os.some((q) => q !== o && Math.hypot(v.sx(q.x) - v.sx(o.x), v.sy(q.y) - v.sy(o.y)) < 3);
+      if (same && o.k === 1) continue; // drawn once, as A · B
+      const col = o.k && two ? B_COL : COL.friend;
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.moveTo(v.sx(o.x), v.sy(o.y) - 7); ctx.lineTo(v.sx(o.x) + 6, v.sy(o.y) + 5); ctx.lineTo(v.sx(o.x) - 6, v.sy(o.y) + 5); ctx.closePath(); ctx.fill();
+      v.label(!two ? 'ORIGIN' : same ? 'ORIGIN A · B' : `ORIGIN ${PKG_NAME[o.k]}`, o.x, o.y, col, { dx: 10 });
+    }
     if (this.routes?.[0] && (this.phase === 'brief' || this.phase === 'strike' || this.phase === 'debrief')) {
       // in the air and after, only the routes that flew; the picked package last, so it's on top where they share a line
       this.relLabels = []; // release-point labels placed this frame, so the next one steps clear of them
@@ -1604,13 +1737,13 @@ export class StrikeEditor extends BaseEditor {
 
   status() {
     return { left: [{ text: this.phase === 'sniffer' ? 'Click to steer the sniffer · Shift+click adds a waypoint · Space runs / pauses · wheel zooms · drag pans'
-      : this.phase === 'brief' ? 'Shift+click adds a route point to the picked package (click its section to pick) · click a line to insert one · drag to move (the origin slides along its arc) · right-click removes · Alt / Z+wheel on a point: its leg’s height / speed · wheel zooms'
+      : this.phase === 'brief' ? 'Shift+click adds a route point to the picked package (click its section to pick) · click a line to insert one · drag to move (the origin slides along its arc) · right-click removes, Shift+right-click edits · Alt / Z+wheel on a point: its leg’s height / speed · wheel zooms'
       : this.phase === 'strike' ? 'Space runs / pauses · Shift+click adds the picked package’s next point · drag points ahead to re-route · Alt / Z+wheel on a point: its leg’s height / speed · wheel zooms · drag pans' : 'Wheel zooms · drag pans' }] };
   }
 
   onShow() { this.view?.resize(); }
   onHide() { if (this.sim && !this.sim.done && !this.paused) this.setPaused(true); } // off screen: the clock stops
-  destroy() { removeEventListener('keydown', this.zKeys); removeEventListener('keyup', this.zKeys); removeEventListener('blur', this.zOff); this.stopLoop(); this.ro?.disconnect(); clearTimeout(this.saveT); if (this.pauseMenu) this.closePauseMenu(); }
+  destroy() { removeEventListener('keydown', this.zKeys); removeEventListener('keyup', this.zKeys); removeEventListener('blur', this.zOff); this.stopLoop(); this.ro?.disconnect(); clearTimeout(this.saveT); if (this.pauseMenu) this.closePauseMenu(); this.closeMenu(); this.closePop(); }
 }
 
 export { THEATRE };

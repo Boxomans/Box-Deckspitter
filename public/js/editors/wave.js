@@ -10,7 +10,8 @@ import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { tbButton, tbSep, toast, errorToast, showMenu, contextMenu, promptDialog, modal, draggedPaths } from '../core/ui.js';
 import { pickOpen, pickSave } from '../core/files.js';
-import { FX, VOICES, PITCH_URL, buildFx, newFx } from '../core/tunnel-fx.js';
+import { FX, VOICES, PITCH_URL, REVERB_MIX, buildFx, newFx } from '../core/tunnel-fx.js';
+import { wheelSlider } from '../core/music.js';
 
 const SR = 48000;
 const AUDIO_EXT = ['wav', 'mp3', 'flac', 'ogg', 'oga', 'opus', 'm4a', 'aac', 'wma', 'aif', 'aiff', 'webm', 'mp4', 'mkv', 'mov', 'm4v'];
@@ -367,11 +368,35 @@ export class WaveEditor extends BaseEditor {
     });
   }
   async oneFx(type) {
+    if (type === 'reverb') return this.reverbFx();
     const d = FX[type];
     const v = await promptDialog(d.name, `Amount (${d.min} to ${d.max} ${d.unit})`, String(d.def));
     const x = parseFloat(v);
     if (!Number.isFinite(x)) return;
     this.applyFx([newFx(type, clamp(x, d.min, d.max))], `${d.name}`);
+  }
+
+  /** Reverb: two sliders, the room's size (how long the tail rings) and the strength (how much of it you hear). */
+  async reverbFx() {
+    const d = FX.reverb, last = this.reverbLast || { v: d.def, mix: REVERB_MIX };
+    const slider = (label, min, max, step, val, fmt, wheel) => {
+      const r = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(val) });
+      const out = h('span', { class: 'mono' }, fmt(val));
+      r.addEventListener('input', () => { out.textContent = fmt(+r.value); });
+      wheelSlider(r, wheel);
+      return { r, el: h('label', { class: 'wv-rv-row' }, h('span', {}, label), r, out) };
+    };
+    const size = slider('Room size', d.min, d.max, d.step, last.v, (v) => `${v.toFixed(1)} s`, 0.2);
+    const mix = slider('Strength', 0, 100, 1, last.mix, (v) => `${v}%`, 5);
+    const ok = await modal({
+      title: 'Reverb',
+      body: h('div', { class: 'wv-rv' }, size.el, mix.el,
+        h('div', { class: 'faint', style: { fontSize: '10.5px' } }, 'Room size: how long the sound rings on. Strength: how much of the room you hear over the dry sound. The mouse wheel moves a slider (Shift for fine steps).')),
+      buttons: [{ label: 'Cancel', value: false, ghost: true }, { label: 'Apply', value: true, primary: true }],
+    });
+    if (!ok) return;
+    this.reverbLast = { v: +size.r.value, mix: +mix.r.value };
+    this.applyFx([{ ...newFx('reverb', this.reverbLast.v), mix: this.reverbLast.mix }], 'Reverb');
   }
 
   // ================================================================ playing

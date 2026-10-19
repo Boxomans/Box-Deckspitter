@@ -4,8 +4,8 @@
 import { BaseEditor } from './base.js';
 import { h } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { toast, showMenu, closeMenus, confirmDialog, modal, contextMenu } from '../core/ui.js';
-import { BANDS, PRESETS, MIN_HZ, MAX_HZ, hzToPos, posToHz, hzLabel } from '../core/music.js';
+import { toast, showMenu, closeMenus, confirmDialog, modal, contextMenu, hoverKeys } from '../core/ui.js';
+import { BANDS, PRESETS, MIN_HZ, MAX_HZ, hzToPos, posToHz, hzLabel, wheelSlider, drawEqCurve } from '../core/music.js';
 import { api } from '../core/api.js';
 
 const SEARCH = {
@@ -62,7 +62,17 @@ export class BrowserEditor extends BaseEditor {
     this.adBtn = h('button', { class: 'bw-btn bw-ad', title: 'Ad blocker' }, icon('shield', 'sm'), this.adCount);
     this.adBtn.addEventListener('click', (e) => this.adMenu(e.currentTarget));
     const more = btn('more', 'Browser menu', (e) => showMenu(this.menuItems(), { anchor: e.currentTarget }));
-    this.bar = h('div', { class: 'bw-bar' }, this.backBtn, this.fwdBtn, this.reloadBtn, h('div', { class: 'bw-addr-wrap' }, this.lock, this.addr), this.adBtn, save, more);
+    // favorites: the star in the address bar adds (or removes) this page; each one is its site's logo after the bar
+    this.star = h('button', { class: 'bw-star', title: 'Add this page to favorites' }, icon('star', 'sm'));
+    this.star.addEventListener('click', () => this.toggleFav());
+    this.favs = h('div', { class: 'bw-favs' });
+    this.favs.addEventListener('wheel', (e) => {
+      if (this.favs.scrollWidth <= this.favs.clientWidth) return;
+      e.preventDefault();
+      this.favs.scrollLeft += (e.deltaY || e.deltaX) > 0 ? 60 : -60;
+    }, { passive: false });
+    this.bar = h('div', { class: 'bw-bar' }, this.backBtn, this.fwdBtn, this.reloadBtn, h('div', { class: 'bw-addr-wrap' }, this.lock, this.addr, this.star), this.favs, this.adBtn, save, more);
+    this.renderFavs();
     this.views = h('div', { class: 'bw-views' });
     this.note = this.persistent ? null : h('div', { class: 'bw-note' },
       icon('lock', 'sm'), 'Logins aren’t kept yet: Box-Deckspitter turns on encrypted storage for them the next time it closes. Until then nothing from the web is written to disk.');
@@ -109,7 +119,7 @@ export class BrowserEditor extends BaseEditor {
     const upd = () => { if (p === this.active) { this.syncBar(); this.refreshStatus(); } this.renderTab(p); };
     v.addEventListener('did-attach', () => { p.wcId = v.getWebContentsId(); });
     v.addEventListener('page-title-updated', (e) => { p.title = e.title; upd(); });
-    v.addEventListener('page-favicon-updated', (e) => { p.favicon = (e.favicons || []).find((u) => u && u !== 'data:,') || null; upd(); });
+    v.addEventListener('page-favicon-updated', (e) => { p.favicon = (e.favicons || []).find((u) => u && u !== 'data:,') || null; upd(); this.favIcon(p); });
     v.addEventListener('did-start-loading', () => { p.loading = true; upd(); });
     v.addEventListener('did-stop-loading', () => { p.loading = false; upd(); this.saveTabs(); });
     v.addEventListener('did-navigate', (e) => { p.url = e.url; p.favicon = null; upd(); this.syncAd(); });
@@ -240,10 +250,99 @@ export class BrowserEditor extends BaseEditor {
     this.reloadBtn.title = p.loading ? 'Stop (Esc)' : 'Reload (F5)';
     // keep what you're typing; otherwise follow the page (even with the bar focused, like a fresh new tab)
     if (document.activeElement !== this.addr || !this.typed) this.addr.value = p.url === 'about:blank' ? '' : p.url;
+    this.syncStar();
     const secure = /^https:/i.test(p.url), plain = /^http:/i.test(p.url) && !/^http:\/\/(localhost|127\.0\.0\.1)/i.test(p.url);
     this.lock.replaceChildren(secure ? icon('lock', 'sm') : plain ? h('span', {}, 'Not secure') : '');
     this.lock.className = `bw-lock${secure ? ' ok' : plain ? ' bad' : ''}`;
     this.lock.title = secure ? 'Encrypted connection (https)' : plain ? 'This page isn’t encrypted: don’t type passwords or card numbers here' : '';
+  }
+
+  // ---- favorites (settings.browserFavs: [{ url, title, icon }])
+
+  favList() { const f = this.app.settings.browserFavs; return Array.isArray(f) ? f.filter((x) => x && /^https?:/i.test(x.url)) : []; }
+  saveFavs(list) { this.app.saveSettings({ browserFavs: list }); this.renderFavs(); }
+
+  /** The star: this page in or out of the favorites. */
+  toggleFav(p = this.active) {
+    if (!p || !/^https?:/i.test(p.url)) { toast('Only web pages can be favorites', { type: 'warn' }); return; }
+    const list = this.favList(), i = list.findIndex((x) => x.url === p.url);
+    if (i >= 0) list.splice(i, 1); else list.push({ url: p.url, title: p.title || p.url, icon: p.favicon || null });
+    this.saveFavs(list);
+  }
+
+  /** A favorite saved before its page had a logo picks it up once the page shows one. */
+  favIcon(p) {
+    if (!p.favicon) return;
+    const list = this.favList(), f = list.find((x) => x.url === p.url && x.icon !== p.favicon);
+    if (f) { f.icon = p.favicon; this.saveFavs(list); }
+  }
+
+  renderFavs() {
+    if (!this.favs) return;
+    const list = this.favList();
+    this.favs.replaceChildren(...list.map((f, i) => {
+      const glob = icon('globe', 'sm');
+      const b = h('button', { class: 'bw-favb', title: `${f.title}\n${f.url}\nClick: open here · Middle-click or Ctrl+click: new tab · Right-click: more` });
+      if (f.logo || f.icon) {
+        const img = h('img', { src: f.logo || f.icon, alt: '', draggable: 'false' });
+        img.addEventListener('error', () => img.replaceWith(glob));
+        b.append(img);
+      } else b.append(glob);
+      const open = (e) => { if (e.button === 1 || e.ctrlKey) this.newPage(f.url); else this.go(f.url); };
+      b.addEventListener('click', open);
+      b.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); this.newPage(f.url); } });
+      b.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+      b.addEventListener('contextmenu', (e) => contextMenu(e, [
+        { label: 'Open', action: () => this.go(f.url) },
+        { label: 'Open in a new tab', action: () => this.newPage(f.url) },
+        { sep: true },
+        { label: 'Change logo…', shortcut: 'F2', action: () => this.pickLogo(f.url) },
+        ...(f.logo ? [{ label: 'Use the site’s logo', shortcut: 'Ctrl+F2', action: () => this.setLogo(f.url, null) }] : []),
+        { sep: true },
+        { label: 'Move left', disabled: i === 0, action: () => { const l = this.favList(); [l[i - 1], l[i]] = [l[i], l[i - 1]]; this.saveFavs(l); } },
+        { label: 'Move right', disabled: i === list.length - 1, action: () => { const l = this.favList(); [l[i + 1], l[i]] = [l[i], l[i + 1]]; this.saveFavs(l); } },
+        { label: 'Remove from favorites', icon: 'trash', action: () => { const l = this.favList(); l.splice(i, 1); this.saveFavs(l); } },
+      ]));
+      hoverKeys(b, { f2: () => this.pickLogo(f.url), reset: f.logo ? () => this.setLogo(f.url, null) : null,
+        remove: () => { const l = this.favList(); l.splice(i, 1); this.saveFavs(l); } });
+      return b;
+    }));
+    this.favs.hidden = !list.length;
+    this.syncStar();
+  }
+
+  /** F2 on a favorite: an image of your own as its logo (made 64 px, kept in the settings). */
+  pickLogo(url) {
+    const inp = h('input', { type: 'file', accept: 'image/*' });
+    inp.addEventListener('change', () => {
+      const file = inp.files?.[0];
+      if (!file) return;
+      const img = new Image(), src = URL.createObjectURL(file);
+      img.onload = () => {
+        const c = h('canvas', { width: '64', height: '64' }), g = c.getContext('2d'), k = Math.min(64 / img.width, 64 / img.height);
+        const w = img.width * k, ht = img.height * k;
+        g.drawImage(img, (64 - w) / 2, (64 - ht) / 2, w, ht);
+        URL.revokeObjectURL(src);
+        this.setLogo(url, c.toDataURL('image/png'));
+      };
+      img.onerror = () => { URL.revokeObjectURL(src); toast('That file isn’t an image', { type: 'error' }); };
+      img.src = src;
+    });
+    inp.click();
+  }
+
+  setLogo(url, logo) {
+    const list = this.favList(), f = list.find((x) => x.url === url);
+    if (!f) return;
+    if (logo) f.logo = logo; else delete f.logo;
+    this.saveFavs(list);
+  }
+
+  syncStar() {
+    if (!this.star) return;
+    const on = !!this.active && this.favList().some((x) => x.url === this.active.url);
+    this.star.classList.toggle('on', on);
+    this.star.title = on ? 'Remove this page from favorites' : 'Add this page to favorites';
   }
 
   go(text) {
@@ -402,6 +501,21 @@ export class BrowserEditor extends BaseEditor {
     if (r?.ok) this.saved('doc', r.file); else toast(r?.error || 'Couldn’t save the page', { type: 'error' });
   }
 
+  // ---- page zoom (Ctrl+= / - / 0 or Ctrl+wheel on the page itself are handled in electron/browser.js)
+
+  pageZoom() { try { return this.active?.view?.getZoomLevel() || 0; } catch { return 0; } }
+  zoomPct(l = this.pageZoom()) { return Math.round(1.2 ** l * 100); }
+
+  /** The app's Ctrl+= / - / 0 and Ctrl+wheel over the tab strip or address bar, and the ⋮ menu's Zoom: the page's zoom
+   *  in half steps (0 = 100%), from 50% to 250%. */
+  zoom(d) {
+    const v = this.active?.view;
+    if (!v) return;
+    const l = d === 0 ? 0 : Math.max(-3.5, Math.min(5, this.pageZoom() + d * 0.5));
+    try { v.setZoomLevel(l); } catch { return; }
+    toast(`Zoom ${this.zoomPct(l)}%`, { timeout: 1200 });
+  }
+
   // ---- the ⋮ menu
 
   menuItems() {
@@ -414,6 +528,11 @@ export class BrowserEditor extends BaseEditor {
       { sep: true },
       { label: 'Search with', submenu: Object.entries(SEARCH).map(([id, s]) => ({ label: s.name, checked: id === eng, action: () => { this.app.saveSettings({ browserSearch: id }); this.addr.placeholder = `Search ${s.name} or type an address`; } })) },
       { label: 'Extensions', submenu: () => this.extensionItems() },
+      { label: `Zoom (${this.zoomPct()}%)`, icon: 'zoom-in', submenu: [
+        { label: 'Zoom in', shortcut: 'Ctrl+=', action: () => this.zoom(+1) },
+        { label: 'Zoom out', shortcut: 'Ctrl+-', action: () => this.zoom(-1) },
+        { label: 'Actual size', shortcut: 'Ctrl+0', action: () => this.zoom(0) },
+      ] },
       { label: this.eqOn() ? 'Equalizer (on)…' : 'Equalizer…', icon: 'sliders', action: () => this.showEq() },
       { sep: true },
       { label: 'Developer tools', shortcut: 'F12', action: () => { try { this.active.view.openDevTools(); } catch { /* not ready */ } } },
@@ -451,8 +570,11 @@ export class BrowserEditor extends BaseEditor {
   showEq() {
     const st = this.eqState();
     let saveT = 0;
+    const curve = h('canvas', { class: 'music-curve', width: '620', height: '150' });
+    const draw = () => drawEqCurve(curve, st);
     const commit = (now) => {
       this.sendEq(st);
+      draw();
       clearTimeout(saveT);
       saveT = setTimeout(() => this.app.saveSettings({ browserEq: { eq: [...st.eq], low: st.low, high: st.high } }), now ? 0 : 300);
       markPreset();
@@ -463,6 +585,7 @@ export class BrowserEditor extends BaseEditor {
       const show = () => { val.textContent = `${st.eq[i] > 0 ? '+' : ''}${st.eq[i]}`; r.value = String(st.eq[i]); };
       r.addEventListener('input', () => { st.eq[i] = Number(r.value); show(); commit(); });
       r.addEventListener('dblclick', () => { st.eq[i] = 0; show(); commit(); });
+      wheelSlider(r, 1);
       show();
       return { show, el: h('div', { class: 'music-eq-band' }, val, h('div', { class: 'music-eq-track' }, r), h('span', { class: 'mono faint music-eq-hz' }, hzLabel(hz))) };
     });
@@ -474,6 +597,7 @@ export class BrowserEditor extends BaseEditor {
         v.textContent = (key === 'low' ? st.low <= MIN_HZ + 1 : st.high >= MAX_HZ - 50) ? 'off' : `${hzLabel(st[key])} Hz`;
       };
       r.addEventListener('input', () => { st[key] = posToHz(Number(r.value)); show(); commit(); });
+      wheelSlider(r, 20);
       show();
       return { show, el: h('label', {}, h('span', {}, key === 'low' ? 'Low cut' : 'High cut'), r, v) };
     };
@@ -489,15 +613,17 @@ export class BrowserEditor extends BaseEditor {
       }
     }
     markPreset();
+    draw();
     modal({
       title: 'Browser equalizer',
       wide: true,
       body: h('div', { class: 'music-eq' },
+        curve,
         h('div', { class: 'music-cuts' }, lowC.el, highC.el),
         h('div', { class: 'music-eq-bands' }, sliders.map((x) => x.el)),
         presets,
         h('div', { class: 'faint', style: { fontSize: '10.5px' } },
-          'Applies to sound from web pages (videos, music sites) in every tab, separate from the music player’s mixer. Double-click a band to zero it. Copy-protected streams (Netflix, Spotify…) can’t be equalised and play as normal.')),
+          'Applies to sound from web pages (videos, music sites) in every tab, separate from the music player’s mixer. Double-click a band to zero it; the mouse wheel moves a slider (Shift for fine steps). Copy-protected streams (Netflix, Spotify…) can’t be equalised and play as normal.')),
     }).then(() => commit(true));
   }
 

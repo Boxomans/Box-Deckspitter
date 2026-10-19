@@ -71,12 +71,12 @@ export class EasterEggsPart {
       });
       clear(box).append(h('h4', {}, 'Games'),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Both games open from the Toolbox, under Games.'),
-        h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat: keep flying in the background, with its top-bar button')),
+        h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat: keep flying in the background and show a quick access button')),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, played
           ? `High score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()} · ${(s.games || 0) + (s.auto?.games || 0)} sorties · ${(s.splashes || 0) + (s.auto?.splashes || 0)} splashes`
           : 'An AWG-9 radar intercept game. Turns on the first time you open it.'),
         on ? h('button', { class: 'btn sm danger', style: { alignSelf: 'flex-start' }, onclick: () => this.resetTomcat(draw) }, icon('trash', 'sm'), 'Reset game progress…') : null,
-        h('label', { class: 'check' }, sb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('reticle', 'sm'), 'Deep Strike: top-bar button')),
+        h('label', { class: 'check' }, sb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('reticle', 'sm'), 'Deep Strike: show a quick access button')),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, ds.flown
           ? `${ds.flown} flown · ${ds.won || 0} objectives destroyed · ${ds.jetsLost || 0} jets lost · ${Object.keys(this.settings.tomcatStrike?.badges || {}).length} badges`
           : 'A strike-planning game: find the defences, plan the package, fly it.'));

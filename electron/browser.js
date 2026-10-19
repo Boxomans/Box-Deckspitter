@@ -372,6 +372,8 @@ ${again}`;
       externalLink(wc, e.url);
     });
     wc.on('context-menu', (_e, p) => contextMenu(wc, p));
+    // Ctrl+wheel on the page zooms it, as in other browsers
+    wc.on('zoom-changed', (_e, dir) => wc.setZoomLevel(Math.max(-3.5, Math.min(5, wc.getZoomLevel() + (dir === 'in' ? 0.5 : -0.5)))));
     wc.on('dom-ready', () => pushEq(wc));
     wc.on('did-start-navigation', (e) => { if (e.isMainFrame && !e.isSameDocument) adblock?.reset(wc.id); });
     const wcId = wc.id;
@@ -383,7 +385,7 @@ ${again}`;
       if (k === 'f12') { e.preventDefault(); wc.toggleDevTools(); return; }
       if (i.control && (k === '=' || k === '+' || k === '-' || k === '0')) {
         e.preventDefault();
-        wc.setZoomLevel(k === '0' ? 0 : Math.max(-5, Math.min(5, wc.getZoomLevel() + (k === '-' ? -0.5 : 0.5))));
+        wc.setZoomLevel(k === '0' ? 0 : Math.max(-3.5, Math.min(5, wc.getZoomLevel() + (k === '-' ? -0.5 : 0.5))));
         return;
       }
       const combo = (i.control ? 'ctrl+' : '') + (i.shift ? 'shift+' : '') + (i.alt ? 'alt+' : '') + k;

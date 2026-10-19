@@ -166,10 +166,24 @@ function onGround(world, x, y) {
 
 /** Where the origin may be dragged to: an arc round the objective, `half` radians either side of bearing `a`, r km out. */
 export const ARC_HALF = Math.PI / 3;
-/** The point of a mission's origin arc at bearing a (clamped to the arc). */
+/** The point of a mission's origin arc at bearing a (clamped to the arc: lo..hi radians off its middle, or ±half). */
 export function arcPoint(primary, arc, a) {
-  const d = Math.max(-arc.half, Math.min(arc.half, Math.atan2(Math.sin(a - arc.a), Math.cos(a - arc.a))));
+  const d = Math.max(arc.lo ?? -arc.half, Math.min(arc.hi ?? arc.half, Math.atan2(Math.sin(a - arc.a), Math.cos(a - arc.a))));
   return { x: primary.x + Math.cos(arc.a + d) * arc.r, y: primary.y + Math.sin(arc.a + d) * arc.r };
+}
+/** The part of the arc inside the field, out each way from its middle (where the origin starts): {lo, hi} in radians. */
+export function arcSpan(world, primary, arc) {
+  const step = Math.PI / 360, out = {};
+  for (const [key, s] of [['lo', -1], ['hi', 1]]) {
+    let d = 0;
+    while (d + step <= arc.half + 1e-9) {
+      const a = arc.a + s * (d + step);
+      if (!inField(world, primary.x + Math.cos(a) * arc.r, primary.y + Math.sin(a) * arc.r)) break;
+      d += step;
+    }
+    out[key] = s * d;
+  }
+  return out;
 }
 /** How far a point is from the origin arc. */
 export function arcDist(p, primary, arc) {

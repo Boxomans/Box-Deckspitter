@@ -3,7 +3,7 @@
 // but the airfields' positions is made up from the mission's seed: no real deployments.
 
 import { SAMS, TARGETS, RUNWAY_HP, RUNWAY_LEN, BUDGET, LARGE_BUDGET, CODEWORDS } from './data.js';
-import { rng, whereIs, onLand, inField, inRegion, zoneAt, makeZones, arcDist, ARC_HALF } from './geo.js';
+import { rng, whereIs, onLand, inField, inRegion, zoneAt, makeZones, arcDist, arcSpan, ARC_HALF } from './geo.js';
 
 /** Which airfields have the long runway (the rest of the medium ones are medium). */
 const LONG_RUNWAY = new Set(['Lipetsk', 'Borisoglebsk', 'Voronezh Baltimore', 'Krymsk', 'Rostov-on-Don Central', 'Millerovo', 'Kursk Khalino']);
@@ -72,6 +72,7 @@ export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0,
   } while (!inField(world, origin.x, origin.y) && ++tries < 80);
   // the planner can slide the origin round the objective along this arc (to balance the packages' fuel)
   const arc = { a: brg, half: ARC_HALF, r: od };
+  Object.assign(arc, arcSpan(world, primary, arc)); // only the part over the field
   // ---- the dead zones: broken rings round it, out past the defences (nothing below goes inside one)
   zones = makeZones(world, r, primary, arc, big);
 

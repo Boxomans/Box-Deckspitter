@@ -12,6 +12,9 @@ workspaces and a disk-space explorer. Everything is served from `127.0.0.1`. You
 this machine. The only exceptions are the ones you switch on yourself (the AI assistant, Discord status, BoxMail,
 downloads, update checks).
 
+<p align="center"><img src="docs/screenshot-home.png" alt="The home screen with the Toolbox open and the music player docked"></p>
+<p align="center"><img src="docs/screenshot-home-2.webp" width="49%" alt="The home screen in another dark theme"> <img src="docs/screenshot-home-light.webp" width="49%" alt="The home screen in a light theme"></p>
+
 ## Start it
 
 | | |
