@@ -2,13 +2,15 @@
 // package flying its route, the network seeing it over the horizon, missiles chasing it, weapons going in).
 // Distances in km, altitudes in m, time in seconds of game time.
 
-import { ALTS, SPEEDS, DECK_MAX_KMH, AIRCRAFT, MUNITIONS, SAMS, SNIFFER, ELINT_GAIN, AIRFIELD_RADAR, reach } from './data.js';
-import { horizon, dist } from './geo.js';
+import { ALTS, SPEEDS, DECK_MAX_KMH, AIRCRAFT, MUNITIONS, SAMS, SNIFFER, ELINT_GAIN, AIRFIELD_RADAR, FIGHTERS, R77, RWR_GAIN, reach, aamReach, packageKmh } from './data.js';
+import { horizon, dist, zoneAt, doseRate } from './geo.js';
 import { searchRadars, fcRadars, canEngage, alive, isHard, targetXY, targetName, targetHp, isRadar, lower } from './mission.js';
 
 export const DT = 0.5;
 const NO_COVER = { see: 1, pk: 1, burn: 1 }; // seconds of game time per step
-export const CLIMB = 120, DESCEND = 120; // m/s
+export const CLIMB = 120, DESCEND = 120; // m/s at Cruise; faster jets climb and descend faster, the same height per km
+/** Climb or descent rate (m/s) at a speed: in step with it, so a faster leg reaches its height at the same point. */
+export const climbRate = (base, kmh) => (base * kmh) / 850;
 
 /** A radar's numbers. kind 'search' | 'fc'. */
 function radarOf(site, kind) {
@@ -31,6 +33,19 @@ class Base {
     this.nid = 0;
     this.site = Object.fromEntries(m.sites.map((s) => [s.id, s]));
   }
+  /** A crew's radiation (who.rad, 1 = dead) after dt more at p: logs going into a zone and the last two minutes.
+   *  True once it's lethal. */
+  dose(who, p, dt, name) {
+    const z = zoneAt(this.m.zones, p.x, p.y);
+    if (!z) { who.inZone = null; return false; }
+    const was = who.rad || 0, rate = doseRate(z);
+    who.rad = was + rate * dt;
+    const left = (1 - who.rad) / rate, what = z.storm ? 'a radiation storm' : 'a dead zone';
+    if (who.inZone !== z && who.rad < 1) this.event(`${name} is in ${what}: ${Math.ceil(left / 60)} min until it kills the crew${was > 0.005 ? ` (with the ${Math.round(was * 100)}% dose already taken)` : ''}.`, 'warn', p);
+    else if ((1 - was) / rate > 120 && left <= 120) this.event(`${name}: 2 minutes of radiation left. Get out of ${what}.`, 'warn', p);
+    who.inZone = z;
+    return who.rad >= 1;
+  }
   event(text, kind = 'info', at) {
     this.log.push({ t: this.t, text, kind });
     this.onEvent?.({ text, kind, at });
@@ -41,6 +56,7 @@ class Base {
     const S = SAMS[site.sam];
     for (let i = 0; i < n && site.fired < site.missiles; i++) {
       site.fired++;
+      this.samShots = (this.samShots || 0) + 1; // for the badges
       this.missiles.push({ id: ++this.nid, site: site.id, target, x: site.x, y: site.y, flown: 0, max: S.missile.km * 1.25, kmh: S.missile.kmh, lost: 0, delay: i * 2 });
     }
     target.engaged = (target.engaged || 0) + n;
@@ -94,6 +110,13 @@ export class SnifferSim extends Base {
       if (d <= step) { j.x = p.x; j.y = p.y; this.path.shift(); this.flown += d; }
       else { j.x += ((p.x - j.x) / d) * step; j.y += ((p.y - j.y) / d) * step; this.flown += step; }
     } else j.hdg += dt * 0.02; // holding
+    if (this.dose(j, j, dt, 'The sniffer')) {
+      j.alive = false;
+      this.burst(j.x, j.y, 'kill');
+      this.event('The sniffer’s crew died of radiation.', 'loss', j);
+      this.done = { why: 'rad' };
+      return;
+    }
     if (this.rtb && !this.path.length && dist(j, this.m.origin) < 1) {
       this.done = { why: 'home' };
       this.event('The sniffer is back at the origin.', 'good');
@@ -123,6 +146,12 @@ export class SnifferSim extends Base {
         this.event(`Missile launch! ${S.long} is firing at the sniffer: turn away and get out of its range.`, 'warn', s);
       }
     }
+    // enemy fighters on patrol: their radars give them away (roughly where, and what)
+    for (const c of this.m.cap || []) {
+      if (c.heard || dist(c, j) > FIGHTERS[c.type].radar.km * ELINT_GAIN) continue;
+      c.heard = true;
+      this.event(`Fighter radars: ${c.n}× ${FIGHTERS[c.type].name} on patrol, marked roughly on the map.`, 'warn', c);
+    }
     this.stepMissiles(dt, (site, tg) => fcRadars(site).length && dist(site, tg) <= seesKm(SAMS[site.sam].fc, tg.rcs, tg.alt));
   }
   impact(ms, site) {
@@ -142,93 +171,140 @@ export class SnifferSim extends Base {
 // ================================================================ the strike
 
 /** A planned package: [{ type, stations: [{ mu, n, target: {site, idx} | {site} | 'auto' | null }] }]. A route:
- *  [{ x, y, alt, spd, decoys }], starting at the origin; the last leg is the way home. */
+ *  [{ x, y, alt, spd, decoys }], starting at the origin; the last leg is the way home. Up to two packages (A and B)
+ *  fly at once, each its own route; one with no jets stays home. */
 export class StrikeSim extends Base {
-  constructor(m, pkg, route, terrain = null) {
+  constructor(m, pkg, route, terrain = null, pkg2 = [], route2 = null) {
     super(m);
     this.terrain = terrain; // biomes (terrain.js): hills, forest and water change what a low package shows
-    this.route = route.map((p) => ({ ...p }));
-    this.leg = 0;
-    const p0 = this.route[0];
-    this.pos = { x: p0.x, y: p0.y, alt: ALTS[p0.alt].m, kmh: SPEEDS[p0.spd].kmh };
-    this.jets = pkg.map((a, i) => ({
-      id: i, type: a.type, A: AIRCRAFT[a.type], alive: true, fuel: 0, x: p0.x, y: p0.y, alt: this.pos.alt, rcs: AIRCRAFT[a.type].rcs,
-      stations: a.stations.map((s) => ({ ...s })), spent: 0,
-    }));
+    this.flights = [];
+    this.jets = [];
+    [[pkg, route], [pkg2, route2]].forEach(([pk, rt], k) => {
+      if (!pk?.length || !rt || rt.length < 2) return;
+      const r = rt.map((p) => ({ ...p })), p0 = r[0];
+      const f = { k, name: 'AB'[k], route: r, leg: 0, decoysOut: false, done: null,
+        pos: { x: p0.x, y: p0.y, alt: ALTS[p0.alt].m, kmh: packageKmh(pk.map((a) => a.type), p0.spd) } };
+      f.jets = pk.map((a) => ({
+        id: this.jets.length, f, type: a.type, A: AIRCRAFT[a.type], alive: true, fuel: 0, x: p0.x, y: p0.y, alt: f.pos.alt, rcs: AIRCRAFT[a.type].rcs,
+        stations: a.stations.map((s) => ({ ...s })), spent: 0,
+      }));
+      this.jets.push(...f.jets);
+      this.flights.push(f);
+    });
     this.decoys = [];
     this.weapons = []; // ours in the air
     this.alert = false;
     this.used = 0; // $M of munitions let go
     this.lost = [];
-    this.decoysOut = false;
+    this.aams = []; // air-to-air missiles in the air, both sides'
+    this.rwrHeard = new Set(); // patrols whose radars our jets have already reported
+    // enemy fighters: two to a patrol, orbiting until the alarm goes or their own radar finds someone
+    this.bandits = (m.cap || []).flatMap((c) => Array.from({ length: c.n }, (_, i) => ({
+      id: ++this.nid, cap: c, F: FIGHTERS[c.type], alive: true, x: c.x, y: c.y, alt: 9000, a: i * Math.PI, hdg: 0, state: 'cap',
+      missiles: FIGHTERS[c.type].missiles, cool: 0, rcs: FIGHTERS[c.type].rcs, seen: false })));
     for (const s of m.sites) { s.fired = 0; s.cool = 0; s.readyAt = 0; s.tracking = false; s.awake = false; for (const t of s.targets) { t.dmg = 0; t.harmed = false; } }
   }
 
-  /** Where the package is headed now, and what the current leg asks for. */
-  get node() { return this.route[this.leg]; }
-  get next() { return this.route[this.leg + 1]; }
+  /** The flight flying package k (0 = A, 1 = B), if it flies. */
+  flight(k) { return this.flights.find((f) => f.k === k) || null; }
+  /** "The package" with one flying, "Package A" with two. */
+  pkgName(f) { return this.flights.length > 1 ? `Package ${f.name}` : 'The package'; }
 
   jammed(site) {
     for (const j of this.jets) if (j.alive && j.A.jam && dist(j, site) <= j.A.jam.km) return j.A.jam;
     return null;
   }
 
+  /** Is this site blinded by an NGJ pod? Once a pod's Growler gets within reach it stays blind until that Growler is lost. */
+  blinded(site) {
+    return this.jets.some((j) => j.alive && j.stations.some((st) => st.mu === 'pod' && st.locked && st.target?.site === site.id));
+  }
+
+  /** NGJ pods: lock on when their Growler gets within reach; let go (with a word in the log) when it's lost. */
+  jamPods() {
+    for (const j of this.jets) for (const st of j.stations) {
+      if (st.mu !== 'pod' || !st.target?.site) continue;
+      const s = this.site[st.target.site];
+      if (!s) continue;
+      const name = s.sam ? `${SAMS[s.sam].long} site` : s.name;
+      if (j.alive && !st.locked && dist(j, s) <= MUNITIONS.pod.km) {
+        st.locked = true;
+        this.event(`The ${j.A.name}’s NGJ pod blinds the ${name}: its radars see nothing while the Growler flies.`, 'good', s);
+      } else if (!j.alive && st.locked && !st.freed) {
+        st.freed = true;
+        if (!this.blinded(s)) this.event(`The ${name} can see again: the Growler jamming it is gone.`, 'warn', s);
+      }
+    }
+  }
+
   step(dt = DT) {
     if (this.done) return;
     this.t += dt;
     this.fly(dt);
+    this.jamPods();
     this.release();
     this.defend(dt);
+    this.intercept(dt);
+    this.airToAir();
+    this.stepAams(dt);
     this.stepMissiles(dt, (site, tg) => this.tracks(site, tg));
     this.stepWeapons(dt);
     this.stepDecoys(dt);
-    const left = this.jets.filter((j) => j.alive);
-    if (!left.length) { this.done = { why: 'lost' }; this.event('The whole package is lost.', 'loss'); }
+    for (const f of this.flights) if (!f.done && !f.jets.some((j) => j.alive)) { f.done = { why: 'lost' }; this.event(`${this.pkgName(f)} is lost${this.flights.length > 1 ? '' : ', all of it'}.`, 'loss'); }
+    // over once every package is home or lost and the weapons still in the air have come down
+    if (this.flights.every((f) => f.done) && !this.weapons.some((w) => !w.dead)) this.done = { why: this.flights.some((f) => f.done.why === 'home') ? 'home' : 'lost' };
   }
 
-  fly(dt) {
-    const p = this.pos, a = this.node, b = this.next;
-    if (!b) {
-      if (!this.done) { this.done = { why: 'home' }; this.event('The package is home.', 'good'); }
-      return;
-    }
+  fly(dt) { for (const f of this.flights) if (!f.done) this.flyFlight(f, dt); }
+
+  flyFlight(f, dt) {
+    const p = f.pos, a = f.route[f.leg], b = f.route[f.leg + 1];
+    if (!b) { f.done = { why: 'home' }; this.event(`${this.pkgName(f)} is home.`, 'good'); return; }
     const wantAlt = ALTS[a.alt].m;
-    p.alt = p.alt < wantAlt ? Math.min(wantAlt, p.alt + CLIMB * dt) : Math.max(wantAlt, p.alt - DESCEND * dt);
-    let want = SPEEDS[a.spd].kmh;
+    p.alt = p.alt < wantAlt ? Math.min(wantAlt, p.alt + climbRate(CLIMB, p.kmh) * dt) : Math.max(wantAlt, p.alt - climbRate(DESCEND, p.kmh) * dt);
+    let want = packageKmh(f.jets.filter((j) => j.alive).map((j) => j.type), a.spd); // the slowest jet still flying sets the pace
     if (p.alt < 400) want = Math.min(want, DECK_MAX_KMH);
     p.kmh += Math.sign(want - p.kmh) * Math.min(Math.abs(want - p.kmh), 20 * dt);
     let step = (p.kmh / 3600) * dt;
     const band = ALTS[a.alt].burn * SPEEDS[a.spd].burn * this.cover(p).burn;
-    for (const j of this.jets) if (j.alive) {
+    for (const j of f.jets) if (j.alive) {
       j.fuel += (step * band) / j.A.range;
       if (j.fuel >= 1) { j.alive = false; this.lost.push({ jet: j, why: 'fuel' }); this.event(`${j.A.name} ran out of fuel; the crew ejected.`, 'loss', p); }
     }
-    while (step > 0 && this.next) {
-      const n = this.next;
+    while (step > 0 && f.route[f.leg + 1]) {
+      const n = f.route[f.leg + 1];
       const d = Math.hypot(n.x - p.x, n.y - p.y);
-      if (d <= step) { p.x = n.x; p.y = n.y; step -= d; this.leg++; if (this.next) this.onLeg?.(this.leg); }
+      if (d <= step) { p.x = n.x; p.y = n.y; step -= d; f.leg++; if (f.route[f.leg + 1]) this.onLeg?.(f.leg, f); }
       else { p.x += ((n.x - p.x) / d) * step; p.y += ((n.y - p.y) / d) * step; step = 0; }
     }
-    p.hdg = this.next ? Math.atan2(this.next.y - p.y, this.next.x - p.x) : p.hdg;
+    const nx = f.route[f.leg + 1];
+    p.hdg = nx ? Math.atan2(nx.y - p.y, nx.x - p.x) : p.hdg;
     // the jets keep a loose formation around the package's point
     const cos = Math.cos(p.hdg || 0), sin = Math.sin(p.hdg || 0);
-    this.jets.forEach((j, i) => {
+    f.jets.forEach((j, i) => {
       if (!j.alive) return;
       const row = Math.floor((i + 1) / 2), side = i === 0 ? 0 : i % 2 ? 1 : -1;
       const back = row * 1.4, off = side * row * 1.2;
       j.x = p.x - cos * back - sin * off; j.y = p.y - sin * back + cos * off;
       j.alt = this.terrain ? this.terrain.skimAlt(j.x, j.y, p.alt) : p.alt; // deck over water: sea-skimming
     });
+    // dead zones and radiation storms: the whole package soaks it together, and a lethal dose kills every crew
+    if (this.dose(f, p, dt, this.pkgName(f))) for (const j of f.jets) if (j.alive) {
+      j.alive = false;
+      this.burst(j.x, j.y, 'kill');
+      this.lost.push({ jet: j, why: 'radiation' });
+      this.event(`${j.A.name}: the crew died of radiation.`, 'loss', j);
+    }
     // decoys go when the route says so
-    if (a.decoys && !this.decoysOut) this.launchDecoys();
+    if (a.decoys && !f.decoysOut) this.launchDecoys(f);
   }
 
-  /** Every MALD in the package goes out toward the objective. */
-  launchDecoys() {
-    this.decoysOut = true;
+  /** Every MALD in a package goes out toward the objective. */
+  launchDecoys(f) {
+    f.decoysOut = true;
     const goal = this.site[this.m.primary];
     let n = 0;
-    for (const j of this.jets) if (j.alive) for (const st of j.stations) {
+    for (const j of f.jets) if (j.alive) for (const st of j.stations) {
       if (st.mu !== 'mald' || !st.n) continue;
       for (let k = 0; k < st.n; k++) {
         const spread = (this.decoys.length % 5 - 2) * 0.12;
@@ -239,7 +315,7 @@ export class StrikeSim extends Base {
       this.used += MUNITIONS.mald.cost * st.n;
       st.n = 0;
     }
-    if (n) this.event(`${n} decoy${n === 1 ? '' : 's'} launched.`, 'info', this.pos);
+    if (n) this.event(`${n} decoy${n === 1 ? '' : 's'} launched${this.flights.length > 1 ? ` from package ${f.name}` : ''}.`, 'info', f.pos);
   }
 
   stepDecoys(dt) {
@@ -256,10 +332,14 @@ export class StrikeSim extends Base {
 
   /** Can this site's guidance radar hold this target right now? */
   tracks(site, tg) {
-    if (!site.sam || !fcRadars(site).length) return false;
+    if (!site.sam || !fcRadars(site).length || this.blinded(site)) return false;
     const jam = this.jammed(site);
-    return dist(site, tg) <= seesKm(SAMS[site.sam].fc, tg.rcs, tg.alt, (jam ? jam.factor : 1) * this.cover(tg).see);
+    return dist(site, this.where(tg)) <= seesKm(SAMS[site.sam].fc, tg.rcs, tg.alt, (jam ? jam.factor : 1) * this.cover(tg).see);
   }
+
+  /** Where the defences measure a target from: a jet counts as being on the route (the package's point), not wherever
+   *  its place in the formation puts it; a decoy is where it is. So the line you drew is what crosses a ring. */
+  where(tg) { return tg.decoy ? tg : tg.f.pos; }
 
   /** The network: search radars look, the alarm goes round, sites in range shoot. */
   defend(dt) {
@@ -267,11 +347,13 @@ export class StrikeSim extends Base {
     for (const s of this.m.sites) {
       const S = s.sam ? SAMS[s.sam] : null;
       const quiet = S?.quiet && !this.alert;
+      if (this.blinded(s)) { s.awake = false; s.tracking = false; continue; } // NGJ: sees nothing, shoots nothing
       s.awake = !quiet && searchRadars(s).length > 0;
+      if (!this.m.known[s.id] && (s.awake || s.tracking)) this.rwr(s);
       if (s.awake && !this.alert) {
         const spec = radarOf(s, 'search');
         const jam = this.jammed(s);
-        const seen = spec && targets.find((tg) => dist(s, tg) <= seesKm(spec, tg.rcs, tg.alt, (jam ? jam.factor : 1) * this.cover(tg).see));
+        const seen = spec && targets.find((tg) => dist(s, this.where(tg)) <= seesKm(spec, tg.rcs, tg.alt, (jam ? jam.factor : 1) * this.cover(tg).see));
         if (seen) {
           this.alert = true;
           this.event(`Detected by the ${S ? S.long + ' ' : ''}${spec.name} radar${s.sam ? '' : ' at ' + s.name}. The defences are awake.`, 'warn', s);
@@ -282,8 +364,8 @@ export class StrikeSim extends Base {
       // who it can shoot: in missile range, high enough, held by its radar; one not already being shot at first
       let best = null, bd = Infinity;
       for (const tg of targets) {
-        const d = dist(s, tg);
-        if (d > S.missile.km * 1.05 || tg.alt < S.missile.min || !this.tracks(s, tg)) continue;
+        const d = dist(s, this.where(tg));
+        if (d > S.missile.km || tg.alt < S.missile.min || !this.tracks(s, tg)) continue;
         s.tracking = true;
         if ((tg.engaged || 0) >= 2) continue; // two missiles on one jet is plenty: the rest look for another
         const score = d + (tg.engaged ? 400 : 0);
@@ -297,11 +379,147 @@ export class StrikeSim extends Base {
       if (!this.m.known[s.id]) { this.m.known[s.id] = true; this.event(`Pop-up threat: a ${S.long} nobody had found.`, 'warn', s); }
       this.launch(s, best, S.salvo);
       s.cool = this.t + (S.ring === 'short' ? 4 : S.ring === 'medium' ? 6 : 8);
-      this.event(`${S.long} launch at ${best.decoy ? 'a contact' : 'the package'}.`, 'warn', s);
-      if (!this.decoysOut && this.jets.some((j) => j.alive && j.stations.some((st) => st.mu === 'mald' && st.n))) this.launchDecoys();
+      this.event(`${S.long} launch at ${best.decoy ? 'a contact' : this.flights.length > 1 ? `package ${best.f.name}` : 'the package'}.`, 'warn', s);
+      const bf = best.f;
+      if (bf && !bf.decoysOut && bf.jets.some((j) => j.alive && j.stations.some((st) => st.mu === 'mald' && st.n))) this.launchDecoys(bf);
     }
   }
   inFlight(s) { return this.missiles.filter((m) => !m.dead && m.site === s.id).length; }
+
+  /** Radar warning receivers: a radar on the air whose energy reaches one of our jets puts its site on the map, even
+   *  one the sniffer never heard (a quiet Buk, Tor or Pantsir only once it switches on). */
+  rwr(s) {
+    for (const kind of ['search', 'fc']) {
+      if (kind === 'fc' ? !s.tracking : !s.awake) continue;
+      const spec = radarOf(s, kind);
+      if (!spec || !(kind === 'search' ? searchRadars(s) : fcRadars(s)).length) continue;
+      const j = this.jets.find((x) => x.alive && dist(s, x) <= Math.min(horizon(spec.h, x.alt), spec.km * RWR_GAIN));
+      if (!j) continue;
+      this.m.known[s.id] = true;
+      this.event(`RWR: ${s.sam ? `${SAMS[s.sam].long} (${spec.name} radar)` : `${spec.name} surveillance radar at ${s.name}`} painting ${this.flights.length > 1 ? `package ${j.f.name}` : 'the package'}. Marked on the map.`, 'warn', s);
+      return;
+    }
+  }
+
+  // ---- enemy fighters
+
+  /** Can this fighter's radar see one of our jets? Looking down at a low one, the ground clutters it. */
+  banditSees(b, j) {
+    const jam = this.jammed(b), look = j.alt < 600 ? 0.6 : 1;
+    return dist(b, this.where(j)) <= b.F.radar.km * Math.pow(j.rcs / 5, 0.25) * (jam ? jam.factor : 1) * look * this.cover(j).see;
+  }
+  /** Can our jet's radar hold this fighter? */
+  jetSees(j, b) { return !!j.A.radar && dist(j, b) <= j.A.radar.km * Math.pow(b.rcs / 5, 0.25); }
+
+  /** The patrols: orbit until the alarm goes (or their radar finds someone), then run at the nearest jet of ours;
+   *  back to the patrol point once out of missiles or after 15 minutes of chasing. */
+  intercept(dt) {
+    const ours = this.jets.filter((j) => j.alive);
+    for (const b of this.bandits) {
+      if (!b.alive) continue;
+      const c = b.cap;
+      if (b.state === 'cap' && b.missiles && (this.alert || ours.some((j) => this.banditSees(b, j)))) { b.state = 'hunt'; b.huntT = this.t; }
+      if (b.state === 'hunt' && (!b.missiles || this.t - b.huntT > 900 || !ours.length)) b.state = 'home';
+      let goal = null, kmh = b.F.kmh.dash;
+      if (b.state === 'hunt') goal = ours.reduce((x, j) => (dist(j, b) < dist(x, b) ? j : x));
+      else if (b.state === 'home' && dist(b, c) > 30) goal = c;
+      if (!goal) { // orbiting, 25 km out
+        kmh = b.F.kmh.cap;
+        b.a += ((kmh / 3600) * dt) / 25;
+        goal = { x: c.x + Math.cos(b.a) * 25, y: c.y + Math.sin(b.a) * 25 };
+      }
+      const d = dist(goal, b), step = (kmh / 3600) * dt;
+      b.hdg = Math.atan2(goal.y - b.y, goal.x - b.x);
+      if (d <= step) { b.x = goal.x; b.y = goal.y; } else { b.x += Math.cos(b.hdg) * step; b.y += Math.sin(b.hdg) * step; }
+    }
+  }
+
+  /** Air-to-air shots, both ways. Theirs: an R-77-1 at a jet their radar holds. Ours: an AMRAAM at a fighter our
+   *  jet's radar holds within reach, or an AIM-9X at one close enough to see. Two missiles at most on one target. */
+  airToAir() {
+    const live = this.bandits.filter((b) => b.alive);
+    if (!live.length) return;
+    const ours = this.jets.filter((j) => j.alive), pkg = (j) => (this.flights.length > 1 ? `package ${j.f.name}` : 'the package');
+    for (const b of live) {
+      const held = ours.filter((j) => this.banditSees(b, j));
+      if (!held.length) continue;
+      b.seen = true; // our warning receivers hear its radar
+      if (!this.rwrHeard.has(b.cap.id)) { this.rwrHeard.add(b.cap.id); this.event(`RWR: ${b.F.name} radar painting ${pkg(held[0])}.`, 'warn', b); }
+      if (!this.alert) { this.alert = true; this.event(`Seen by enemy fighters. The defences are awake.`, 'warn', b); }
+      if (!b.missiles || this.t < b.cool) continue;
+      const rk = (j) => aamReach(R77, b.alt, j.alt, b.F.kmh.cap);
+      const tg = held.filter((j) => (j.engaged || 0) < 2 && dist(b, j) <= rk(j)).sort((x, y) => dist(b, x) - dist(b, y))[0];
+      if (!tg) continue;
+      b.missiles--; b.cool = this.t + 6;
+      this.aams.push({ id: ++this.nid, red: true, from: b, target: tg, x: b.x, y: b.y, kmh: R77.kmh, max: rk(tg) * 1.3, flown: 0, lost: 0, pitbull: R77.pitbull, pk: R77.pk, name: R77.name });
+      tg.engaged = (tg.engaged || 0) + 1;
+      this.event(`${b.F.name} fires an ${R77.name} at the ${tg.A.name} (${pkg(tg)}).`, 'warn', b);
+    }
+    for (const b of live) if (!b.seen && ours.some((j) => this.jetSees(j, b))) {
+      b.seen = true;
+      this.event(`Radar contact: ${b.F.name}.`, 'warn', b);
+    }
+    for (const j of ours) {
+      if (this.t < (j.aamCool || 0)) continue;
+      for (const st of j.stations) {
+        const mu = st.n && MUNITIONS[st.mu];
+        if (!mu || mu.kind !== 'aam') continue;
+        const R = (b) => aamReach(mu, j.alt, b.alt, j.f.pos.kmh);
+        const tg = live.filter((b) => b.alive && (b.engaged || 0) < 2 && dist(j, b) <= R(b) && (this.jetSees(j, b) || (mu.ir && dist(j, b) <= 15)))
+          .sort((x, y) => dist(j, x) - dist(j, y))[0];
+        if (!tg) continue;
+        st.n--; this.used += mu.cost; j.aamCool = this.t + 3;
+        tg.seen = true;
+        this.aams.push({ id: ++this.nid, red: false, from: j, target: tg, x: j.x, y: j.y, kmh: mu.kmh, max: R(tg) * 1.3, flown: 0, lost: 0, pitbull: mu.ir ? Infinity : mu.pitbull, pk: mu.pk, name: mu.short });
+        tg.engaged = (tg.engaged || 0) + 1;
+        this.event(`${j.A.name}: ${mu.short} away at an ${tg.F.name}.`, 'info', tg);
+        break;
+      }
+    }
+  }
+
+  stepAams(dt) {
+    for (const a of this.aams) {
+      if (a.dead) continue;
+      const tg = a.target;
+      if (!tg.alive) { a.dead = true; continue; }
+      const end = (why) => {
+        a.dead = true; tg.engaged = Math.max(0, (tg.engaged || 1) - 1);
+        if (why) { this.burst(a.x, a.y, 'miss'); this.event(`${a.red ? 'An' : 'Our'} ${a.name} ${why}.`, a.red ? 'good' : 'info'); }
+      };
+      const d = dist(a, tg);
+      // until its own seeker takes over, the shooter's radar has to keep holding the target
+      const held = d <= a.pitbull || (a.from.alive && (a.red ? this.banditSees(a.from, tg) : this.jetSees(a.from, tg)));
+      a.lost = held ? 0 : a.lost + dt;
+      if (a.lost > 4) { end('lost its guidance'); continue; }
+      const step = (a.kmh / 3600) * dt;
+      if (d <= step) { end(); this.aamHit(a, tg); continue; }
+      a.x += ((tg.x - a.x) / d) * step; a.y += ((tg.y - a.y) / d) * step; a.flown += step;
+      if (a.flown > a.max) end('ran out of energy');
+    }
+    if (this.aams.length > 80) this.aams = this.aams.filter((a) => !a.dead);
+  }
+
+  aamHit(a, tg) {
+    if (a.red) {
+      const leg = tg.f.route[Math.min(tg.f.leg, tg.f.route.length - 2)], jam = this.jammed(a.from);
+      const pk = a.pk * SPEEDS[leg.spd].pk * (1 - tg.A.ecm) * (1 - tg.A.cm) * (tg.A.lo ?? 1) * (jam ? jam.pk : 1);
+      if (Math.random() < pk) {
+        tg.alive = false;
+        this.lost.push({ jet: tg, why: a.from.F.name });
+        this.burst(tg.x, tg.y, 'kill');
+        this.event(`${tg.A.name} shot down by an ${a.name} from an ${a.from.F.name}.`, 'loss', tg);
+      } else { this.burst(tg.x, tg.y, 'miss'); this.event(`An ${a.name} missed the ${tg.A.name}.`, 'good', tg); }
+      return;
+    }
+    const F = tg.F, pk = a.pk * (1 - F.ecm) * (1 - F.cm) * (F.lo ?? 1);
+    if (Math.random() < pk) {
+      tg.alive = false;
+      this.airKills = (this.airKills || 0) + 1;
+      this.burst(tg.x, tg.y, 'hit');
+      this.event(`Splash: ${F.name} shot down by an ${a.name} from the ${a.from.A.name}.`, 'kill', tg);
+    } else { this.burst(tg.x, tg.y, 'miss'); this.event(`Our ${a.name} missed the ${F.name}.`, 'info', tg); }
+  }
 
   impact(ms, site, tg) {
     const S = SAMS[site.sam];
@@ -310,9 +528,9 @@ export class StrikeSim extends Base {
       else this.burst(tg.x, tg.y, 'miss');
       return;
     }
-    const a = this.node;
+    const a = tg.f.route[Math.min(tg.f.leg, tg.f.route.length - 2)];
     const jam = this.jammed(site);
-    let pk = S.missile.pk * SPEEDS[a.spd].pk * (1 - tg.A.ecm) * (1 - tg.A.cm) * (jam ? jam.pk : 1);
+    let pk = S.missile.pk * SPEEDS[a.spd].pk * (1 - tg.A.ecm) * (1 - tg.A.cm) * (tg.A.lo ?? 1) * (jam ? jam.pk : 1);
     // down low the ground clutters the radar picture (and there are hills the game doesn't draw); big long-range
     // systems are built for high targets and suffer most
     if (tg.alt < 600) pk *= (tg.alt < 120 ? 0.5 : 0.75) * (S.ring === 'long' ? 0.7 : 1);
@@ -335,13 +553,13 @@ export class StrikeSim extends Base {
 
   /** Let go of weapons whose targets are within reach. */
   release() {
-    const p = this.pos;
     for (const j of this.jets) {
       if (!j.alive) continue;
+      const p = j.f.pos;
       for (const st of j.stations) {
-        if (!st.n || st.mu === 'mald') continue;
+        if (!st.n || st.mu === 'mald' || st.mu === 'pod' || MUNITIONS[st.mu].kind === 'aam') continue;
         const mu = MUNITIONS[st.mu];
-        const R = reach(mu, p.alt);
+        const R = reach(mu, p.alt, p.kmh);
         if (mu.kind === 'arm') {
           // HARMs: at the radar they were given, or (auto) at whichever radar is on and shooting first
           const radars = [];
@@ -383,20 +601,55 @@ export class StrikeSim extends Base {
       const mu = MUNITIONS[w.mu];
       const step = (mu.kmh / 3600) * dt;
       const d = Math.hypot(w.tx - w.x, w.ty - w.y);
-      // point defence gets one go at it on the way in, from the closest site that's awake and has missiles
+      // point defence on the way in: the two closest sites covering the target each get a go. Tor and Pantsir see it
+      // coming with their own radar and fire even before the alarm (and wake the network doing it); a slow glide bomb
+      // gives them time to shoot, look and shoot again. Each takes on only so many at once: a big salvo saturates it.
+      // an arcing weapon (Mako) is seen high up from far off: S-300s and S-400s covering the target try to intercept it,
+      // alarm or not (their search radars pick it up, and it wakes the network). Hard to hit at Mach 5 and manoeuvring.
+      if (mu.arc && !w.arced && d < 90) {
+        w.arced = true;
+        const longs = this.m.sites.filter((s) => s.sam && SAMS[s.sam].ring === 'long' && canEngage(s) && !this.blinded(s) && Math.hypot(s.x - w.tx, s.y - w.ty) <= SAMS[s.sam].missile.km)
+          .sort((a, b) => Math.hypot(a.x - w.tx, a.y - w.ty) - Math.hypot(b.x - w.tx, b.y - w.ty)).slice(0, 2);
+        let down = null;
+        for (const ls of longs) {
+          const S = SAMS[ls.sam];
+          if (!this.m.known[ls.id]) this.m.known[ls.id] = true;
+          if (!this.alert) { this.alert = true; this.event(`${S.long} is tracking an incoming ${mu.short}. The defences are awake.`, 'warn', ls); }
+          for (let k = S.salvo; k > 0 && !down && ls.fired < ls.missiles; k--) {
+            ls.fired++;
+            if (Math.random() < S.missile.pk * 0.3) down = S;
+          }
+          if (down) break;
+        }
+        if (down) {
+          w.dead = true;
+          this.burst(w.x, w.y, 'pd');
+          this.event(`${down.long} intercepted a ${mu.short}.`, 'warn', w);
+          continue;
+        }
+      }
       if (!w.tried && d < 18) {
         w.tried = true;
-        const pd = this.m.sites.filter((s) => s.sam && SAMS[s.sam].pd && this.alert && canEngage(s) && Math.hypot(s.x - w.tx, s.y - w.ty) <= SAMS[s.sam].missile.km)
-          .sort((a, b) => Math.hypot(a.x - w.tx, a.y - w.ty) - Math.hypot(b.x - w.tx, b.y - w.ty))[0];
-        if (pd) {
-          pd.fired++;
+        const pds = this.m.sites.filter((s) => s.sam && SAMS[s.sam].pd && canEngage(s) && !this.blinded(s) && (this.alert || SAMS[s.sam].ring === 'short') && Math.hypot(s.x - w.tx, s.y - w.ty) <= SAMS[s.sam].missile.km)
+          .sort((a, b) => Math.hypot(a.x - w.tx, a.y - w.ty) - Math.hypot(b.x - w.tx, b.y - w.ty)).slice(0, 2);
+        let down = null;
+        for (const pd of pds) {
+          const S = SAMS[pd.sam], slot = Math.floor(this.t / 4);
+          pd.pdLoad = pd.pdSlot === slot ? pd.pdLoad + 1 : 1; pd.pdSlot = slot;
+          if (pd.pdLoad > S.ch * 2) continue; // busy with the others
           if (!this.m.known[pd.id]) this.m.known[pd.id] = true;
-          if (Math.random() < SAMS[pd.sam].pd * mu.pd * 1.6) {
-            w.dead = true;
-            this.burst(w.x, w.y, 'pd');
-            this.event(`${SAMS[pd.sam].long} shot down a ${mu.short}.`, 'warn', w);
-            continue;
+          if (!this.alert) { this.alert = true; this.event(`${S.long} is engaging incoming weapons. The defences are awake.`, 'warn', pd); }
+          for (let k = S.ring === 'short' && mu.kind === 'glide' ? 2 : 1; k > 0 && !down && pd.fired < pd.missiles; k--) {
+            pd.fired++;
+            if (Math.random() < S.pd * mu.pd * 1.6) down = S;
           }
+          if (down) break;
+        }
+        if (down) {
+          w.dead = true;
+          this.burst(w.x, w.y, 'pd');
+          this.event(`${down.long} shot down a ${mu.short}.`, 'warn', w);
+          continue;
         }
       }
       if (d <= step) { w.dead = true; this.hit(w, mu); continue; }
@@ -415,6 +668,7 @@ export class StrikeSim extends Base {
     t.dmg = (t.dmg || 0) + (isHard(t) ? mu.dmg : mu.soft);
     this.burst(w.tx, w.ty, 'hit');
     if (was && !alive(t)) {
+      if (mu.kind === 'arm') this.harmKills = (this.harmKills || 0) + 1;
       const obj = this.m.objective.site === s.id && s.targets[this.m.objective.idx] === t;
       this.event(`${obj ? 'OBJECTIVE DESTROYED: ' : 'Destroyed: '}${targetName(t)} at ${s.name}.`, obj ? 'objective' : 'kill', w);
     } else if (t.k === 'runway') this.event(`Runway hit: ${Math.min(100, Math.round(((t.dmg || 0) / targetHp(t)) * 100))}% closed.`, 'kill', w);
@@ -425,9 +679,11 @@ export class StrikeSim extends Base {
     return !alive(s.targets[this.m.objective.idx]);
   }
 
-  /** The way home from where the package is (for RTB): straight back to the origin. */
-  rtb() {
-    this.route = [...this.route.slice(0, this.leg + 1), { x: this.pos.x, y: this.pos.y, alt: this.node.alt, spd: this.node.spd }, { ...this.route[this.route.length - 1] }];
-    this.leg++;
+  /** The way home from where a package is (for RTB): straight back to the origin. Edits the route in place, so the
+   *  editor's reference to it stays good. */
+  rtb(f) {
+    const r = f.route, now = r[f.leg];
+    r.splice(f.leg + 1, r.length - f.leg - 2, { x: f.pos.x, y: f.pos.y, alt: now.alt, spd: now.spd });
+    f.leg++;
   }
 }

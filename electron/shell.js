@@ -9,7 +9,38 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 // Windows caches icons by file path, so a redesigned icon gets a new file name or the old one keeps showing
-const ICON = path.join(ROOT, 'public', 'assets', 'icon-lavender.ico');
+let ICON = path.join(ROOT, 'public', 'assets', 'icon-lavender.ico');
+// Copies told apart on the taskbar: one run from a git checkout (the dev copy) gets a red icon, one run from the temp
+// folder (a scratch test copy) a yellow one. Everyone else keeps the lavender one. The tinted icon is made here at
+// startup and kept in the copy's own data folder, so the repo's icon files never change.
+try {
+  const tmp = path.resolve(require('os').tmpdir()).toLowerCase();
+  const tint = path.resolve(ROOT).toLowerCase().startsWith(tmp) ? ['yellow', [240, 200, 40]]
+    : fs.existsSync(path.join(ROOT, '.git')) ? ['red', [232, 64, 64]] : null;
+  if (tint) {
+    const img = nativeImage.createFromPath(path.join(ROOT, 'public', 'assets', 'icon-256.png'));
+    const { width, height } = img.getSize();
+    const px = img.toBitmap(); // BGRA
+    const [r, g, b] = tint[1];
+    for (let i = 0; i < px.length; i += 4) {
+      const hi = Math.max(px[i], px[i + 1], px[i + 2]), lo = Math.min(px[i], px[i + 1], px[i + 2]);
+      if (hi - lo < 24 || px[i] < px[i + 2]) continue; // only the lavender (blue-led) parts; the page and the black stay
+      const f = Math.min(1.15, hi / 214);
+      px[i] = Math.min(255, b * f); px[i + 1] = Math.min(255, g * f); px[i + 2] = Math.min(255, r * f);
+    }
+    const png = nativeImage.createFromBitmap(px, { width, height }).toPNG();
+    // a one-image .ico holding the PNG (Windows wants a file path for the taskbar and shortcuts)
+    const head = Buffer.alloc(22);
+    head.writeUInt16LE(1, 2); head.writeUInt16LE(1, 4);
+    head[6] = width >= 256 ? 0 : width; head[7] = height >= 256 ? 0 : height;
+    head.writeUInt16LE(1, 10); head.writeUInt16LE(32, 12); head.writeUInt32LE(png.length, 14); head.writeUInt32LE(22, 18);
+    const out = path.join(ROOT, 'data', 'electron', `icon-${tint[0]}.ico`);
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    const ico = Buffer.concat([head, png]);
+    if (!fs.existsSync(out) || !fs.readFileSync(out).equals(ico)) fs.writeFileSync(out, ico);
+    ICON = out;
+  }
+} catch { /* keep the lavender icon */ }
 const BG = { dark: '#111214', light: '#f5f5f8', dusk: '#0b0910', bluehour: '#090b12', pbj: '#3a1e3e' };
 
 app.setName('Box-Deckspitter');

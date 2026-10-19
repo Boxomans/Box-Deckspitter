@@ -1,4 +1,4 @@
-// Box-Deckspitter app shell, the easter eggs: turning them on, their sortie, the splash count.
+// Box-Deckspitter app shell, the games (their switches, the F-14's sortie, the splash count) and the easter eggs.
 // Methods of App (app.js mixes this class into it).
 
 import { $, $$, h, clear } from '../core/dom.js';
@@ -7,7 +7,7 @@ import { confirmDialog, toast } from '../core/ui.js';
 import { HIDDEN_THEMES } from './shared.js';
 
 export class EasterEggsPart {
-  /** The F-14 button shows, and the sortie flies, only while the easter egg is turned on (Settings → Easter eggs). */
+  /** The F-14 button shows, and the sortie flies, only while the game is on (opened once from the Toolbox, or Settings → Games). */
   syncTomcat() {
     const on = !!this.settings.tomcatEnabled && this.mainWindow !== false; // one sortie per app: in the main window
     $('#btn-tomcat').hidden = !on || !!this.tomcatLaunched; // after the first take-off the radar stands in for it
@@ -20,14 +20,20 @@ export class EasterEggsPart {
     this.syncStrike();
   }
 
-  /** Deep Strike's own switch (Settings → Easter eggs): its top-bar button and Toolbox entry. The carrier's DEEP STRIKE
-   *  tab still opens it while the F-14 is on. */
+  /** Deep Strike's own switch (Settings → Games): its top-bar button. The Toolbox always opens it. */
   syncStrike() {
     const on = !!this.settings.strikeEnabled && this.mainWindow !== false;
     $('#btn-strike').hidden = !on;
     $('#btn-strike').title = 'Deep Strike · drag or flick it to the right sidebar to dock it there';
-    if (!on && !this.settings.tomcatEnabled) for (const t of this.tabs.filter((x) => x.mode === 'strike')) this.closeTab(t);
     this.syncRail();
+  }
+
+  /** A game from the Toolbox. The first time, it turns on: the F-14's sortie starts flying and its top-bar button shows
+   *  (Deep Strike's too). */
+  async openGame(mode) {
+    const key = mode === 'tomcat' ? 'tomcatEnabled' : 'strikeEnabled';
+    if (!this.settings[key]) { await this.saveSettings({ [key]: true }); this.syncTomcat(); }
+    this.newDocument(mode);
   }
 
   /** The easter egg's sortie: one per app, flying from start-up for as long as it's turned on. */
@@ -41,7 +47,8 @@ export class EasterEggsPart {
     await (await f)?.stop();
   }
 
-  easterEggSettings() {
+  /** Settings → Games: the F-14's sortie and top-bar button, Deep Strike's button, and wiping the F-14's progress. */
+  gameSettings() {
     const box = h('div', { class: 'settings-group' });
     const draw = () => {
       const on = !!this.settings.tomcatEnabled;
@@ -59,9 +66,28 @@ export class EasterEggsPart {
       sb.addEventListener('change', async () => {
         await this.saveSettings({ strikeEnabled: sb.checked });
         this.syncStrike();
-        if (sb.checked) toast('Deep Strike is in the top bar and the Toolbox.', { type: 'ok', timeout: 3000 });
+        if (sb.checked) toast('Deep Strike is in the top bar.', { type: 'ok', timeout: 3000 });
         draw();
       });
+      clear(box).append(h('h4', {}, 'Games'),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Both games open from the Toolbox, under Games.'),
+        h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat: keep flying in the background, with its top-bar button')),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, played
+          ? `High score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()} · ${(s.games || 0) + (s.auto?.games || 0)} sorties · ${(s.splashes || 0) + (s.auto?.splashes || 0)} splashes`
+          : 'An AWG-9 radar intercept game. Turns on the first time you open it.'),
+        on ? h('button', { class: 'btn sm danger', style: { alignSelf: 'flex-start' }, onclick: () => this.resetTomcat(draw) }, icon('trash', 'sm'), 'Reset game progress…') : null,
+        h('label', { class: 'check' }, sb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('reticle', 'sm'), 'Deep Strike: top-bar button')),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, ds.flown
+          ? `${ds.flown} flown · ${ds.won || 0} objectives destroyed · ${ds.jetsLost || 0} jets lost · ${Object.keys(this.settings.tomcatStrike?.badges || {}).length} badges`
+          : 'A strike-planning game: find the defences, plan the package, fly it.'));
+    };
+    draw();
+    return box;
+  }
+
+  easterEggSettings() {
+    const box = h('div', { class: 'settings-group' });
+    const draw = () => {
       const hid = h('input', { type: 'checkbox', checked: !!this.settings.hiddenThemes });
       hid.addEventListener('change', async () => {
         await this.saveSettings({ hiddenThemes: hid.checked });
@@ -74,16 +100,6 @@ export class EasterEggsPart {
         }
       });
       clear(box).append(h('h4', {}, 'Easter eggs'),
-        h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat')),
-        h('span', { class: 'faint', style: { fontSize: '11px' } }, played
-          ? `High score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()} · ${(s.games || 0) + (s.auto?.games || 0)} sorties · ${(s.splashes || 0) + (s.auto?.splashes || 0)} splashes`
-          : 'An AWG-9 radar intercept game, behind a button in the top bar.'),
-        // wiping progress only shows while the game itself is on
-        on ? h('button', { class: 'btn sm danger', style: { alignSelf: 'flex-start' }, onclick: () => this.resetTomcat(draw) }, icon('trash', 'sm'), 'Reset game progress…') : null,
-        h('label', { class: 'check' }, sb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('reticle', 'sm'), 'Deep Strike')),
-        h('span', { class: 'faint', style: { fontSize: '11px' } }, ds.flown
-          ? `${ds.flown} flown · ${ds.won || 0} objectives destroyed · ${ds.jetsLost || 0} jets lost`
-          : 'A strike-planning game: find the defences, plan the package, fly it.'),
         h('label', { class: 'check' }, hid, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('palette', 'sm'), 'Hidden themes')),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, HIDDEN_THEMES.length
           ? `Adds ${HIDDEN_THEMES.length} more theme${HIDDEN_THEMES.length === 1 ? '' : 's'} to the theme list in Appearance (not the top-bar button).`
@@ -113,6 +129,7 @@ export class EasterEggsPart {
   splashLine(live = 0) {
     const t = this.settings.tomcat || {};
     const n = (t.splashes || 0) + (t.auto?.splashes || 0) + live;
+    if (!n && !this.settings.tomcatEnabled) return 'an AWG-9 radar intercept game';
     return `${n.toLocaleString()} ${n === 1 ? 'splash' : 'splashes'}`;
   }
 }

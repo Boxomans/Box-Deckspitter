@@ -2,8 +2,8 @@
 // somewhere in one of the field's regions, the targets inside it, and the air defence network around it. Everything
 // but the airfields' positions is made up from the mission's seed: no real deployments.
 
-import { SAMS, TARGETS, RUNWAY_HP, RUNWAY_LEN, BUDGET, CODEWORDS } from './data.js';
-import { rng, whereIs, onLand, inField, inRegion } from './geo.js';
+import { SAMS, TARGETS, RUNWAY_HP, RUNWAY_LEN, BUDGET, LARGE_BUDGET, CODEWORDS } from './data.js';
+import { rng, whereIs, onLand, inField, inRegion, zoneAt, makeZones, arcDist, ARC_HALF } from './geo.js';
 
 /** Which airfields have the long runway (the rest of the medium ones are medium). */
 const LONG_RUNWAY = new Set(['Lipetsk', 'Borisoglebsk', 'Voronezh Baltimore', 'Krymsk', 'Rostov-on-Don Central', 'Millerovo', 'Kursk Khalino']);
@@ -22,8 +22,9 @@ export const REGIONS = {
 };
 
 /** A fresh mission. type: 'airbase' | 'sam' | 'industry' | undefined (any); region: a REGIONS key | undefined (any). */
-export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0, type, region) {
-  const r = rng(seed);
+/** size 'large': a much bigger network (more long-range, medium and outer sites) and three times the budget. */
+export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0, type, region, size = 'normal') {
+  const r = rng(seed), big = size === 'large';
   type ||= r.pick(['airbase', 'airbase', 'sam', 'industry']);
   region ||= r.pick(Object.keys(REGIONS));
   const sites = [];
@@ -31,7 +32,9 @@ export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0,
   const id = () => `s${++n}`;
   // every mission is built around one of the region's airfields: the objective itself, or what's near it
   const anchor = r.pick(world.airfields.filter((a) => a.r === region));
-  const mine = (x, y) => inRegion(world, region, x, y);
+  let zones = [];
+  const dead = (x, y) => !!zoneAt(zones, x, y);
+  const mine = (x, y) => inRegion(world, region, x, y) && !dead(x, y);
 
   // ---- the objective
   let primary;
@@ -64,9 +67,13 @@ export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0,
   let brg, od, origin, tries = 0;
   do {
     brg = r() * Math.PI * 2; // radians, 0 = east, y runs south
-    od = r.range(300, 380);
+    od = big ? r.range(600, 760) : r.range(430, 550); // a large mission's package comes from further out
     origin = { x: primary.x + Math.cos(brg) * od, y: primary.y + Math.sin(brg) * od };
   } while (!inField(world, origin.x, origin.y) && ++tries < 80);
+  // the planner can slide the origin round the objective along this arc (to balance the packages' fuel)
+  const arc = { a: brg, half: ARC_HALF, r: od };
+  // ---- the dead zones: broken rings round it, out past the defences (nothing below goes inside one)
+  zones = makeZones(world, r, primary, arc, big);
 
   // ---- the network around it
   const far = (x, y, min = 9) => sites.every((s) => Math.hypot(s.x - x, s.y - y) >= min);
@@ -76,7 +83,7 @@ export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0,
       if (towardOrigin) a = brg + r.range(-0.8, 0.8);
       const d = r.range(dMin, dMax);
       const x = near.x + Math.cos(a) * d, y = near.y + Math.sin(a) * d;
-      if (!(tries < 60 ? mine(x, y) : onLand(world, x, y)) || !far(x, y, SAMS[sam].ring === 'short' ? 1.2 : 9) || Math.hypot(x - origin.x, y - origin.y) < SAMS[sam].missile.km + 40) continue;
+      if (!(tries < 60 ? mine(x, y) : onLand(world, x, y) && !dead(x, y)) || !far(x, y, SAMS[sam].ring === 'short' ? 1.2 : 9) || arcDist({ x, y }, primary, arc) < SAMS[sam].missile.km + 40) continue;
       const s = { id: id(), kind: 'sam', sam, x, y, targets: samTargets(r, sam) };
       s.name = `${SAMS[sam].name} site ${whereIs(world, s)}`;
       sites.push(s);
@@ -86,20 +93,20 @@ export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0,
   };
   // point defence right at the objective
   place(r() < 0.5 ? 'pantsir' : 'tor', primary, 1.2, 3.5);
-  if (r() < 0.55) place(r() < 0.5 ? 'pantsir' : 'tor', primary, 1.5, 4.5);
-  // one or two long-range systems covering it (not when it is one)
-  const longs = type === 'sam' ? r.int(1, 2) : r.int(1, 2);
+  if (big || r() < 0.55) place(r() < 0.5 ? 'pantsir' : 'tor', primary, 1.5, 4.5);
+  // one or two long-range systems covering it (three to five on a large mission)
+  const longs = big ? r.int(3, 5) : r.int(1, 2);
   for (let i = 0; i < longs; i++) {
-    const s = place(r() < 0.5 ? 's400' : 's300', primary, 25, 95, i === 0 && r() < 0.6);
+    const s = place(r() < 0.5 ? 's400' : 's300', primary, 25, big ? 140 : 95, i === 0 && r() < 0.6);
     if (s && r() < 0.7) place('pantsir', s, 1.2, 3); // long-range sites keep their own point defence
   }
   // medium-range sites, some across the way in
-  const meds = r.int(2, 4);
-  for (let i = 0; i < meds; i++) place('buk', primary, 15, 80, r() < 0.5);
-  if (r() < 0.4) place('tor', primary, 20, 60, true);
+  const meds = big ? r.int(6, 9) : r.int(2, 4);
+  for (let i = 0; i < meds; i++) place('buk', primary, 15, big ? 120 : 80, r() < 0.5);
+  for (let i = big ? r.int(2, 3) : r() < 0.4 ? 1 : 0; i > 0; i--) place('tor', primary, 20, 60, true);
   // an outer layer out along the way in: the edge to feel around first
-  const outer = r.int(1, 2);
-  for (let i = 0; i < outer; i++) place(r() < 0.65 ? 'buk' : 's300', primary, 100, 175, true);
+  const outer = big ? r.int(3, 5) : r.int(1, 2);
+  for (let i = 0; i < outer; i++) place(r() < 0.65 ? 'buk' : 's300', primary, 100, big ? 240 : 175, true);
 
   // hidden: how many missiles each site really has (shown in the debrief)
   for (const s of sites) {
@@ -110,9 +117,18 @@ export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0,
     s.fired = 0;
   }
 
+  // enemy fighters on patrol (CAP) out toward the origin: on about half the normal missions, one to three flights of two
+  // on a large one; the Su-57 is very rare
+  const cap = [], ang = Math.atan2(origin.y - primary.y, origin.x - primary.x);
+  for (let i = big ? r.int(1, 3) : r() < 0.5 ? 1 : 0; i > 0; i--) {
+    const back = r.range(50, 160), side = r.range(-80, 80);
+    cap.push({ id: `cap${cap.length}`, type: r() < 0.05 ? 'su57' : 'su35', n: 2,
+      x: primary.x + Math.cos(ang) * back - Math.sin(ang) * side, y: primary.y + Math.sin(ang) * back + Math.cos(ang) * side });
+  }
+
   return {
-    v: 1, seed, type, region, code: r.pick(CODEWORDS), budget: BUDGET[type], origin, primary: primary.id, objective: { site: primary.id, idx: objective },
-    sites, known: { [primary.id]: true },
+    v: 1, seed, type, region, size: big ? 'large' : 'normal', code: r.pick(CODEWORDS), budget: BUDGET[type] * (big ? LARGE_BUDGET : 1), origin, arc, primary: primary.id, objective: { site: primary.id, idx: objective },
+    sites, known: { [primary.id]: true }, cap, zones,
   };
 }
 

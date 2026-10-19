@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.1.3",
+    "date": "2026-10-18",
+    "notes": [
+      "F-14F Super Tomcat, and Deep Strike are no longer listed under Easter Eggs. They have been added as proper games under the toolbox.",
+      "F-14F Super Tomcat: an idle air-combat game that keeps flying in the background while it's turned on. Added new content.",
+      "Deep Strike: a strike-planning game. Added new content. Airfield positions are from OurAirports (public domain).",
+      "Settings › Games: switches and stats for both games. Their progress is kept in the settings export.",
+      "Dump panels: right-clicking a file copies it, as in the dump docked in the editors. Shift+right-click opens the full menu."
+    ]
+  },
+  {
     "version": "1.1.2",
     "date": "2026-10-18",
     "notes": [

@@ -150,6 +150,115 @@ export function loadWorld(proj) {
   })().catch((e) => { worldCache = null; throw e; }));
 }
 
+/** The dead zones: salted ground round the old megaton strikes. Each mission makes its own from its seed: two to
+ *  four broken rings of strike clusters round the objective, blending into each other, each with its own gaps and
+ *  slits to thread. A cluster is one or more overlapping footprints, each a rough polygon of straight cuts, strung out
+ *  roughly along its ring. Every footprint sits on land inside the field (lakes are fine), so coasts stay open. Radiation adds up over the whole flight: STORM_S
+ *  seconds in a radiation storm kills a crew, DEAD_S in an ordinary dead zone, and the two count together. */
+export const STORM_S = 600, DEAD_S = 1200;
+/** How much of a lethal dose a second in this zone gives. */
+export const doseRate = (z) => 1 / (z.storm ? STORM_S : DEAD_S);
+
+/** Dry land or a lake, inside the field: where a footprint may lie. */
+function onGround(world, x, y) {
+  return inFieldOf(world.field, x, y) && probe.isPointInPath(world.land, x, y, 'evenodd');
+}
+
+/** Where the origin may be dragged to: an arc round the objective, `half` radians either side of bearing `a`, r km out. */
+export const ARC_HALF = Math.PI / 3;
+/** The point of a mission's origin arc at bearing a (clamped to the arc). */
+export function arcPoint(primary, arc, a) {
+  const d = Math.max(-arc.half, Math.min(arc.half, Math.atan2(Math.sin(a - arc.a), Math.cos(a - arc.a))));
+  return { x: primary.x + Math.cos(arc.a + d) * arc.r, y: primary.y + Math.sin(arc.a + d) * arc.r };
+}
+/** How far a point is from the origin arc. */
+export function arcDist(p, primary, arc) {
+  return dist(p, arcPoint(primary, arc, Math.atan2(p.y - primary.y, p.x - primary.x)));
+}
+
+/** The mission's dead zones (see above): primary {x, y} and the origin's arc; nothing covers the objective or any
+ *  point the origin can be dragged to. */
+export function makeZones(world, r, primary, arc, big) {
+  const zones = [], od = arc.r;
+  const q = (v) => Math.round(v * 10) / 10;
+  // one strike's footprint round (x, y), stretched along `wind`: every 8 km of its edge on ground and clear of the
+  // origin's arc and the objective, or null
+  const footprint = (x, y, rad, stretch, wind) => {
+    const n = r.int(7, 11), pts = [], cw = Math.cos(wind), sw = Math.sin(wind);
+    for (let i = 0; i < n; i++) {
+      const t = ((i + r.range(-0.3, 0.3)) / n) * Math.PI * 2, k = rad * r.range(0.7, 1.1);
+      const u = Math.cos(t) * k * stretch, v = (Math.sin(t) * k) / stretch;
+      pts.push([q(x + u * cw - v * sw), q(y + u * sw + v * cw)]);
+    }
+    const far = rad * 1.1 * stretch;
+    if (arcDist({ x, y }, primary, arc) < far + 30 || Math.hypot(primary.x - x, primary.y - y) < far + 20) return null;
+    const ok = pts.every((p, i) => {
+      const e = pts[(i + 1) % n], k = Math.max(1, Math.ceil(Math.hypot(e[0] - p[0], e[1] - p[1]) / 8));
+      for (let j = 0; j < k; j++) if (!onGround(world, p[0] + ((e[0] - p[0]) * j) / k, p[1] + ((e[1] - p[1]) * j) / k)) return false;
+      return true;
+    });
+    return ok ? { x: q(x), y: q(y), r: q(far), pts } : null;
+  };
+  // a cluster: the first strike at (x, y), the rest overlapping one already there, mostly strung out along the wind
+  const cluster = (x, y, want, rMin, rMax, wind, storm) => {
+    const parts = [];
+    for (let k = 0; parts.length < want && k < want * 6; k++) {
+      const at = parts.length ? r.pick(parts) : null, rad = r.range(rMin, rMax);
+      let px = x, py = y;
+      if (at) {
+        const d = (at.r + rad) * r.range(0.35, 0.7), ang = wind + (r() < 0.75 ? r.range(-0.4, 0.4) : r.range(0, Math.PI * 2)) + (r() < 0.5 ? Math.PI : 0);
+        px = at.x + Math.cos(ang) * d; py = at.y + Math.sin(ang) * d;
+      } else if (!onGround(world, x, y)) return;
+      const f = footprint(px, py, rad, r.range(1.05, r() < 0.3 ? 2 : 1.45), wind);
+      if (f) parts.push(f);
+    }
+    if (!parts.length) return;
+    let far = 0;
+    for (const f of parts) for (const p of f.pts) far = Math.max(far, Math.hypot(p[0] - x, p[1] - y));
+    zones.push({ x: q(x), y: q(y), r: q(far), parts, storm });
+  };
+  // the rings: two or three (three or four on a large mission) from just outside the objective outwards, each wandering
+  // in and out so they blend into each other, with clusters bridging between them in places; each ring has its own
+  // one or two gaps, so getting in means weaving from one to the next
+  const rings = big ? r.int(3, 4) : r.int(2, 3), step = r.range(70, 95);
+  for (let ri = 0; ri < rings; ri++) {
+    const R0 = r.range(65, 90) + ri * step;
+    if (R0 > od - 120) break;
+    const gaps = [];
+    for (let i = r() < 0.5 ? 1 : 2; i > 0; i--) gaps.push({ a: r() * Math.PI * 2, w: r.range(22, 38) / R0 }); // half-widths, radians
+    const inGap = (a) => gaps.some((g) => Math.abs(Math.atan2(Math.sin(a - g.a), Math.cos(a - g.a))) < g.w);
+    const wob = [r.range(10, 28), r.int(2, 4), r() * 7, r.range(5, 14), r.int(5, 8), r() * 7];
+    const Rat = (a) => R0 + wob[0] * Math.sin(wob[1] * a + wob[2]) + wob[3] * Math.sin(wob[4] * a + wob[5]);
+    for (let a = r() * 0.5; a < Math.PI * 2; ) {
+      const size = r.range(22, 40), R = Rat(a) + r.range(-10, 10);
+      if (!inGap(a)) {
+        cluster(primary.x + Math.cos(a) * R, primary.y + Math.sin(a) * R, r.int(2, 4), size * 0.6, size, a + Math.PI / 2 + r.range(-0.4, 0.4), r() < 0.3);
+        // a bridge out toward the next ring (or in toward the last), so the rings run into each other
+        if (r() < 0.3) { const R2 = R + (r() < 0.65 ? 1 : -1) * step * r.range(0.4, 0.6); cluster(primary.x + Math.cos(a) * R2, primary.y + Math.sin(a) * R2, r.int(1, 3), size * 0.5, size * 0.85, a + r.range(-0.5, 0.5), r() < 0.3); }
+      }
+      a += (size * r.range(1.4, 1.8)) / R; // a little under a cluster's width on, so neighbours run together
+    }
+  }
+  return zones;
+}
+
+/** Is (x, y) inside this polygon [[x, y], ...]? */
+function inPoly(pts, x, y) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** The dead zone (of these) a point (km) is in, or null. */
+export function zoneAt(zones, x, y) {
+  let hit = null; // a storm wins where it overlaps a dead zone
+  for (const z of zones || []) if ((!hit || z.storm) && Math.hypot(z.x - x, z.y - y) <= z.r && z.parts.some((f) => inPoly(f.pts, x, y))) { hit = z; if (z.storm) break; }
+  return hit;
+}
+
 let probe;
 /** Inside the field's outline and not in an excluded country. */
 function inFieldOf(field, x, y) {

@@ -56,13 +56,15 @@ export class PanelsPart {
     const mine = !!(this.settings.cardOrder || {}).toolbox;
     const groups = [
       ['Tools', this.ordered('toolbox', all, (c) => c[1])],
+      ['Games', [
+        ['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.openGame('tomcat'), 'tools-tomcat'],
+        ['reticle', 'Deep Strike', 'find the defences · plan the package · fly it', () => this.openGame('strike')],
+      ]],
       ['More', [
         ['play', 'Video player', 'just watch something', () => this.openVideoPlayer()],
         ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
         ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
         ...(this.weather ? [['cloud-sun', 'Weather widget', 'a small floating forecast · click again to close', () => this.weather.toggleMini()]] : []),
-        ...(this.settings.tomcatEnabled ? [['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.newDocument('tomcat')]] : []),
-        ...(this.settings.strikeEnabled ? [['reticle', 'Deep Strike', 'find the defences · plan the package · fly it', () => this.newDocument('strike')]] : []),
       ]],
     ];
     const list = h('div', { class: 'file-list tools-list' });
@@ -82,7 +84,7 @@ export class PanelsPart {
     // the sortie flying right now isn't in the totals until it ends
     if (this.settings.tomcatEnabled && this._flight) this._flight.then((f) => {
       const g = f.game;
-      const sub = list.querySelector('.tools-row:last-child .tools-sub');
+      const sub = list.querySelector('.tools-tomcat .tools-sub');
       if (g && !g.gameOver && sub && this.panel === 'tools') sub.textContent = this.splashLine(g.splashes);
     }).catch(() => {});
     p.append(h('div', { class: 'panel-head' }, 'Toolbox', h('div', { class: 'grow' }),

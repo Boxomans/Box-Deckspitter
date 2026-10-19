@@ -5,7 +5,7 @@ import { h } from '../../core/dom.js';
 import {
   F14_PATH, PANEL_W, BSCOPE_SIZE, MARGIN, RADAR_RANGE_KM, KILL_RANGE_KM, DOGFIGHT_S, DOGFIGHT_COUNTDOWN,
   DOGFIGHT_CLICKS, MACH1_KMPS, OWN_SPEED, PLAYER_ALT_FT, MIN_ALT_M, MAX_ALT_M, M_TO_FT, KTS_PER_KMPS, KM_PER_NM,
-  AZ_LIMIT, KILL_RADIUS_KM, MONO, MISSILES, HOSTILE_MISSILES, INCOME, BOUNTY, NOTCH_HOLD, JINK_KM, AGILITY,
+  AZ_LIMIT, KILL_RADIUS_KM, MONO, MISSILES, HOSTILE_MISSILES, INCOME, BOUNTY, veteranPay, NOTCH_HOLD, JINK_KM, AGILITY,
   overshootChance, dudChance, speedsFor, MAGAZINE_STEP, BANDIT_TYPES, H20, H20_FAINT_KM, H20_COLOR, DRONE_AMMO,
   DRONE_RELOAD, DRONE_GAP, GOOSE_PATH, GOOSE_NOSE, rand, rad, clamp, inRect, angNorm, shortCode, clock,
 } from './data.js';
@@ -346,7 +346,7 @@ export class TomcatGame {
     const pay = 1 + 0.15 * this.heat();
     const [pts, base] = (BOUNTY[what] || [50, 5]).map((n) => Math.round(n * pay));
     const favor = this.best().perks?.favor || 0;
-    const cash = Math.max(1, Math.round(INCOME * base * (1 + 0.1 * (this.upgrades().contracts || 0)) * (1 + 0.1 * favor)));
+    const cash = Math.max(1, Math.round(INCOME * base * (1 + 0.1 * (this.upgrades().contracts || 0)) * (1 + 0.1 * favor) * veteranPay(this.best().playTime)));
     this.score += pts;
     this.earned += cash;
     this.onEarn?.(cash);

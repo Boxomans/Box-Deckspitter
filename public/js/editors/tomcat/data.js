@@ -38,6 +38,8 @@ export const HOSTILE_MISSILES = {
 };
 // points and $ per kill
 export const INCOME = 0.5; // $ per kill is half the bounty below
+/** Hours in the air pay: +25% $ per kill for every 100 hours logged (playTime is in seconds). */
+export const veteranPay = (playTime) => 1 + 0.25 * Math.floor((playTime || 0) / 360000);
 export const BOUNTY = { 'J-11': [100, 10], 'J-36': [150, 15], 'H-20': [2000, 200], 'PL-15': [50, 5], 'PL-21': [80, 8] };
 export const NOTCH_HOLD = 5; // seconds without firing after a notch
 // missiles don't always kill: a target breaks hard as one closes in (the seeker has to out-turn it), and a fuse can dud

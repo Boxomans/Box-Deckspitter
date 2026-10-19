@@ -81,7 +81,7 @@ export class DumpsPart {
     h('div', { class: 'explorer-path' },
       h('button', { class: 'icon-btn', 'data-tip': 'Up one folder (Mouse 4)', disabled: !sub, onclick: () => again(parts.slice(0, -1).join('/')) }, icon('arrow-up', 'sm')),
       crumbs),
-    h('div', { class: 'dump-panel-hint faint' }, 'Shift+drag to carry or move into a folder · Ctrl+right-click sends to the open tool'),
+    h('div', { class: 'dump-panel-hint faint' }, 'Right-click copies · Shift+right-click for more · Shift+drag to carry or move into a folder · Ctrl+right-click sends to the open tool'),
     body);
     const remove = async (items) => {
       for (const it of items) { try { await api.dumpRemove(it.name, kind); } catch (e) { errorToast(e, it.base || it.name); } }
@@ -147,7 +147,7 @@ export class DumpsPart {
     for (const it of items) {
       const thumb = it.type === 'image' ? h('img', { class: 'fr-thumb', src: it.url, alt: '', loading: 'lazy', draggable: 'false' })
         : icon(it.type === 'video' ? 'video' : it.type === 'audio' ? 'music' : iconForName(it.base), 'sm');
-      const row = h('button', { class: 'file-row dump-row', title: `${it.base}\n${formatBytes(it.size)} · added ${timeAgo(it.mtime)}\nDouble-click to open · Shift+drag to carry · Ctrl+right-click to send to the open tool` },
+      const row = h('button', { class: 'file-row dump-row', title: `${it.base}\n${formatBytes(it.size)} · added ${timeAgo(it.mtime)}\nDouble-click to open · Right-click: copy · Shift+right-click: more · Shift+drag to carry · Ctrl+right-click to send to the open tool` },
         h('span', { class: 'fr-icon' }, thumb),
         h('span', { class: 'fr-name' }, it.base),
         h('span', { class: 'fr-meta' }, formatBytes(it.size)));
@@ -155,12 +155,21 @@ export class DumpsPart {
       hoverKeys(row, { nameEl: row.querySelector('.fr-name'), value: () => it.base, selectBase: true, commit: (n) => rename(it, n),
         remove: () => remove(row.classList.contains('picked') && picker.picked().length > 1 ? picker.picked() : [it]) });
       row.addEventListener('dblclick', () => this.openPath(it.path));
-      row.addEventListener('contextmenu', (e) => contextMenu(e, [
+      const copyFile = () => api.dumpClip(it.name, kind).then(() => toast(`Copied ${it.base}`, { type: 'ok', timeout: 1500 }), errorToast);
+      // right-click copies the file, like the dump docked in the editors; Shift+right-click for everything else
+      row.addEventListener('contextmenu', (e) => {
+        if (e.shiftKey) return;
+        e.preventDefault();
+        row.classList.add('copied');
+        setTimeout(() => row.classList.remove('copied'), 600);
+        copyFile();
+      });
+      row.addEventListener('contextmenu', (e) => e.shiftKey && contextMenu(e, [
         { label: 'Open', icon: 'file', action: () => this.openPath(it.path) },
         { label: 'Send to the open tool', icon: 'send', shortcut: 'Ctrl+right-click', action: () => this.sendToActive([it.path]) },
         ...this.videoEditorMenu([it.path]),
         { sep: true },
-        { label: 'Copy as file', icon: 'copy', action: () => api.dumpClip(it.name, kind).then(() => toast(`Copied ${it.base}`, { type: 'ok', timeout: 1500 }), errorToast) },
+        { label: 'Copy as file', icon: 'copy', shortcut: 'Right-click', action: copyFile },
         { label: 'Copy path', icon: 'link', action: () => navigator.clipboard.writeText(it.path) },
         { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { if (!renameInline(row)) promptDialog('Rename', 'New name', it.base, { selectBase: true }).then((n) => n && rename(it, n).catch(errorToast)); } },
         { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(kind, it.name) },

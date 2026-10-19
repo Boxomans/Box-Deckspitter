@@ -148,7 +148,7 @@ export class MapView {
   label(text, x, y, color = COL.text, { dx = 8, dy = 0, align = 'left', font = '11px ui-monospace, Consolas, monospace' } = {}) {
     const { ctx } = this;
     ctx.font = font; ctx.textAlign = align; ctx.textBaseline = 'middle';
-    const px = this.sx(x) + dx, py = this.sy(y) + dy;
+    const px = Math.round(this.sx(x) + dx), py = Math.round(this.sy(y) + dy); // whole pixels: small text shimmers when panned otherwise
     ctx.lineWidth = 3; ctx.strokeStyle = COL.halo; ctx.strokeText(text, px, py);
     ctx.fillStyle = color; ctx.fillText(text, px, py);
     ctx.textAlign = 'left';

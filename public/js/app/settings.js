@@ -156,6 +156,7 @@ export class SettingsPart {
         this.mailSettings(),
         this.discordSettings(),
         this.aiSettings(),
+        this.gameSettings(),
         this.easterEggSettings(),
         h('div', { class: 'settings-group' }, h('h4', {}, 'About'),
           h('span', { class: 'dim mono', style: { fontSize: '11px' } }, `v${window.BDS?.version} · data folder: Box-Deckspitter\\data`)),
