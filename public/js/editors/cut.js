@@ -6,7 +6,7 @@
 // list and the timeline; files from the Files / BoxSpaces / recents panels come in by Shift+drag.
 
 import { BaseEditor } from './base.js';
-import { h, clear, clamp, basename, extOf, stripExt, uid, dirname, formatBytes } from '../core/dom.js';
+import { h, clear, clamp, basename, extOf, stripExt, uid, dirname, formatBytes, fileManager } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { tbButton, tbSep, toast, errorToast, contextMenu, modal, promptDialog, hoverKeys, PATHS_MIME, draggedPaths, setDraggedPaths, popover } from '../core/ui.js';
 import { api } from '../core/api.js';
@@ -388,7 +388,7 @@ export class CutEditor extends BaseEditor {
     parts.forEach((part, i) => crumbs.append(h('span', { class: 'faint' }, '/'), crumb(part, parts.slice(0, i + 1).join('/'))));
     const G = clear(this.dumpGrid);
     if (!folders.length && !items.length) {
-      G.append(h('div', { class: 'cut-empty' }, sub ? 'Empty folder. Drop videos, sounds and pictures here.' : 'The media dump is empty. Drop videos, sounds and pictures here — from Explorer, the media list, the timeline, or Shift+drag from Files — or export straight into it.'));
+      G.append(h('div', { class: 'cut-empty' }, sub ? 'Empty folder. Drop videos, sounds and pictures here.' : `The media dump is empty. Drop videos, sounds and pictures here — from ${fileManager()}, the media list, the timeline, or Shift+drag from Files — or export straight into it.`));
       return;
     }
     for (const f of folders) {
@@ -399,7 +399,7 @@ export class CutEditor extends BaseEditor {
       card.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Open', icon: 'folder-open', action: () => this.openDumpFolder(f.name) },
         { label: 'Rename…', icon: 'edit', action: async () => { const n = await promptDialog('Rename folder', 'New name', f.base); if (n && n !== f.base) { try { await api.dumpRename(f.name, n, 'media'); this.refreshDump(true); } catch (err) { errorToast(err); } } } },
-        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('media', f.name) },
+        { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.dumpReveal('media', f.name) },
         { sep: true },
         { label: 'Remove folder', icon: 'trash', action: async () => { try { await api.dumpRemove(f.name, 'media'); toast(`Moved ${f.base} to media-dump${BDS.sep}.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
       ]));
@@ -432,7 +432,7 @@ export class CutEditor extends BaseEditor {
         { sep: true },
         { label: 'Copy as file', icon: 'copy', action: () => api.dumpClip(it.name, 'media').then(() => toast(`Copied ${it.base}`, { type: 'ok', timeout: 1500 }), errorToast) },
         { label: 'Rename…', icon: 'edit', action: async () => { const n = await promptDialog('Rename', 'New name', it.base, { selectBase: true }); if (n && n !== it.base) { try { await api.dumpRename(it.name, extOf(n) ? n : `${n}.${extOf(it.base)}`, 'media'); this.refreshDump(true); } catch (err) { errorToast(err); } } } },
-        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('media', it.name) },
+        { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.dumpReveal('media', it.name) },
         ...(sub ? [{ label: 'Move up a folder', icon: 'arrow-up', action: () => api.dumpMove([it.name], parts.slice(0, -1).join('/'), 'media').then(() => this.refreshDump(true), errorToast) }] : []),
         { sep: true },
         { label: 'Remove from the dump', icon: 'trash', action: async () => { try { await api.dumpRemove(it.name, 'media'); toast(`Moved ${it.base} to media-dump${BDS.sep}.removed`, { timeout: 2500 }); this.refreshDump(true); } catch (err) { errorToast(err); } } },
@@ -762,7 +762,7 @@ export class CutEditor extends BaseEditor {
       const id = e.dataTransfer.getData('text/bds-media');
       if (id) { const m = this.media(id); if (m) this.placeMedia(m, this.fits(lane?.dataset.track, m), at); return; }
       const paths = await this.dropPaths(e);
-      if (!paths.length && e.dataTransfer.files.length) return toast('Use the + button to add files here (drag-and-drop from Explorer works in the app window).', { type: 'warn' });
+      if (!paths.length && e.dataTransfer.files.length) return toast(`Use the + button to add files here (drag-and-drop from ${fileManager()} works in the app window).`, { type: 'warn' });
       await this.placePaths(paths, lane?.dataset.track, at);
     });
     // the media list takes files; the media dump (its tab, or the open dump) keeps copies

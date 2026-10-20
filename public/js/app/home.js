@@ -129,10 +129,20 @@ export class HomePart {
     this.updateStatus(this.active);
   }
 
+  /** Name a tool (an empty name or its own puts the original back), from its home card or its Toolbox row: both
+   *  show the same name, and toolRenamed updates every place that shows it. */
+  setToolName(key, n) {
+    const was = this.toolName(key);
+    const next = { ...(this.settings.cardNames || {}) };
+    if (!n?.trim() || n.trim() === key) delete next[key]; else next[key] = n.trim();
+    this.saveSettings({ cardNames: next });
+    this.toolRenamed(key, was);
+  }
+
   /** A home screen card. Hover + F2 renames it (saved in settings); Ctrl+F2 puts the original name back. */
   homeCard(ic, title, sub) {
     const names = this.settings.cardNames || {};
-    const nameEl = h('span', { class: 'nc-title' }, names[title] || title);
+    const nameEl = h('span', { class: 'nc-title', dataset: { toolname: title } }, names[title] || title);
     const subs = this.settings.cardSubs || {};
     const subEl = h('span', { class: 'nc-sub' }, subs[title] || sub);
     const card = h('button', { class: 'new-card', dataset: { key: title }, title: 'F2 to rename · Ctrl+F2 to reset · drag to reorder (hover the small line to change that instead)' }, h('span', { class: 'nc-icon' }, icon(ic, 'lg')), nameEl, subEl);
@@ -149,16 +159,9 @@ export class HomePart {
     });
     hoverKeys(card, {
       nameEl,
-      value: () => (this.settings.cardNames || {})[title] || title,
-      commit: (n) => {
-        const was = this.toolName(title);
-        const next = { ...(this.settings.cardNames || {}) };
-        if (!n.trim() || n.trim() === title) delete next[title]; else next[title] = n.trim();
-        this.saveSettings({ cardNames: next });
-        nameEl.textContent = next[title] || title;
-        this.toolRenamed(title, was);
-      },
-      reset: () => { const was = this.toolName(title); const next = { ...(this.settings.cardNames || {}) }; delete next[title]; this.saveSettings({ cardNames: next }); nameEl.textContent = title; this.toolRenamed(title, was); },
+      value: () => this.toolName(title),
+      commit: (n) => this.setToolName(title, n),
+      reset: () => this.setToolName(title, ''),
     });
     return card;
   }

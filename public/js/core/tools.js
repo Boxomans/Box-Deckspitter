@@ -1,6 +1,8 @@
 // Every editor and tool in one place. Adding a tool: one entry in TOOLS (and its editor file, an icon in icons.js and
 // a line in presence.js). Everything else (home cards, the Toolbox, tabs, menus, names, icons) reads from here.
 
+import { hostIsWindows } from './dom.js';
+
 /** The editors behind each tab mode, loaded the first time one opens. */
 const DOC_EDITORS = {
   doc: () => import('../editors/doc.js').then((m) => m.DocEditor),
@@ -57,7 +59,7 @@ export const TOOLS = [
   { mode: 'log', name: 'BoxLog', icon: 'logs', rename: true, tab: true, kind: true, single: true,
     editor: () => import('../editors/log.js').then((m) => m.LogEditor), toolbox: 'every log on the pc · games · filters · live' },
   { mode: 'terminal', name: 'BoxTerminal', icon: 'terminal', rename: true, tab: true, kind: true,
-    editor: () => import('../editors/terminal.js').then((m) => m.TerminalEditor), toolbox: 'powershell · cmd · history' },
+    editor: () => import('../editors/terminal.js').then((m) => m.TerminalEditor), get toolbox() { return hostIsWindows() ? 'powershell · cmd · history' : 'bash · history'; } },
   { mode: 'scribe', name: 'BoxScribe', icon: 'scan-text', rename: true, tab: true, kind: true, single: true,
     editor: () => import('../editors/scribe.js').then((m) => m.ScribeEditor), home: { icon: 'scan-text', sub: 'image → text · offline ocr' } },
   { mode: 'diff', name: 'BoxDiff', icon: 'diff', rename: true, tab: true, kind: true,
@@ -76,6 +78,8 @@ export const TOOLS = [
     editor: () => import('../editors/weather.js').then((m) => m.WeatherEditor), toolbox: 'now · next 24 hours · 7 days' },
   { mode: 'todo', name: 'Todo', icon: 'list-check', rename: true, tab: true, kind: true, single: true,
     editor: () => import('../editors/todo.js').then((m) => m.TodoEditor), toolbox: 'lists · due dates · stars' },
+  { mode: 'saver', name: 'BoxSaver', icon: 'saver', rename: true, tab: true, kind: true, single: true,
+    editor: () => import('../editors/saver.js').then((m) => m.SaverEditor), toolbox: 'screensaver studio · layers · your own code' },
   { mode: 'tomcat', name: 'F-14F Super Tomcat', icon: 'f14', tab: true, single: true,
     editor: () => import('../editors/tomcat.js').then((m) => m.TomcatEditor) },
   { mode: 'strike', name: 'Deep Strike', icon: 'reticle', tab: true, single: true,

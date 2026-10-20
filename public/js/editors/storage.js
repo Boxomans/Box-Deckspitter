@@ -1,7 +1,7 @@
 // StoragePeek — drive usage at a glance, then scan a drive or folder to see what's eating space.
 
 import { BaseEditor } from './base.js';
-import { h, clear, formatBytes, basename, dirname } from '../core/dom.js';
+import { h, clear, formatBytes, basename, dirname, fileManager } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { contextMenu, toast, errorToast } from '../core/ui.js';
 import { api } from '../core/api.js';
@@ -223,7 +223,7 @@ export class StorageEditor extends BaseEditor {
     if (!it.path) return [{ label: 'Files smaller than 1 MB in this folder', disabled: true }];
     return [
       ...(it.isDir ? [{ label: 'Drill in', icon: 'arrow-down', action: () => this.show(it.path) }, { label: 'Open as BoxSpace', icon: 'spaces', action: () => this.app.openSpace(it.path) }] : [{ label: 'Open', icon: 'file', action: () => this.app.openPath(it.path) }]),
-      { label: 'Show in Explorer', icon: 'external', action: () => api.reveal(it.path) },
+      { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.reveal(it.path) },
       { label: 'Copy path', icon: 'copy', action: () => { navigator.clipboard.writeText(it.path); toast('Copied', { timeout: 1200 }); } },
       { sep: true },
       it.off

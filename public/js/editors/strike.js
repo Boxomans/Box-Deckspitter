@@ -6,10 +6,10 @@
 import { BaseEditor } from './base.js';
 import { h, clear } from '../core/dom.js';
 import { confirmDialog, toast } from '../core/ui.js';
-import { ALTS, ALT_ORDER, SPEEDS, SPEED_ORDER, DECK_MAX_KMH, AIRCRAFT, AIRCRAFT_ORDER, MUNITIONS, SAMS, SNIFFER, TARGETS, AIRFIELD_RADAR, FIGHTERS, HANGAR_MUNITIONS, untargeted, reach, packageKmh } from './strike/data.js';
-import { Proj, loadWorld, horizon, dist, toSegment, whereIs, zoneAt, doseRate, arcPoint, arcSpan, STORM_S, DEAD_S, THEATRE } from './strike/geo.js';
-import { makeMission, REGIONS, TYPE_NAME, targetName, targetXY, alive, targetHp, lower, isRadar, searchRadars, fcRadars } from './strike/mission.js';
-import { SnifferSim, StrikeSim, DT, CLIMB, DESCEND, climbRate } from './strike/sim.js';
+import { ALTS, ALT_ORDER, SPEEDS, SPEED_ORDER, DECK_MAX_KMH, AIRCRAFT, AIRCRAFT_ORDER, MUNITIONS, SAMS, SNIFFER, TARGETS, AIRFIELD_RADAR, FIGHTERS, HANGAR_MUNITIONS, SHIPS, SHIP_ORDER, SHIP_MAX, SHIP_REFILL, SHIP_STANDOFF, TLAM, shipRefund, untargeted, homes, reach, packageKmh, tanksOn, fuelCap } from './strike/data.js';
+import { Proj, loadWorld, horizon, dist, toSegment, whereIs, zoneAt, doseRate, arcPoint, arcSpan, onSea, STORM_S, DEAD_S, THEATRE } from './strike/geo.js';
+import { makeMission, REGIONS, TYPE_NAME, targetName, targetXY, alive, targetHp, lower, isRadar, searchRadars, fcRadars, objectivesOf, objectiveNo, SMART_RIPPLE, smartTier, smartFits } from './strike/mission.js';
+import { SnifferSim, StrikeSim, DT, CLIMB, DESCEND, climbRate, salvoPlan } from './strike/sim.js';
 import { MapView, COL } from './strike/view.js';
 import { briefing } from './strike/story.js';
 import { Terrain, BIOMES, describe } from './strike/terrain.js';
@@ -31,6 +31,8 @@ const LEG_COL = { deck: '#6fe08a', low: '#5ec8ff', med: '#c9a8ff', high: '#e8eef
 /** Package B's legs, in warm colours so the two routes never get mixed up; its points and jets in orange. */
 const LEG_COL_B = { deck: '#ffd166', low: '#ff9f43', med: '#ff7eb6', high: '#ffd9c2' };
 const B_COL = '#ff9f43';
+/** The fleet's ships and their salvos: teal, apart from both packages. */
+const SHIP_COL = '#4fe3c1';
 const PKG_NAME = ['A', 'B'];
 const RING_COL = { long: COL.enemy, medium: COL.medium, short: COL.short };
 /** Dead zones in yellow, radiation storms in deep purple: a wash, caution stripes and a solid edge. */
@@ -48,6 +50,7 @@ function stripeTile(ctx, col) {
   return (stripes[col] = ctx.createPattern(c, 'repeat'));
 }
 const clone = (o) => JSON.parse(JSON.stringify(o));
+const siteName = (s) => (s.sam ? `${SAMS[s.sam].long} site` : s.name);
 const money = (m) => `$${m >= 10 ? (Math.round(m * 10) / 10).toLocaleString('en-US') : m.toFixed(2)}M`;
 const clock = (s) => `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -146,6 +149,7 @@ export class StrikeEditor extends BaseEditor {
       this.mission = cur.mission;
       this.pkgs = [cur.pkg || [], cur.pkg2 || []];
       this.routes = [cur.route || null, cur.route2 || null];
+      this.ships = (cur.ships || []).filter((d) => this.fleet().some((f) => f.id === d.id));
       this.setPhase(cur.phase === 'brief' ? 'brief' : cur.phase === 'sniffer' ? 'sniffer' : 'mission', { keep: true });
     } else this.newMission();
   }
@@ -157,7 +161,7 @@ export class StrikeEditor extends BaseEditor {
   saveCur() {
     if (!this.mission) return;
     clearTimeout(this.saveT);
-    this.saveT = setTimeout(() => this.save({ cur: { mission: this.plan || this.mission, phase: this.phase === 'strike' || this.phase === 'debrief' ? 'brief' : this.phase, pkg: this.pkgs[0], route: this.routes[0], pkg2: this.pkgs[1], route2: this.routes[1] } }), 400);
+    this.saveT = setTimeout(() => this.save({ cur: { mission: this.plan?.mission || this.mission, phase: this.phase === 'strike' || this.phase === 'debrief' ? 'brief' : this.phase, pkg: this.pkgs[0], route: this.routes[0], pkg2: this.pkgs[1], route2: this.routes[1], ships: this.ships } }), 400);
   }
 
   // ---------------------------------------------------------------- phases
@@ -167,6 +171,7 @@ export class StrikeEditor extends BaseEditor {
     this.mission = makeMission(this.world, this.proj, undefined, type || this.wantType, this.wantRegion, this.wantSize);
     this.pkgs = [[], []];
     this.routes = [null, null];
+    this.ships = [];
     this.active = 0;
     this.plan = null;
     this.setPhase('mission');
@@ -175,6 +180,7 @@ export class StrikeEditor extends BaseEditor {
   setPhase(p, { keep = false } = {}) {
     this.stopLoop();
     this.closePop();
+    this.stopPlacing();
     this.phase = p;
     this.sel = null;
     if (p !== 'debrief') this.sim = null;
@@ -198,9 +204,9 @@ export class StrikeEditor extends BaseEditor {
       this.plan = null;
     }
     if (p === 'strike') {
-      this.plan = clone({ mission: m, pkg: this.pkgs[0], route: this.routes[0], pkg2: this.pkgs[1], route2: this.routes[1] });
+      this.plan = clone({ mission: m, pkg: this.pkgs[0], route: this.routes[0], pkg2: this.pkgs[1], route2: this.routes[1], ships: this.ships });
       this.live = clone(m);
-      this.sim = new StrikeSim(this.live, clone(this.pkgs[0]), this.routes[0], this.terrain, clone(this.pkgs[1]), this.routes[1]);
+      this.sim = new StrikeSim(this.live, clone(this.pkgs[0]), this.routes[0], this.terrain, clone(this.pkgs[1]), this.routes[1], this.deployed());
       for (const f of this.sim.flights) this.routes[f.k] = f.route; // re-routing in flight edits the sim's own copy
       if (!this.sim.flight(this.active) && this.sim.flights[0]) this.active = this.sim.flights[0].k;
       this.sim.onEvent = (e) => this.onEvent(e);
@@ -252,14 +258,15 @@ export class StrikeEditor extends BaseEditor {
     this.useHangarMunitions(s);
     this.loseHangarJets(s);
     this.trimHangarMunitions();
-    this.save({ stats: st, cur: { mission: this.plan.mission, phase: 'brief', pkg: this.plan.pkg, route: this.plan.route, pkg2: this.plan.pkg2 || [], route2: this.plan.route2 || null } });
+    this.useFleet(s);
+    this.save({ stats: st, cur: { mission: this.plan.mission, phase: 'brief', pkg: this.plan.pkg, route: this.plan.route, pkg2: this.plan.pkg2 || [], route2: this.plan.route2 || null, ships: this.plan.ships || [] } });
     const badges = this.awardBadges(r);
     // points for the hangar; a mission already destroyed once pays only for flying it
     const m = this.plan.mission, key = `${m.seed}:${m.type || ''}:${m.region || ''}:${m.size}`, wonList = this.store().wonMissions || [];
     this.earned = strikePoints(r, m.size === 'large', wonList.includes(key), badges);
     const total = this.earned.reduce((n, [, p]) => n + p, 0);
     this.save({ points: this.points() + total, ...(r.won && !wonList.includes(key) ? { wonMissions: [...wonList, key].slice(-200) } : {}) });
-    toast(`+${total} points · ${this.points().toLocaleString('en-US')} to spend in the hangar`, { type: 'ok', timeout: 5000 });
+    toast(`+${total} points · ${this.points().toLocaleString('en-US')} to spend in the hangar and the fleet`, { type: 'ok', timeout: 5000 });
     this.renderTop(); this.renderMenu();
   }
 
@@ -346,15 +353,229 @@ export class StrikeEditor extends BaseEditor {
         h('button', { class: 'ds-btn sm', disabled: pts < A.points, title: 'Shift+click buys without asking', onclick: (e) => this.buyJet(id, e.shiftKey) }, `BUY · ${A.points.toLocaleString('en-US')} pts`));
     });
     return this.section(`HANGAR · ${pts.toLocaleString('en-US')} POINTS`,
-      h('div', { class: 'faint sm' }, 'Strikes earn points: more for destroying the objective and bringing everyone home, double on large missions, and for each new badge. A jet or NGJ pod bought here is kept from mission to mission until it’s lost, a Mako until it’s fired; each mission’s budget still pays for them. Shift+click BUY to skip the question.'),
+      h('div', { class: 'faint sm' }, 'Strikes earn points: more for destroying the objective and bringing everyone home, more again for every other target the jets destroy and fighter shot down along the way, double on large missions, and for each new badge. A jet or NGJ pod bought here is kept from mission to mission until it’s lost, a Mako until it’s fired; each mission’s budget still pays for them. Shift+click BUY to skip the question.'),
       ...rows);
+  }
+
+  // ---------------------------------------------------------------- the fleet: ships bought with points
+
+  /** The ships owned: [{ id, type, name, tlam, sm }] (what's left in their cells). */
+  fleet() { return this.store().fleet || []; }
+  /** This plan's ships at sea, with what the fleet says they carry: for the strike. */
+  deployed() {
+    const fleet = this.fleet();
+    return this.ships.map((d) => { const f = fleet.find((x) => x.id === d.id); return f && { id: d.id, type: f.type, nm: f.name, x: d.x, y: d.y, tlam: f.tlam, sm: f.sm, salvos: clone(d.salvos) }; }).filter(Boolean);
+  }
+  refreshAll() { this.renderPanel(); this.renderMenu(); this.view.request(); this.saveCur(); }
+
+  async buyShip(type, quick = false) {
+    const S = SHIPS[type];
+    if (this.points() < S.points || this.fleet().length >= SHIP_MAX) return;
+    if (!quick && !(await confirmDialog(`Buy a ${S.name}?`, `${S.points.toLocaleString('en-US')} of your ${this.points().toLocaleString('en-US')} points. It comes with full launch cells (${S.tlam} Tomahawks, ${S.sm} ${S.missile.name}s) and stays in the fleet until you sell it, for half its price back.`, { okLabel: 'Buy' }))) return;
+    const no = (this.store().shipNo || 0) + 1, name = `${S.short} ${no}`;
+    this.save({ points: this.points() - S.points, shipNo: no, fleet: [...this.fleet(), { id: `ship${no}`, type, name, tlam: S.tlam, sm: S.sm }] });
+    toast(`${name} joins the fleet: put it to sea in the briefing (FLEET in the side panel)`, { type: 'ok', timeout: 6000 });
+    this.refreshAll();
+  }
+
+  async sellShip(id) {
+    const f = this.fleet().find((x) => x.id === id);
+    if (!f) return;
+    const back = shipRefund(f.type);
+    if (!(await confirmDialog(`Sell ${f.name}?`, `${back.toLocaleString('en-US')} points back, half its price. The missiles still in its cells go with it.`, { okLabel: 'Sell', danger: true }))) return;
+    this.save({ points: this.points() + back, fleet: this.fleet().filter((x) => x.id !== id) });
+    this.ships = this.ships.filter((d) => d.id !== id);
+    toast(`${f.name} sold: +${back} points`, { type: 'ok', timeout: 5000 });
+    this.refreshAll();
+  }
+
+  /** Refill a ship's Tomahawks or Standard missiles (kind 'tlam' | 'sm'): as many as the points pay for, up to full. */
+  refill(id, kind) {
+    const fleet = this.fleet().map((x) => ({ ...x })), f = fleet.find((x) => x.id === id);
+    const n = f ? Math.min(SHIPS[f.type][kind] - f[kind], Math.floor(this.points() / SHIP_REFILL[kind])) : 0;
+    if (n <= 0) return;
+    f[kind] += n;
+    this.save({ points: this.points() - n * SHIP_REFILL[kind], fleet });
+    this.refreshAll();
+  }
+
+  /** What the strike's ships fired is gone from their cells. */
+  useFleet(s) {
+    if (!s.ships?.length) return;
+    this.save({ fleet: this.fleet().map((f) => {
+      const sh = s.ships.find((x) => x.id === f.id);
+      return sh ? { ...f, tlam: Math.max(0, f.tlam - sh.used.tlam), sm: Math.max(0, f.sm - sh.used.sm) } : f;
+    }) });
+  }
+
+  /** FLEET (the menu): buy a destroyer or a cruiser, refill their cells, sell them. */
+  fleetSection() {
+    const pts = this.points(), fleet = this.fleet(), full = fleet.length >= SHIP_MAX, n = (v) => v.toLocaleString('en-US');
+    const shipTip = (S) => [S.name, `${S.cells} launch cells: ${S.tlam} Tomahawks, ${S.sm} ${S.missile.name}s`,
+      `${S.radar.name} radar ${S.radar.km} km · ${S.missile.name} ${S.missile.km} km · ${S.ch} missiles guided at once`].join('\n');
+    const buy = SHIP_ORDER.map((type) => {
+      const S = SHIPS[type];
+      return h('div', { class: 'ds-kv ds-hangar on', title: shipTip(S) },
+        h('span', {}, `${S.short} · ${S.name}`, h('div', { class: 'faint sm' }, `${S.tlam} TLAM · ${S.sm} ${S.missile.name} (${S.missile.km} km)`)),
+        h('button', { class: 'ds-btn sm', disabled: pts < S.points || full, title: full ? `${SHIP_MAX} ships at most: sell one first` : 'Shift+click buys without asking', onclick: (e) => this.buyShip(type, e.shiftKey) }, `BUY · ${n(S.points)} pts`));
+    });
+    const own = fleet.map((f) => {
+      const S = SHIPS[f.type];
+      const fill = (kind, label) => {
+        const want = S[kind] - f[kind], can = Math.min(want, Math.floor(pts / SHIP_REFILL[kind]));
+        return h('button', { class: 'ds-btn sm', disabled: can <= 0, title: want ? `${SHIP_REFILL[kind]} points a missile${can < want ? `: your points cover ${can} of the ${want}` : ''}` : 'Full' },
+          want ? `REFILL ${label} · ${n(can * SHIP_REFILL[kind])} pts` : `${label} FULL`);
+      };
+      const tl = fill('tlam', 'TLAM'), sm = fill('sm', 'SM');
+      tl.addEventListener('click', () => this.refill(f.id, 'tlam'));
+      sm.addEventListener('click', () => this.refill(f.id, 'sm'));
+      return h('div', { class: 'ds-jet', title: shipTip(S) },
+        h('div', { class: 'ds-jet-h' }, h('b', { style: { color: SHIP_COL } }, `${f.name} · ${S.name}`)),
+        h('div', { class: 'ds-kv' }, h('span', {}, 'Tomahawks'), h('b', { class: f.tlam ? '' : 'bad' }, `${f.tlam} / ${S.tlam}`)),
+        h('div', { class: 'ds-kv' }, h('span', {}, `${S.missile.name}s`), h('b', { class: f.sm ? '' : 'bad' }, `${f.sm} / ${S.sm}`)),
+        h('div', { class: 'ds-row' }, tl, sm, h('div', { class: 'grow' }),
+          h('button', { class: 'ds-btn sm', title: 'Half its price back', onclick: () => this.sellShip(f.id) }, `SELL · +${n(shipRefund(f.type))} pts`)));
+    });
+    return this.section(`FLEET · ${n(pts)} POINTS`,
+      h('div', { class: 'faint sm' }, `Ships, ${SHIP_MAX} at most, bought with points and kept from mission to mission. Each comes with full launch cells. In the briefing, put one to sea (FLEET in the side panel, then click the map): open sea joined to the ocean (the Black Sea and the Baltic count, lakes and the Caspian don’t), at least ${SHIP_STANDOFF} km from every enemy site you know of.`),
+      h('div', { class: 'faint sm' }, `Its Standard missiles shoot at enemy fighters within reach once the defences are awake or the fighters give chase: lead a patrol over the ship. Its Tomahawks go in salvos at a whole site, enough at every part of it to destroy it, at a time you plan or when you fire them during the strike. Targets they destroy earn no points. What a ship fires is gone until you refill it: ${SHIP_REFILL.tlam} points a Tomahawk, ${SHIP_REFILL.sm} a Standard missile.`),
+      ...buy,
+      h('div', { class: 'ds-h2' }, `YOUR SHIPS (${fleet.length} of ${SHIP_MAX})`),
+      ...(fleet.length ? own : [h('div', { class: 'faint' }, 'None yet.')]));
+  }
+
+  // ---- ships in the briefing
+
+  /** Why a ship can't go here, or null if it can. */
+  shipSpot(x, y) {
+    if (!onSea(this.world, this.proj, x, y)) return 'Ships go on open sea joined to the ocean: not on land, a lake or the Caspian.';
+    const m = this.mission, near = Math.min(Infinity, ...m.sites.filter((s) => m.known[s.id]).map((s) => dist(s, { x, y })));
+    return near < SHIP_STANDOFF ? `Too close to the enemy: ships stay ${SHIP_STANDOFF} km from every site you know of (that’s ${Math.round(near)} km from one).` : null;
+  }
+
+  startPlacing(id) {
+    this.placing = id;
+    this.placeKey ||= (e) => { if (e.key === 'Escape') { this.stopPlacing(); this.renderPanel(); this.view.request(); } };
+    addEventListener('keydown', this.placeKey);
+    this.renderPanel(); this.view.request();
+  }
+  stopPlacing() { this.placing = null; if (this.placeKey) removeEventListener('keydown', this.placeKey); }
+
+  placeShip(id, x, y) {
+    const why = this.shipSpot(x, y);
+    if (why) { toast(why, { type: 'warn', timeout: 6000 }); return; }
+    const d = this.ships.find((s) => s.id === id);
+    if (d) Object.assign(d, { x, y }); else this.ships.push({ id, x, y, salvos: [] });
+    this.stopPlacing();
+    this.changed();
+  }
+
+  /** Drag a ship on the map: back where it was if it's let go somewhere it can't be. */
+  dragShip(e, r, id) {
+    const c = this.canvas, d = this.ships.find((s) => s.id === id), was = { x: d.x, y: d.y };
+    let moved = false;
+    c.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
+      moved = true;
+      d.x = this.view.wx(ev.clientX - r.left); d.y = this.view.wy(ev.clientY - r.top);
+      this.view.request();
+    };
+    const up = () => {
+      c.removeEventListener('pointermove', move); c.removeEventListener('pointerup', up);
+      if (!moved) return;
+      const why = this.shipSpot(d.x, d.y);
+      if (why) { Object.assign(d, was); toast(why, { type: 'warn', timeout: 6000 }); }
+      this.changed();
+    };
+    c.addEventListener('pointermove', move);
+    c.addEventListener('pointerup', up);
+  }
+
+  /** Tomahawks a salvo at this site takes, as the plan sees it (every part of it standing). */
+  salvoCount(siteId) { const s = this.mission.sites.find((x) => x.id === siteId); return s ? salvoPlan(s).reduce((n, [, k]) => n + k, 0) : 0; }
+  tlamTime(from, s) { return (dist(from, s) / TLAM.kmh) * 3600; }
+  /** A new salvo's launch time: landing with the first weapon the packages put on that site, or else at take-off. */
+  salvoTime(d, siteId) {
+    const s = this.mission.sites.find((x) => x.id === siteId);
+    const hits = [0, 1].flatMap((k) => this.shots(k)).filter((sh) => sh.siteId === siteId).map((sh) => sh.hits);
+    return hits.length ? Math.max(0, Math.round((Math.min(...hits) - this.tlamTime(d, s)) / 60) * 60) : 0;
+  }
+
+  /** FLEET (briefing): each ship, put to sea or not, and its planned salvos. */
+  fleetPlanSection() {
+    const fleet = this.fleet();
+    if (!fleet.length) return null;
+    return this.section(h('span', { style: { color: SHIP_COL } }, `FLEET (${this.ships.length} of ${fleet.length} at sea)`),
+      h('div', { class: 'faint sm' }, this.placing ? 'Click the sea to put the ship there (Esc to stop).' : `Put a ship to sea, then plan its Tomahawk salvos: each goes at a whole site at the minute you set. Drag a ship on the map to move it. The ring round it is where its missiles reach enemy fighters.`),
+      ...fleet.map((f) => this.shipCard(f)));
+  }
+
+  shipCard(f) {
+    const S = SHIPS[f.type], d = this.ships.find((x) => x.id === f.id), m = this.mission, placing = this.placing === f.id;
+    const head = h('div', { class: 'ds-jet-h' }, h('b', { style: { color: SHIP_COL }, title: S.name }, f.name), h('span', { class: 'faint' }, `${f.tlam} TLAM · ${f.sm} ${S.missile.name}`));
+    const place = (label) => h('button', { class: `ds-btn sm${placing ? ' on' : ''}`, onclick: () => (placing ? (this.stopPlacing(), this.renderPanel(), this.view.request()) : this.startPlacing(f.id)) }, placing ? 'CLICK THE SEA…' : label);
+    if (!d) return h('div', { class: 'ds-jet' }, head, h('div', { class: 'ds-row' }, place('PUT TO SEA')));
+    return h('div', { class: 'ds-jet' }, head,
+      ...d.salvos.map((sv, i) => this.salvoRow(d, sv, i)),
+      h('div', { class: 'ds-row' },
+        h('button', { class: 'ds-btn sm', disabled: !f.tlam, title: f.tlam ? 'A salvo at a site, at a time you set' : 'No Tomahawks left: refill them in the menu’s FLEET tab', onclick: () => {
+          const o = objectivesOf(m).find((x) => !d.salvos.some((sv) => sv.site === x.site)) || m.objective;
+          d.salvos.push({ site: o.site, t: this.salvoTime(d, o.site) });
+          this.changed();
+        } }, '+ TLAM SALVO'),
+        place('MOVE'),
+        h('button', { class: 'ds-btn sm', onclick: () => { this.ships = this.ships.filter((x) => x !== d); this.changed(); } }, 'BACK TO PORT')));
+  }
+
+  salvoRow(d, sv, i) {
+    const m = this.mission, objSites = new Set(objectivesOf(m).map((o) => o.site));
+    const sel = h('select', { class: 'ds-sel sm grow' }, ...m.sites.filter((s) => m.known[s.id]).map((s) => h('option', { value: s.id }, `${objSites.has(s.id) ? '★ ' : ''}${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`)));
+    sel.value = sv.site;
+    sel.addEventListener('change', () => { sv.site = sel.value; this.changed(); });
+    const min = h('input', { type: 'number', class: 'ds-num', min: 0, step: 1, value: String(Math.round(sv.t / 60)), title: 'Minutes after take-off' });
+    min.addEventListener('change', () => { sv.t = Math.max(0, Math.round(+min.value || 0)) * 60; this.changed(); });
+    const s = m.sites.find((x) => x.id === sv.site);
+    return h('div', { class: 'ds-salvo' }, h('div', { class: 'ds-st' }, sel, h('button', { class: 'ds-x', title: 'Cancel this salvo', onclick: () => { d.salvos.splice(i, 1); this.changed(); } }, '×')),
+      h('div', { class: 'ds-st' }, h('span', { class: 'faint sm' }, 'Away at minute'), min,
+        h('span', { class: 'faint sm' }, `· ${this.salvoCount(sv.site)} TLAM · lands ${s ? clock(sv.t + this.tlamTime(d, s)) : '–'}`)));
+  }
+
+  /** The planned salvos as timing rows (like shots()): [{ jet, short, n, ship, away, hits, what }]. */
+  salvoShots() {
+    const fleet = this.fleet();
+    return this.ships.flatMap((d) => {
+      const f = fleet.find((x) => x.id === d.id);
+      return f ? d.salvos.map((sv) => {
+        const s = this.mission.sites.find((x) => x.id === sv.site);
+        return s && { jet: f.name, short: 'TLAM', n: this.salvoCount(sv.site), ship: true, away: sv.t, hits: sv.t + this.tlamTime(d, s), what: `the ${siteName(s)}` };
+      }).filter(Boolean) : [];
+    });
+  }
+
+  /** FLEET (strike): what each ship has left, the salvos still to go, and one fired now at a picked site. */
+  fleetLiveSection() {
+    const s = this.sim, m = this.live;
+    if (!s.ships?.length) return null;
+    this.fireAt ||= {};
+    return this.section(h('span', { style: { color: SHIP_COL } }, 'FLEET'), ...s.ships.map((sh) => {
+      const sel = h('select', { class: 'ds-sel sm grow', onpointerdown: () => { this.pickT = performance.now(); } },
+        ...m.sites.filter((x) => m.known[x.id]).map((x) => h('option', { value: x.id }, `${objectivesOf(m).some((o) => o.site === x.id) ? '★ ' : ''}${x.sam ? SAMS[x.sam].long : x.name}`)));
+      sel.value = this.fireAt[sh.id] || m.objective.site;
+      sel.addEventListener('change', () => { this.fireAt[sh.id] = sel.value; this.pickT = 0; });
+      const left = sh.salvos.filter((sv) => !sv.fired);
+      return h('div', { class: 'ds-jet' },
+        h('div', { class: 'ds-jet-h' }, h('b', { style: { color: SHIP_COL } }, sh.nm), h('span', { class: 'faint' }, `${sh.tlam} TLAM · ${sh.sm} ${sh.S.missile.name}`)),
+        ...left.map((sv) => h('div', { class: 'faint sm' }, `Salvo at ${clock(sv.t)}: the ${siteName(s.site[sv.site])}`)),
+        s.done || !sh.tlam ? null : h('div', { class: 'ds-st' }, sel, h('button', { class: 'ds-btn sm', title: 'A salvo at that site now', onclick: () => { s.fireSalvo(sh.id, sel.value); this.renderPanel(); this.view.request(); } }, 'FIRE NOW')));
+    }));
   }
 
   /** Levels and feats this strike earned: saved, and a toast for each. */
   awardBadges(r) {
     const got = { ...(this.store().badges || {}) };
     const lv = levelList({ ...this.store(), badges: got }).filter((b) => !b.earned && b.have >= b.goal);
-    const ft = FEATS.filter((f) => !got[f.id] && f.test(r));
+    const ft = r.jets ? FEATS.filter((f) => !got[f.id] && f.test(r)) : []; // a strike by the ships alone earns no feats
     if (!lv.length && !ft.length) return 0;
     for (const b of [...lv, ...ft]) got[b.id] = Date.now();
     this.save({ badges: got });
@@ -399,9 +620,9 @@ export class StrikeEditor extends BaseEditor {
     const tab = (id, label) => h('button', { class: `ds-btn sm${this.menuTab === id ? ' on' : ''}`, onclick: () => { this.menuTab = id; this.renderMenu(); } }, label);
     const top = this.menu.scrollTop;
     clear(this.menu).append(
-      h('div', { class: 'ds-menu-h' }, tab('hangar', 'HANGAR'), tab('badges', 'BADGES'), h('div', { class: 'grow' }),
+      h('div', { class: 'ds-menu-h' }, tab('hangar', 'HANGAR'), tab('fleet', 'FLEET'), tab('badges', 'BADGES'), h('div', { class: 'grow' }),
         h('button', { class: 'ds-x', title: 'Close (Esc)', onclick: () => this.closeMenu() }, '×')),
-      this.menuTab === 'badges' ? this.badgeSection() : this.hangarSection());
+      this.menuTab === 'badges' ? this.badgeSection() : this.menuTab === 'fleet' ? this.fleetSection() : this.hangarSection());
     this.menu.scrollTop = top;
     this.renderTop();
   }
@@ -458,18 +679,15 @@ export class StrikeEditor extends BaseEditor {
   renderTop() {
     const at = PHASES.findIndex(([id]) => id === this.phase);
     const steps = PHASES.map(([id, label], i) => h('span', { class: `ds-step${i === at ? ' on' : i < at ? ' done' : ''}` }, label));
-    const live = this.phase === 'sniffer' || this.phase === 'strike';
-    const ctl = live && this.sim && !this.sim.done ? [
-      h('button', { class: `ds-btn ds-play${this.paused ? '' : ' on'}`, title: 'Run / pause (Space)', onclick: () => this.setPaused(!this.paused) }, this.paused ? '▶ RUN' : '❚❚ PAUSE'),
-      this.speedButton(),
-      this.pauseButton(),
-    ] : [];
     this.clockEl = h('span', { class: 'ds-clock' }, this.sim ? clock(this.sim.t) : '');
-    clear(this.top).append(h('span', { class: 'ds-title' }, 'DEEP STRIKE'), h('span', { class: 'ds-code' }, `OBJECTIVE ${this.mission?.code || ''}`),
+    clear(this.top).append(h('span', { class: 'ds-title' }, 'DEEP STRIKE'),
+      h('button', { class: `ds-btn ds-menu-btn${this.menu ? ' on' : ''}`, title: 'The hangar (jets and munitions), the fleet (ships) and your badges: spend your points here', onclick: () => (this.menu ? this.closeMenu() : this.openMenu()) },
+        h('span', { class: 'ds-menu-ico' }, '☰'), ' HANGAR · FLEET · BADGES', h('span', { class: 'ds-menu-pts' }, `${this.points().toLocaleString('en-US')} PTS`)),
+      h('span', { class: 'ds-code' }, `OBJECTIVE ${this.mission?.code || ''}`),
       h('div', { class: 'ds-steps' }, ...steps), h('div', { class: 'grow' }),
-      h('button', { class: `ds-btn sm${this.menu ? ' on' : ''}`, title: 'The hangar (points to spend on jets and munitions) and your badges', onclick: () => (this.menu ? this.closeMenu() : this.openMenu()) }, `HANGAR & BADGES · ${this.points().toLocaleString('en-US')} PTS`),
       h('button', { class: `ds-btn sm${this.showTerrain ? ' on' : ''}`, title: 'Terrain overlay (T): the biomes, and what each does to a low package. Hover the map to see.', onclick: () => this.toggleTerrain() }, 'TERRAIN'),
-      ...ctl, this.clockEl);
+      this.clockEl);
+    this.renderHead();
   }
 
   /** One button for the time speed: click or scroll up for faster, right-click or scroll down for slower. */
@@ -487,7 +705,7 @@ export class StrikeEditor extends BaseEditor {
     const on = this.pauseOn();
     const menu = h('div', { class: 'ds-pop' }, h('div', { class: 'ds-h2' }, 'PAUSE THE GAME ON'),
       ...PAUSE_ON.map(([id, label]) => h('label', { class: 'ds-check' }, h('input', {
-        type: 'checkbox', checked: !!on[id], onchange: (e) => { this.save({ pauseOn: { ...this.pauseOn(), [id]: e.target.checked } }); this.renderTop(); },
+        type: 'checkbox', checked: !!on[id], onchange: (e) => { this.save({ pauseOn: { ...this.pauseOn(), [id]: e.target.checked } }); this.renderHead(); },
       }), label)));
     const r = btn.getBoundingClientRect();
     menu.style.left = `${Math.max(8, Math.min(innerWidth - 230, r.left))}px`;
@@ -524,7 +742,9 @@ export class StrikeEditor extends BaseEditor {
     if (!this.mission) return;
     const top = this.panel.scrollTop;
     const body = this[`panel_${this.phase}`]();
-    clear(this.panel).append(...body.filter(Boolean));
+    this.head ||= h('div', { class: 'ds-sec ds-head' });
+    clear(this.panel).append(this.head, ...body.filter(Boolean));
+    this.renderHead();
     this.panel.scrollTop = top;
     this.logDirty = false;
     this.panelFull = performance.now();
@@ -533,16 +753,42 @@ export class StrikeEditor extends BaseEditor {
     if (this.clockEl && this.sim) this.clockEl.textContent = clock(this.sim.t);
     // rebuilt when something happens (or every few seconds for fuel); in between only the live numbers change, so
     // a click on the panel's buttons isn't lost to a redraw
-    if (this.panel.matches(':active')) return;
+    if (this.panel.matches(':active') || performance.now() - (this.pickT || 0) < 6000) return; // (or picking a salvo's site)
     if (this.logDirty || (this.phase === 'strike' && performance.now() - (this.panelFull || 0) > 3000)) this.renderPanel();
     else for (const [el, f] of this.nowEls || []) el.textContent = `${Math.round(f.pos.alt)} m · ${Math.round(f.pos.kmh)} km/h`;
   }
 
+  /** The top of the side panel, pinned while the rest scrolls: the buttons that move the game on to its next stage,
+   *  and while something flies, run / pause, the time speed and auto-pause. */
+  renderHead() {
+    if (!this.head || !this.mission) return;
+    const s = this.sim, ph = this.phase, rows = [];
+    const btn = (label, fn, { primary, title, disabled } = {}) => h('button', { class: `ds-btn${primary ? ' primary grow' : ''}`, title: title || '', disabled: !!disabled, onclick: fn }, label);
+    if (ph === 'mission') rows.push([btn('FLY THE SNIFFER →', () => this.setPhase('sniffer'), { primary: true })]);
+    else if (ph === 'sniffer') rows.push(s?.done ? [btn('PLAN THE STRIKE →', () => this.setPhase('brief'), { primary: true })]
+      : [btn('RETURN TO ORIGIN', () => { s.home(); this.setPaused(false); }), btn('END FLIGHT', () => this.setPhase('brief'), { title: 'Stop here and plan with what it has heard' })]);
+    else if (ph === 'brief') {
+      const { ready, worst } = this.briefState();
+      rows.push([btn('← MISSION', () => this.setPhase('mission')), btn('LAUNCH THE STRIKE →', () => this.launch(worst), { primary: true, disabled: !ready })]);
+    } else if (ph === 'strike') rows.push(s?.done ? [btn('DEBRIEF →', () => this.setPhase('debrief'), { primary: true })]
+      : [btn('END MISSION', () => this.endStrike(), { title: 'Stop the strike here and go to the debrief' })]);
+    else if (ph === 'debrief') rows.push([btn('FLY IT AGAIN', () => this.flyAgain()), btn('NEW MISSION', () => this.newMission(), { primary: true })]);
+    if ((ph === 'sniffer' || ph === 'strike') && s && !s.done) rows.unshift([
+      h('button', { class: `ds-btn ds-play${this.paused ? '' : ' on'}`, title: 'Run / pause (Space)', onclick: () => this.setPaused(!this.paused) }, this.paused ? '▶ RUN' : '❚❚ PAUSE'),
+      this.speedButton(), this.pauseButton()]);
+    clear(this.head).append(...rows.map((r) => h('div', { class: 'ds-row' }, ...r)));
+  }
+
   section(title, ...kids) { return h('div', { class: 'ds-sec' }, title ? h('div', { class: 'ds-h' }, title) : null, ...kids); }
 
+  /** The objective (or both), one line each; in the debrief, whether each one went. */
   objectiveLine() {
-    const m = this.mission, s = m.sites.find((x) => x.id === m.primary);
-    return h('div', { class: 'ds-obj' }, h('span', { class: 'ds-star' }, '★'), ' ', targetName(s.targets[m.objective.idx]), h('span', { class: 'faint' }, ` · ${s.name}`));
+    const m = this.mission, objs = objectivesOf(m), live = this.phase === 'debrief' && this.live;
+    return h('div', {}, ...objs.map((o, i) => {
+      const s = m.sites.find((x) => x.id === o.site), down = live && !alive(live.sites.find((x) => x.id === o.site).targets[o.idx]);
+      return h('div', { class: 'ds-obj' }, h('span', { class: 'ds-star' }, objs.length > 1 ? `★${i + 1}` : '★'), ' ', targetName(s.targets[o.idx]), h('span', { class: 'faint' }, ` · ${s.name}`),
+        live ? h('b', { class: down ? 'good' : 'bad' }, down ? ' · destroyed' : ' · standing') : null);
+    }));
   }
 
   panel_mission() {
@@ -558,37 +804,38 @@ export class StrikeEditor extends BaseEditor {
     sizeSel.value = this.wantSize;
     sizeSel.addEventListener('change', () => { this.wantSize = sizeSel.value; this.save({ size: this.wantSize }); });
     const story = briefing(m, { place: s.name, where: whereIs(this.world, s, 30000), sam: s.sam ? SAMS[s.sam].long : null, budget: money(m.budget) });
+    const two = objectivesOf(m)[1], s2 = two && m.sites.find((x) => x.id === two.site);
+    if (two) story.splice(2, 0, `A second objective this time: the ${lower(targetName(s2.targets[two.idx]))} ${s2 === s ? 'in the same place' : `at the ${s2.name}`}. Both have to go.`);
     return [
       this.section('BRIEFING', ...story.map((p) => h('p', { class: 'ds-story' }, p))),
       this.section(`${TYPE_NAME[m.type].toUpperCase()}`, h('div', { class: 'ds-big' }, s.name), / of /.test(s.name) ? null : h('div', { class: 'faint' }, whereIs(this.world, s, 30000)),
         m.region ? h('div', { class: 'ds-kv' }, h('span', {}, 'Region'), h('b', {}, REGIONS[m.region])) : null,
         m.size === 'large' ? h('div', { class: 'ds-kv' }, h('span', {}, 'Size'), h('b', {}, 'Large')) : null,
-        h('div', { class: 'ds-kv' }, h('span', {}, 'Primary target'), this.objectiveLine()),
+        h('div', { class: 'ds-kv' }, h('span', {}, two ? 'Objectives' : 'Primary target'), this.objectiveLine()),
         h('div', { class: 'ds-kv' }, h('span', {}, 'Budget'), h('b', {}, money(m.budget))),
         h('div', { class: 'ds-kv' }, h('span', {}, 'From the origin'), h('b', {}, `${Math.round(dist(m.origin, s))} km`))),
       this.section('INSIDE THE OBJECTIVE', ...this.targetSummary(s)),
       this.section('HOW IT GOES', h('div', { class: 'ds-note' },
         'Fly the sniffer first: it hears the radars around the objective and marks each one with its type and reach. Then buy jets and weapons, draw the route (each leg at its own height and speed) and fly it. ',
         'Low legs hide behind the curve of the earth until a radar is close; high legs see further and throw weapons further, but every radar sees them.')),
-      this.section(null, h('div', { class: 'ds-row' }, regionSel, sizeSel), h('div', { class: 'ds-row' }, typeSel, h('button', { class: 'ds-btn', onclick: () => this.newMission() }, 'NEW MISSION')),
-        h('button', { class: 'ds-btn primary wide', onclick: () => this.setPhase('sniffer') }, 'FLY THE SNIFFER →')),
+      this.section(null, h('div', { class: 'ds-row' }, regionSel, sizeSel), h('div', { class: 'ds-row' }, typeSel, h('button', { class: 'ds-btn', onclick: () => this.newMission() }, 'NEW MISSION'))),
       st.flown ? this.section('RECORD', h('div', { class: 'ds-note' }, `${st.flown} flown · ${st.won || 0} objectives destroyed · ${st.jetsLost || 0} jets lost · ${money(st.spent || 0)} spent`)) : null,
     ];
   }
 
   /** The objective's contents, alike ones counted together ("S-400 launcher ×8"); the primary target first. */
   targetSummary(s) {
-    const m = this.mission, obj = s.targets[m.objective.idx];
+    const m = this.mission, two = objectivesOf(m).length > 1, objs = objectivesOf(m).filter((o) => o.site === s.id).map((o) => s.targets[o.idx]);
     const counts = new Map();
-    for (const t of s.targets) if (t !== obj) counts.set(targetName(t), (counts.get(targetName(t)) || 0) + 1);
-    return [h('div', { class: 'ds-trow obj' }, h('span', { class: 'ds-ico' }, '★'), h('span', { class: 'grow' }, targetName(obj)), h('span', { class: 'faint' }, 'primary')),
+    for (const t of s.targets) if (!objs.includes(t)) counts.set(targetName(t), (counts.get(targetName(t)) || 0) + 1);
+    return [...objs.map((obj) => h('div', { class: 'ds-trow obj' }, h('span', { class: 'ds-ico' }, '★'), h('span', { class: 'grow' }, targetName(obj)), h('span', { class: 'faint' }, two ? 'objective' : 'primary'))),
       ...[...counts].map(([n, c]) => h('div', { class: 'ds-trow' }, h('span', { class: 'ds-ico' }, '·'), h('span', { class: 'grow' }, n), c > 1 ? h('span', { class: 'faint' }, `×${c}`) : null))];
   }
 
   targetRows(s, { assign } = {}) {
     const m = this.live || this.mission;
     return s.targets.map((t, i) => {
-      const obj = m.objective.site === s.id && m.objective.idx === i;
+      const obj = objectiveNo(m, s.id, i);
       const dead = this.phase === 'debrief' || this.phase === 'strike' ? !alive(t) : false;
       const hp = t.dmg ? ` ${Math.min(100, Math.round((t.dmg / targetHp(t)) * 100))}%` : '';
       return h('div', { class: `ds-trow${obj ? ' obj' : ''}${dead ? ' dead' : ''}`, onclick: assign ? () => assign(i) : null },
@@ -604,11 +851,7 @@ export class StrikeEditor extends BaseEditor {
       this.section(SNIFFER.name.toUpperCase(),
         h('div', { class: 'ds-note' }, done ? (done.why === 'shot' ? 'The sniffer was shot down. You plan with what it heard.' : done.why === 'rad' ? 'The sniffer’s crew died of radiation. You plan with what it heard.' : 'The sniffer is home.')
           : 'Click the map to fly there (Shift+click adds a waypoint). Every radar it hears goes on the map with its type and reach. Fly into a site’s missile range and it shoots: stay on the edges. The phase ends when it’s back at the origin.'),
-        done ? null : h('div', { class: 'ds-row' },
-          h('button', { class: 'ds-btn', onclick: () => { s.home(); this.setPaused(false); } }, 'RETURN TO ORIGIN'),
-          h('button', { class: 'ds-btn', title: 'Stop here and plan with what it has heard', onclick: () => this.setPhase('brief') }, 'END FLIGHT'),
-          h('span', { class: 'faint' }, `${Math.round(s.flown)} km flown`)),
-        done ? h('button', { class: 'ds-btn primary wide', onclick: () => this.setPhase('brief') }, 'PLAN THE STRIKE →') : null),
+        done ? null : h('span', { class: 'faint' }, `${Math.round(s.flown)} km flown`)),
       this.section(`HEARD (${found.length + this.capRows().length})`, ...(found.length ? found.map((x) => this.siteRow(x)) : this.capRows().length ? [] : [h('div', { class: 'faint' }, 'Nothing yet.')]), ...this.capRows()),
       this.logSection(),
     ];
@@ -629,7 +872,7 @@ export class StrikeEditor extends BaseEditor {
     const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
     const d = h('details', { class: 'ds-sec ds-fulllog' }, h('summary', { class: 'ds-h' }, `FULL LOG (${log.length} event${log.length === 1 ? '' : 's'})`),
       h('div', { class: 'ds-tally' },
-        h('div', { class: 'ds-kv' }, h('span', {}, `${this.sim?.flights?.length > 1 ? 'The packages' : 'The package'} fired (${sum(ours)})`), h('b', {}, list(ours))),
+        h('div', { class: 'ds-kv' }, h('span', {}, `${!this.sim?.flights?.length ? 'The fleet' : `${this.sim.flights.length > 1 ? 'The packages' : 'The package'}${this.sim.ships?.length ? ' and the fleet' : ''}`} fired (${sum(ours)})`), h('b', {}, list(ours))),
         h('div', { class: 'ds-kv' }, h('span', {}, `The defences fired (${sum(theirs)})`), h('b', {}, list(theirs)))),
       ...log.map((e) => h('div', { class: `ds-log ${e.kind}` }, h('span', { class: 'faint' }, clock(e.t)), ' ', e.text)));
     d.open = !!this.logOpen;
@@ -642,9 +885,13 @@ export class StrikeEditor extends BaseEditor {
   expended() {
     const ours = {}, theirs = {};
     const left = {};
-    for (const j of this.sim?.jets || []) for (const s of j.stations) if (s.mu) left[s.mu] = (left[s.mu] || 0) + (s.n || 0);
-    for (const a of [...(this.plan?.pkg || []), ...(this.plan?.pkg2 || [])]) for (const s of a.stations) if (s.mu) ours[MUNITIONS[s.mu].short] = (ours[MUNITIONS[s.mu].short] || 0) + (s.n || MUNITIONS[s.mu].per);
+    for (const j of this.sim?.jets || []) for (const s of j.stations) if (s.mu && s.mu !== 'tank') left[s.mu] = (left[s.mu] || 0) + (s.n || 0);
+    for (const a of [...(this.plan?.pkg || []), ...(this.plan?.pkg2 || [])]) for (const s of a.stations) if (s.mu && s.mu !== 'tank') ours[MUNITIONS[s.mu].short] = (ours[MUNITIONS[s.mu].short] || 0) + (s.n || MUNITIONS[s.mu].per);
     for (const [mu, n] of Object.entries(left)) ours[MUNITIONS[mu].short] -= n;
+    for (const sh of this.sim?.ships || []) {
+      if (sh.used.tlam) ours.TLAM = (ours.TLAM || 0) + sh.used.tlam;
+      if (sh.used.sm) ours[sh.S.missile.name] = (ours[sh.S.missile.name] || 0) + sh.used.sm;
+    }
     for (const s of this.live?.sites || []) if (s.sam && s.fired) theirs[SAMS[s.sam].long] = (theirs[SAMS[s.sam].long] || 0) + s.fired;
     return { ours, theirs };
   }
@@ -662,29 +909,39 @@ export class StrikeEditor extends BaseEditor {
     const over = cost > m.budget + 1e-9;
     const flying = [0, 1].filter((k) => this.pkgs[k].length);
     const both = flying.length > 1;
-    const worst = flying.flatMap((k) => this.fuels(k)).reduce((a, b) => (b[1] > a[1] ? b : a), ['', 0]);
-    const ready = flying.length && !over && flying.every((k) => this.routes[k].length >= 3) && this.podCount() <= this.podMax() && HANGAR_MUNITIONS.every((id) => this.spareMu(id) >= 0);
     const issues = this.planIssues();
     return [
       this.section('BUDGET', h('div', { class: 'ds-budget' }, h('div', { class: `ds-bar${over ? ' over' : ''}`, style: { width: `${Math.min(100, (cost / m.budget) * 100)}%` } })),
         h('div', { class: 'ds-kv' }, h('span', {}, `${money(cost)} of ${money(m.budget)}`), over ? h('b', { class: 'bad' }, 'over budget') : h('span', { class: 'faint' }, `${money(m.budget - cost)} left`)),
         this.objectiveLine()),
-      this.packageSection(0), this.packageSection(1),
+      this.packageSection(0), this.packageSection(1), this.fleetPlanSection(),
       this.section('ROUTES', h('div', { class: 'ds-note' }, 'Shift+click the map to add the next turn point (after the selected one) to the package picked above: click a package’s section to pick it. Or click a line to put a point in it; drag points to move them, right-click one to remove it. Click a point (or Shift+right-click it for a box by the point) to set the height and speed of the leg that starts there, or scroll on it holding Alt for the height, Z for the speed.'),
         ...[0, 1].filter((k) => this.pkgs[k].length || this.routes[k].length > 2).flatMap((k) => [
           h('div', { class: 'ds-kv' }, h('span', { style: k ? { color: B_COL } : null }, `Route ${PKG_NAME[k]}`), h('b', {}, `${Math.round(routeKm(this.routes[k]))} km`)),
-          ...this.fuels(k).map(([t, f]) => h('div', { class: 'ds-kv' }, h('span', {}, `Fuel, ${AIRCRAFT[t].name}${both ? ` (${PKG_NAME[k]})` : ''}`), h('b', { class: f > 1 ? 'bad' : f > 0.85 ? 'warn' : '' }, `${Math.round(f * 100)}%`)))]),
+          ...this.fuels(k).map(([t, f, n]) => h('div', { class: 'ds-kv' }, h('span', {}, `Fuel, ${AIRCRAFT[t].name}${n ? ` with ${n} drop tank${n > 1 ? 's' : ''}` : ''}${both ? ` (${PKG_NAME[k]})` : ''}`), h('b', { class: f > 1 ? 'bad' : f > 0.85 ? 'warn' : '' }, `${Math.round(f * 100)}%`)))]),
         this.legEditor()),
       this.timingSection(),
       issues.length ? this.section('CHECK', ...issues.map((t) => h('div', { class: 'ds-log warn' }, t))) : null,
-      this.section(null, h('div', { class: 'ds-row' },
-        h('button', { class: 'ds-btn', onclick: () => this.setPhase('mission') }, '← MISSION'),
-        h('button', { class: 'ds-btn primary grow', disabled: !ready, onclick: () => this.launch(worst) }, 'LAUNCH THE STRIKE →'))),
     ];
   }
 
+  /** Whether the plan can launch, and the jet type shortest of fuel on it ([type, share]). */
+  briefState() {
+    const cost = this.pkgs.flat().reduce((n, a) => n + jetCost(a), 0);
+    const flying = [0, 1].filter((k) => this.pkgs[k].length);
+    const worst = flying.flatMap((k) => this.fuels(k)).reduce((a, b) => (b[1] > a[1] ? b : a), ['', 0]);
+    const salvos = this.ships.some((d) => d.salvos.length); // the ships can strike with no jets at all
+    const ready = (flying.length || salvos) && cost <= this.mission.budget + 1e-9 && flying.every((k) => this.routes[k].length >= 3) && this.podCount() <= this.podMax()
+      && HANGAR_MUNITIONS.every((id) => this.spareMu(id) >= 0) && this.ships.every((d) => !this.shipSpot(d.x, d.y));
+    return { ready, worst };
+  }
+
   /** Fuel each jet type in package k needs for its route: [[type, share]]. */
-  fuels(k) { return [...new Set(this.pkgs[k].map((a) => a.type))].map((t) => [t, fuelUse(this.routes[k], t, this.terrain)]); }
+  /** [[type, share of its fuel, drop tanks]] for each type and tank load in package k (tanks count as fuel). */
+  fuels(k) {
+    const kinds = [...new Set(this.pkgs[k].map((a) => `${a.type}:${tanksOn(a.stations)}`))].map((id) => [id.split(':')[0], +id.split(':')[1]]);
+    return kinds.map(([t, n]) => [t, fuelUse(this.routes[k], t, this.terrain) / fuelCap(t, Array.from({ length: n }, () => ({ mu: 'tank' }))), n]);
+  }
 
   /** PACKAGE A / PACKAGE B: its jets and its own "+ Add a jet". */
   packageSection(k) {
@@ -732,8 +989,8 @@ export class StrikeEditor extends BaseEditor {
 
   planIssues() {
     const m = this.mission, out = [];
-    const flying = [0, 1].filter((k) => this.pkgs[k].length), both = flying.length > 1;
-    if (!flying.length && this.routes[0].length < 3) out.push('Draw a route: Shift+click the map to add turn points.');
+    const flying = [0, 1].filter((k) => this.pkgs[k].length), both = flying.length > 1, salvos = this.ships.some((d) => d.salvos.length);
+    if (!flying.length && !salvos && this.routes[0].length < 3) out.push('Draw a route: Shift+click the map to add turn points.');
     for (const k of flying) if (this.routes[k].length < 3) out.push(`Draw package ${PKG_NAME[k]}’s route: click its section, then Shift+click the map to add turn points.`);
     for (const k of [0, 1]) if (!this.pkgs[k].length && this.routes[k].length > 2 && flying.length) out.push(`Package ${PKG_NAME[k]} has a route but no jets: it stays home.`);
     const heard = (m.cap || []).filter((c) => c.heard);
@@ -742,13 +999,26 @@ export class StrikeEditor extends BaseEditor {
     const pods = this.podCount(), podMax = this.podMax();
     if (pods > podMax) out.push(podMax ? `${pods} NGJ pods: this mission allows ${podMax} (one fewer than its long-range SAM sites).` : 'No NGJ pods this mission: it has too few long-range SAM sites. Take the pod off.');
     for (const id of HANGAR_MUNITIONS) if (this.spareMu(id) < 0) out.push(`${this.loaded(this.pkgs.flat(), id)} ${MUNITIONS[id].short} loaded, ${this.owned(id)} in the hangar: buy more there or take some off.`);
-    const objT = m.sites.find((s) => s.id === m.objective.site).targets[m.objective.idx];
-    const onObj = this.pkgs.flat().some((a) => a.stations.some((s) => s.mu && s.target?.site === m.objective.site && s.target.idx === m.objective.idx));
-    if (flying.length && !onObj) out.push(`No weapon is aimed at the primary target (${lower(targetName(objT))}).`);
+    const objs = objectivesOf(m);
+    objs.forEach((o, i) => {
+      const objT = m.sites.find((s) => s.id === o.site).targets[o.idx];
+      const objSite = m.sites.find((s) => s.id === o.site);
+      // a smart station counts when its route takes it within reach of the objective
+      const smartOn = flying.some((k) => this.pkgs[k].some((a) => a.stations.some((s) => s.mu && s.n && s.target === 'smart' && smartFits(s, objT)
+        && releasePoint(this.routes[k], targetXY(objSite, objT), MUNITIONS[s.mu], this.pkgs[k].map((x) => x.type)))));
+      const onObj = smartOn || this.pkgs.flat().some((a) => a.stations.some((s) => s.mu && s.target?.site === o.site && s.target.idx === o.idx)) || this.ships.some((d) => d.salvos.some((sv) => sv.site === o.site));
+      if ((flying.length || salvos) && !onObj) out.push(`No weapon is aimed at ${objs.length > 1 ? `objective ${i + 1}` : 'the primary target'} (${lower(targetName(objT))}).`);
+    });
+    for (const d of this.ships) {
+      const f = this.fleet().find((x) => x.id === d.id), why = f && this.shipSpot(d.x, d.y);
+      if (why) out.push(`${f.name}: ${why}`);
+      const want = d.salvos.reduce((n, sv) => n + this.salvoCount(sv.site), 0);
+      if (f && want > f.tlam) out.push(`${f.name}’s salvos take ${want} Tomahawks and it has ${f.tlam}: the last salvo goes short (refill in the menu’s FLEET tab).`);
+    }
     for (const k of flying) {
       const pk = this.pkgs[k], route = this.routes[k];
       for (const [i, a] of pk.entries()) for (const s of a.stations) {
-        if (!s.mu || !s.target || s.target === 'auto' || s.mu === 'harm' || s.mu === 'mald' || s.mu === 'pod') continue;
+        if (!s.mu || !s.target || s.target === 'auto' || s.target === 'smart' || homes(s) || s.mu === 'mald' || s.mu === 'pod') continue;
         const site = m.sites.find((x) => x.id === s.target.site), t = site?.targets[s.target.idx];
         if (t && !releasePoint(route, targetXY(site, t), MUNITIONS[s.mu], pk.map((x) => x.type))) out.push(`${AIRCRAFT[a.type].name} ${k ? 'B' : ''}${i + 1}: the ${MUNITIONS[s.mu].short} never gets within reach of the ${lower(targetName(t))} on ${both ? `route ${PKG_NAME[k]}` : 'this route'}.`);
       }
@@ -756,7 +1026,7 @@ export class StrikeEditor extends BaseEditor {
       const where = [rad.storm && `${Math.ceil(rad.storm / 60)} min in radiation storms`, rad.dead && `${Math.ceil(rad.dead / 60)} min in dead zones`].filter(Boolean).join(' and ');
       if (rad.dose >= 1) out.push(`${RT} is a lethal radiation dose (${where}): the crews die on the way.`);
       else if (rad.dose > 0) out.push(`${RT} takes ${Math.round(rad.dose * 100)}% of a lethal radiation dose (${where}).`);
-      for (const [t, f] of this.fuels(k)) if (f > 1) out.push(`The ${AIRCRAFT[t].name}${both ? ` in package ${PKG_NAME[k]}` : ''} doesn’t have the fuel for ${both ? 'its' : 'this'} route.`);
+      for (const [t, f, n] of this.fuels(k)) if (f > 1) out.push(`The ${AIRCRAFT[t].name}${n ? ` with ${n} drop tank${n > 1 ? 's' : ''}` : ''}${both ? ` in package ${PKG_NAME[k]}` : ''} doesn’t have the fuel for ${both ? 'its' : 'this'} route${n < (AIRCRAFT[t].tanks || 0) ? ' (a drop tank would help)' : ''}.`);
     }
     return out;
   }
@@ -804,7 +1074,8 @@ export class StrikeEditor extends BaseEditor {
         // NGJ pods: the option goes grey once the strike has all this mission allows (unless this station holds one)
         const cap = mu.max ? this.podMax() : Infinity, full = st.mu !== id && this.podCount() >= cap;
         // hangar munitions (Mako, NGJ): only as many as are bought
-        const left = this.spareMu(id), none = st.mu !== id && left < n;
+        const left = this.spareMu(id), none = (st.mu !== id && left < n) || (id === 'tank' && st.mu !== 'tank' && tanksOn(a.stations) >= A.tanks);
+        if (id === 'tank') return h('option', { value: id, disabled: none }, `${mu.short} · +${Math.round(A.tank * 100)}% fuel · ${money(mu.cost)}${none ? ` (${A.tanks} at most)` : ''}`);
         const stock = mu.points ? (none ? (this.owned(id) ? ' (all in use)' : ' (buy in the hangar)') : ` · ${left} left in the hangar`) : '';
         return h('option', { value: id, disabled: full || none }, `${n > 1 ? n + '× ' : ''}${mu.short} · ${money(mu.cost * n)}${full ? (cap ? ` (${cap} this mission, all taken)` : ' (none this mission)') : stock}`);
       }));
@@ -812,40 +1083,50 @@ export class StrikeEditor extends BaseEditor {
     muSel.addEventListener('change', () => {
       st.mu = muSel.value || null;
       st.n = st.mu ? loadOf(a, st.mu) : 0;
-      st.target = st.mu === 'harm' ? 'auto' : st.mu === 'pod' ? this.defaultPodTarget() : st.mu && !untargeted(st.mu) ? this.defaultTarget(st.mu) : null;
+      st.gps = false;
+      st.target = homes(st) ? 'auto' : st.mu === 'pod' ? this.defaultPodTarget() : st.mu && !untargeted(st.mu) ? this.defaultTarget(st.mu) : null;
       this.changed();
     });
-    if (!st.mu || untargeted(st.mu)) return h('div', { class: 'ds-st' }, muSel, st.mu ? h('span', { class: 'faint sm' }, st.mu === 'mald' ? 'at the decoy point, or when first shot at' : 'at enemy fighters, by itself') : null);
+    if (!st.mu || untargeted(st.mu)) return h('div', { class: 'ds-st' }, muSel, st.mu ? h('span', { class: 'faint sm' }, st.mu === 'mald' ? 'at the decoy point, or when first shot at' : st.mu === 'tank' ? 'burned first, dropped once empty' : 'at enemy fighters, by itself') : null);
     const tSel = h('select', { class: 'ds-sel sm' });
     const known = m.sites.filter((s) => m.known[s.id]);
     if (st.mu === 'pod') {
       const objSite = m.objective.site;
-      tSel.append(h('option', { value: '' }, 'No site'), ...known.filter((s) => s.targets.some(isRadar)).map((s) => h('option', { value: s.id }, `${s.id === objSite ? '★ ' : ''}Blind the ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`)));
+      const objSites = new Set(objectivesOf(m).map((o) => o.site));
+      tSel.append(h('option', { value: '' }, 'No site'), ...known.filter((s) => s.targets.some(isRadar)).map((s) => h('option', { value: s.id }, `${s.id === objSite || objSites.has(s.id) ? '★ ' : ''}Blind the ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`)));
       tSel.value = st.target?.site || '';
-    } else if (st.mu === 'harm') {
+    } else if (homes(st)) {
       // ★ on the site whose radars include the objective, when the objective is a radar a HARM can go for
-      const objSite = m.objective.site, objT = m.sites.find((s) => s.id === objSite)?.targets[m.objective.idx];
-      const harmObj = objT && isRadar(objT) ? objSite : null;
-      tSel.append(h('option', { value: 'auto' }, 'Any radar that’s on'), ...known.filter((s) => s.targets.some(isRadar)).map((s) => h('option', { value: s.id }, `${s.id === harmObj ? '★ ' : ''}Radars of ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`)));
-      tSel.value = st.target === 'auto' || !st.target ? 'auto' : st.target.site;
+      const harmObj = new Set(objectivesOf(m).filter((o) => isRadar(m.sites.find((s) => s.id === o.site)?.targets[o.idx] || {})).map((o) => o.site));
+      tSel.append(h('option', { value: 'auto' }, 'Any radar that’s on'), h('option', { value: 'smart' }, `Smart: ${SMART_RIPPLE} at each radar on the air along the route`),
+        ...known.filter((s) => s.targets.some(isRadar)).map((s) => h('option', { value: s.id }, `${harmObj.has(s.id) ? '★ ' : ''}Radars of ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`)));
+      tSel.value = st.target === 'auto' || st.target === 'smart' ? st.target : !st.target ? 'auto' : st.target.site;
     } else {
-      tSel.append(h('option', { value: '' }, 'No target'));
+      tSel.append(h('option', { value: '' }, 'No target'), h('option', { value: 'smart' }, `Smart: ${SMART_RIPPLE} at each target along the route`));
       for (const s of known) {
         const g = h('optgroup', { label: s.sam ? `${SAMS[s.sam].long} site` : s.name });
         s.targets.forEach((t, i) => {
-          const obj = m.objective.site === s.id && m.objective.idx === i;
+          const obj = objectiveNo(m, s.id, i);
           g.append(h('option', { value: `${s.id}:${i}` }, `${obj ? '★ ' : ''}${targetName(t)}`));
         });
         tSel.append(g);
       }
-      tSel.value = st.target?.site ? `${st.target.site}:${st.target.idx}` : '';
+      tSel.value = st.target === 'smart' ? 'smart' : st.target?.site ? `${st.target.site}:${st.target.idx}` : '';
     }
+    tSel.title = 'Smart: as the route passes them, the objectives first, then radars and air defences, then everything else. Enough stays on the rails for an objective further on.';
     tSel.addEventListener('change', () => {
       const v = tSel.value;
-      st.target = v === 'auto' ? 'auto' : !v ? null : v.includes(':') ? { site: v.split(':')[0], idx: +v.split(':')[1] } : { site: v };
+      st.target = v === 'auto' || v === 'smart' ? v : !v ? null : v.includes(':') ? { site: v.split(':')[0], idx: +v.split(':')[1] } : { site: v };
       this.changed();
     });
-    return h('div', { class: 'ds-st' }, muSel, tSel);
+    // AARGM-ER: radar homing, or INS/GPS to a picked target
+    const modeSel = MUNITIONS[st.mu].gps ? h('select', { class: 'ds-sel sm', title: 'Radar: homes on a radar that’s on. INS/GPS: flies to the target you pick, on the air or not.' },
+      h('option', { value: 'radar' }, 'Radar mode'), h('option', { value: 'gps' }, 'INS/GPS mode')) : null;
+    if (modeSel) {
+      modeSel.value = st.gps ? 'gps' : 'radar';
+      modeSel.addEventListener('change', () => { st.gps = modeSel.value === 'gps'; st.target = st.gps ? this.defaultTarget() : 'auto'; this.changed(); });
+    }
+    return h('div', { class: 'ds-st' }, muSel, modeSel, tSel);
   }
 
   defaultTarget() { return { site: this.mission.objective.site, idx: this.mission.objective.idx }; }
@@ -949,14 +1230,14 @@ export class StrikeEditor extends BaseEditor {
           h('button', { class: 'ds-btn', title: 'Turn this package for home now, straight back', onclick: () => { s.rtb(f); this.sel = null; this.renderPanel(); this.view.request(); } }, two ? `RTB ${f.name}` : 'RTB NOW')),
         f.done || s.done ? null : this.overrideSection(f)));
     };
-    const over = !s.done ? null : !two ? (s.done.why === 'home' ? 'The package is home.' : s.done.why === 'ended' ? 'The strike was ended.' : 'The package is lost.')
+    const over = !s.done ? null : s.done.why === 'ended' ? 'The strike was ended.' : !s.flights.length ? 'The salvos are in.' : !two ? (s.done.why === 'home' ? 'The package is home.' : 'The package is lost.')
       : s.done.why === 'ended' ? 'The strike was ended.' : `${s.flights.map((f) => `Package ${f.name} ${f.done?.why === 'home' ? 'is home' : 'was lost'}`).join(' · ')}.`;
     return [
-      s.done ? this.section(null, h('div', { class: 'ds-big' }, over), h('button', { class: 'ds-btn primary wide', onclick: () => this.setPhase('debrief') }, 'DEBRIEF →')) : null,
-      this.section(null, h('div', { class: 'ds-kv' }, h('span', {}, 'Defences'), h('b', { class: s.alert ? 'bad' : 'good' }, s.alert ? 'awake' : 'not seen yet')),
-        s.done ? null : h('div', { class: 'ds-row' }, h('button', { class: 'ds-btn', title: 'Stop the strike here and go to the debrief', onclick: () => this.endStrike() }, 'END MISSION'))),
+      s.done ? this.section(null, h('div', { class: 'ds-big' }, over)) : null,
+      this.section(null, h('div', { class: 'ds-kv' }, h('span', {}, 'Defences'), h('b', { class: s.alert ? 'bad' : 'good' }, s.alert ? 'awake' : 'not seen yet'))),
       ...s.flights.map(pkgSec),
-      s.done ? null : this.section(two ? 'ROUTES' : 'ROUTE', h('div', { class: 'ds-note' }, two
+      this.fleetLiveSection(),
+      s.done || !s.flights.length ? null : this.section(two ? 'ROUTES' : 'ROUTE', h('div', { class: 'ds-note' }, two
         ? 'Edit the routes ahead as they fly (pausing gives you time): Shift+click adds the next point to the package picked above (click its section to pick it), click a line ahead to insert one, drag or right-click the points ahead, Shift+right-click one to set its leg.'
         : 'Edit the route ahead as it flies (pausing gives you time): Shift+click adds the next point after the selected one, click a line ahead to insert one, drag or right-click the points ahead, Shift+right-click one to set its leg.'), this.legEditor()),
       this.logSection(18),
@@ -990,26 +1271,24 @@ export class StrikeEditor extends BaseEditor {
 
   panel_debrief() {
     const s = this.sim, m = this.live;
-    const won = s.objectiveDone();
+    const won = s.objectiveDone(), objs = objectivesOf(m).length, down = s.objectivesDown();
+    const result = won ? (objs > 1 ? 'BOTH OBJECTIVES DESTROYED' : 'OBJECTIVE DESTROYED') : down ? `${down} OF ${objs} OBJECTIVES DESTROYED` : objs > 1 ? 'OBJECTIVES STANDING' : 'OBJECTIVE STANDING';
     const lostCost = s.lost.reduce((n, l) => n + l.jet.A.cost, 0);
     const killed = [];
     for (const site of m.sites) for (const t of site.targets) if (!alive(t)) killed.push(`${targetName(t)} · ${site.sam ? SAMS[site.sam].long + ' site' : site.name}`);
     return [
-      this.section(null, h('div', { class: `ds-result ${won ? 'good' : 'bad'}` }, won ? 'OBJECTIVE DESTROYED' : 'OBJECTIVE STANDING'), this.objectiveLine()),
+      this.section(null, h('div', { class: `ds-result ${won ? 'good' : 'bad'}` }, result), this.objectiveLine()),
       this.section('COST', h('div', { class: 'ds-kv' }, h('span', {}, `Jets lost (${s.lost.length})`), h('b', {}, money(lostCost))),
         h('div', { class: 'ds-kv' }, h('span', {}, 'Weapons used'), h('b', {}, money(s.used))),
         h('div', { class: 'ds-kv' }, h('span', {}, 'Total'), h('b', {}, money(lostCost + s.used))),
         ...s.lost.map((l) => h('div', { class: 'ds-log loss' }, `${l.jet.A.name}: ${l.why === 'fuel' ? 'out of fuel' : l.why === 'radiation' ? 'crew killed by radiation' : 'shot down by a ' + l.why}`))),
       this.earned ? this.section(`POINTS (+${this.earned.reduce((n, [, p]) => n + p, 0)})`, ...this.earned.map(([w, p]) => h('div', { class: 'ds-kv' }, h('span', {}, w), h('b', {}, `+${p}`))),
-        h('div', { class: 'faint sm' }, `${this.points().toLocaleString('en-US')} to spend in the hangar (HANGAR & BADGES, top right)`)) : null,
+        h('div', { class: 'faint sm' }, `${this.points().toLocaleString('en-US')} to spend in the hangar and the fleet (☰ HANGAR · FLEET · BADGES, top left)`)) : null,
       this.section(`DESTROYED (${killed.length})`, ...(killed.length ? killed.map((t) => h('div', { class: 'ds-log kill' }, t)) : [h('div', { class: 'faint' }, 'Nothing.')])),
       this.section('THE DEFENCES, REVEALED', ...m.sites.filter((x) => x.sam).map((x) => h('div', { class: 'ds-srow' },
         h('span', { class: 'ds-dot', style: { background: RING_COL[SAMS[x.sam].ring] } }), h('span', { class: 'grow' }, `${SAMS[x.sam].long}${this.plan.mission.known[x.id] ? '' : ' (never found)'}`),
         h('span', { class: 'faint' }, `${x.fired} of ${x.missiles} missiles`)))),
       this.fullLog(),
-      this.section(null, h('div', { class: 'ds-row' },
-        h('button', { class: 'ds-btn', onclick: () => this.flyAgain() }, 'FLY IT AGAIN'),
-        h('button', { class: 'ds-btn primary grow', onclick: () => this.newMission() }, 'NEW MISSION'))),
     ];
   }
 
@@ -1018,6 +1297,7 @@ export class StrikeEditor extends BaseEditor {
     this.mission = clone(p.mission);
     this.pkgs = [clone(p.pkg), clone(p.pkg2 || [])];
     this.routes = [clone(p.route), p.route2 ? clone(p.route2) : null];
+    this.ships = clone(p.ships || []).filter((d) => this.fleet().some((f) => f.id === d.id));
     this.live = null;
     this.setPhase('brief');
   }
@@ -1036,6 +1316,7 @@ export class StrikeEditor extends BaseEditor {
 
   hit(px, py) {
     const v = this.view;
+    if (this.phase === 'brief') for (const d of this.ships || []) if (Math.hypot(v.sx(d.x) - px, v.sy(d.y) - py) < 10) return { ship: d.id };
     if (this.routes?.[0] && (this.phase === 'brief' || this.phase === 'strike')) {
       const pref = this.sel?.pk || 0; // where both packages' points overlap (the origins, say), the one already selected gets it
       for (const k of [pref, 1 - pref]) {
@@ -1079,9 +1360,11 @@ export class StrikeEditor extends BaseEditor {
       c.focus();
       const r = c.getBoundingClientRect();
       const px = e.clientX - r.left, py = e.clientY - r.top;
+      if (e.button === 0 && this.placing && this.phase === 'brief') { this.placeShip(this.placing, this.view.wx(px), this.view.wy(py)); return; }
       const ok = e.button === 0 ? this.overOrigin(px, py) : null;
       if (ok != null) { this.dragOrigin(e, r, px, py, ok); return; }
       const hit = e.button === 0 ? this.hit(px, py) : null;
+      if (hit?.ship) { this.dragShip(e, r, hit.ship); return; }
       const dragNode = hit?.node != null && this.routeEditable(hit.pk) && hit.node > 0 && hit.node > this.firstEditable(hit.pk) ? hit.node : null;
       let moved = false, lx = e.clientX, ly = e.clientY;
       c.setPointerCapture(e.pointerId);
@@ -1223,10 +1506,10 @@ export class StrikeEditor extends BaseEditor {
   hover(e) {
     const r = this.canvas.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
-    this.canvas.style.cursor = this.overOrigin(px, py) != null ? 'grab' : '';
+    this.canvas.style.cursor = this.placing && this.phase === 'brief' ? 'crosshair' : this.overOrigin(px, py) != null || this.hit(px, py)?.ship ? 'grab' : '';
     const at = this.mission && this.hit(px, py)?.site, s = at && (this.live || this.mission).sites.find((x) => x.id === at);
     if (s) {
-      const m = this.live || this.mission, obj = m.objective.site === s.id;
+      const m = this.live || this.mission, obj = objectivesOf(m).some((o) => o.site === s.id);
       clear(this.tip).append(h('div', { class: 'ds-tip-h' }, `${obj ? '★ ' : ''}${s.sam ? `${SAMS[s.sam].long} site` : s.name}`),
         h('div', { class: 'ds-tip-line' }, whereIs(this.world, s, 30000)));
     } else {
@@ -1331,6 +1614,7 @@ export class StrikeEditor extends BaseEditor {
       if (r?.[node] && r[node + 1] && !r[node].home) this.drawDetection(ctx, v, k, node);
     }
     this.drawSites(ctx, v, m, reveal);
+    this.drawFleet(ctx, v);
     // the origins, and in the planner the arc they can be dragged along
     if (this.phase === 'brief' && m.arc) {
       const P = m.sites.find((s) => s.id === m.primary);
@@ -1412,8 +1696,8 @@ export class StrikeEditor extends BaseEditor {
     for (const s of m.sites) {
       if (!m.known[s.id] && !reveal) continue;
       const S = s.sam ? SAMS[s.sam] : null;
-      const primary = s.id === m.primary;
-      const col = primary ? COL.objective : S ? RING_COL[S.ring] : COL.unknown;
+      const primary = s.id === m.primary, second = !primary && objectivesOf(m).some((o) => o.site === s.id);
+      const col = primary || second ? COL.objective : S ? RING_COL[S.ring] : COL.unknown;
       const x = v.sx(s.x), y = v.sy(s.y);
       if (detail) { this.drawInside(ctx, v, s, m); continue; }
       ctx.strokeStyle = col; ctx.lineWidth = 1.6;
@@ -1421,8 +1705,8 @@ export class StrikeEditor extends BaseEditor {
       else { ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x + 6, y); ctx.lineTo(x, y + 6); ctx.lineTo(x - 6, y); ctx.closePath(); ctx.stroke(); }
       if (this.sel?.site === s.id) { ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2); ctx.stroke(); }
       const jammed = this.phase === 'strike' && this.sim?.blinded?.(s);
-      const name = `${primary ? `★ ${m.code}` : S ? S.name : s.name}${jammed ? ' · JAMMED' : ''}`;
-      if (primary || jammed || v.scale > 0.9 || this.sel?.site === s.id) v.label(name, s.x, s.y, col, { dx: primary ? 15 : 9 });
+      const name = `${primary ? `★ ${m.code}` : second ? `★ ${m.code} 2 · ${S ? S.name : s.name}` : S ? S.name : s.name}${jammed ? ' · JAMMED' : ''}`;
+      if (primary || second || jammed || v.scale > 0.9 || this.sel?.site === s.id) v.label(name, s.x, s.y, col, { dx: primary ? 15 : 9 });
     }
   }
 
@@ -1432,7 +1716,7 @@ export class StrikeEditor extends BaseEditor {
     s.targets.forEach((t, i) => {
       const at = targetXY(s, t);
       const x = v.sx(at.x), y = v.sy(at.y);
-      const obj = m.objective.site === s.id && m.objective.idx === i;
+      const obj = objectiveNo(m, s.id, i);
       const dead = !alive(t);
       const col = dead ? '#555' : obj ? COL.objective : S ? RING_COL[S.ring] : '#c9d4dc';
       ctx.strokeStyle = col; ctx.fillStyle = dead ? '#222' : `${col}33`; ctx.lineWidth = 1.4;
@@ -1621,16 +1905,32 @@ export class StrikeEditor extends BaseEditor {
     const types = pk.map((x) => x.type), pts = timeline(r, types).pts;
     const key = JSON.stringify([r, pk, m.known]);
     if (this.shotCache?.[k]?.key === key) return this.shotCache[k].out;
-    const out = [];
+    const out = [], claimed = new Map(); // smart stations: what the ones before already ripple at
     pk.forEach((a, i) => a.stations.forEach((st) => {
       if (!st.mu || !st.n || !st.target || st.mu === 'mald' || st.mu === 'pod') return;
       const mu = MUNITIONS[st.mu], jet = `${AIRCRAFT[a.type].name.split(' ')[0]} ${k ? 'B' : ''}${i + 1}`;
-      if (mu.kind === 'arm') {
+      if (st.target === 'smart') {
+        // as the sim does it: each known target in the order the route reaches it, the objectives' share kept back
+        const near = m.sites.filter((s) => m.known[s.id]).flatMap((s) => s.targets.map((t, idx) => ({ s, t, idx })))
+          .filter((c) => smartFits(st, c.t)).map((c) => { const at = targetXY(c.s, c.t); return { ...c, at, tier: smartTier(m, c.s, c.idx), rp: pts.find((p) => dist(p, at) <= reach(mu, p.alt, p.kmh)) }; })
+          .filter((c) => c.rp).sort((x, y) => x.rp.t - y.rp.t || x.tier - y.tier);
+        let left = st.n, reserve = near.filter((c) => !c.tier).length * SMART_RIPPLE;
+        for (const c of near) {
+          const key = `${c.s.id}:${c.idx}`, had = claimed.get(key) || 0;
+          if (!c.tier) reserve -= SMART_RIPPLE;
+          const n = Math.min(SMART_RIPPLE - had, left - (c.tier ? Math.max(0, reserve) : 0));
+          if (n <= 0) continue;
+          left -= n; claimed.set(key, had + n);
+          out.push({ jet, short: mu.short, n, harm: homes(st), key, siteId: c.s.id, rp: c.rp, at: c.at, away: c.rp.t, hits: c.rp.t + (dist(c.rp, c.at) / mu.kmh) * 3600, what: `the ${lower(targetName(c.t))}` });
+        }
+        return;
+      }
+      if (homes(st)) {
         const radars = m.sites.filter((s) => m.known[s.id] && (st.target === 'auto' || st.target.site === s.id))
           .flatMap((s) => s.targets.filter((t) => isRadar(t) && alive(t)).map((t) => ({ s, t, at: targetXY(s, t) })));
         for (const p of radars.length ? pts : []) {
           const R = reach(mu, p.alt, p.kmh), hit = radars.find((x) => dist(p, x.at) <= R);
-          if (hit) { out.push({ jet, short: mu.short, n: st.n, harm: true, rp: p, at: hit.at, away: p.t, hits: p.t + (dist(p, hit.at) / mu.kmh) * 3600, what: `the radars at the ${hit.s.sam ? `${SAMS[hit.s.sam].long} site` : hit.s.name}` }); break; }
+          if (hit) { out.push({ jet, short: mu.short, n: st.n, harm: true, siteId: hit.s.id, rp: p, at: hit.at, away: p.t, hits: p.t + (dist(p, hit.at) / mu.kmh) * 3600, what: `the radars at the ${hit.s.sam ? `${SAMS[hit.s.sam].long} site` : hit.s.name}` }); break; }
         }
         return;
       }
@@ -1638,12 +1938,12 @@ export class StrikeEditor extends BaseEditor {
       const s = m.sites.find((x) => x.id === st.target.site), t = s?.targets[st.target.idx];
       if (!t) return;
       const at = targetXY(s, t), rp = releasePoint(r, at, mu, types);
-      if (rp) out.push({ jet, short: mu.short, n: st.n, rp, at, away: rp.t, hits: rp.t + (dist(rp, at) / mu.kmh) * 3600, what: `the ${lower(targetName(t))}` });
+      if (rp) out.push({ jet, short: mu.short, n: st.n, siteId: s.id, rp, at, away: rp.t, hits: rp.t + (dist(rp, at) / mu.kmh) * 3600, what: `the ${lower(targetName(t))}` });
     }));
     // the same weapon let go at the same thing at the same moment is one shot: "3× JSOW", from whichever jets
     const merged = new Map();
     for (const sh of out) {
-      const id = `${sh.short}|${sh.what}|${Math.round(sh.away)}`, was = merged.get(id);
+      const id = `${sh.short}|${sh.key || sh.what}|${Math.round(sh.away)}`, was = merged.get(id);
       if (!was) { merged.set(id, { ...sh, jets: [sh.jet] }); continue; }
       was.n += sh.n;
       if (!was.jets.includes(sh.jet)) was.jets.push(sh.jet);
@@ -1655,10 +1955,10 @@ export class StrikeEditor extends BaseEditor {
 
   /** The briefing's timeline: every planned impact from both packages in order, so attacks can be lined up. */
   timingSection() {
-    const flying = [0, 1].filter((k) => this.pkgs[k].length && this.routes[k]?.length >= 3);
-    if (!flying.length) return null;
+    const flying = [0, 1].filter((k) => this.pkgs[k].length && this.routes[k]?.length >= 3), salvos = this.salvoShots();
+    if (!flying.length && !salvos.length) return null;
     const both = flying.length > 1;
-    const rows = flying.flatMap((k) => this.shots(k).map((sh) => ({ ...sh, k })));
+    const rows = [...flying.flatMap((k) => this.shots(k).map((sh) => ({ ...sh, k }))), ...salvos];
     rows.sort((x, y) => x.hits - y.hits);
     const home = flying.map((k) => {
       const r = this.routes[k], at = timeline(r, this.pkgs[k].map((a) => a.type)).at;
@@ -1667,9 +1967,35 @@ export class StrikeEditor extends BaseEditor {
     return this.section('TIMING',
       h('div', { class: 'ds-note' }, 'Planned times from take-off: turn points on the map show when the package gets there, weapons when they go and land. HARM times (~) assume the radar is on.'),
       ...rows.map((sh) => h('div', { class: 'ds-time' },
-        h('b', { style: { color: sh.harm ? '#7cf' : COL.short } }, `${sh.harm ? '~' : ''}${clock(sh.hits)}`),
-        h('span', { class: 'grow' }, h('span', { style: sh.k ? { color: B_COL } : null }, `${both && !sh.k ? 'A · ' : ''}${sh.jet}`), `: ${sh.n > 1 ? sh.n + '× ' : ''}${sh.short} at ${sh.what}`, h('span', { class: 'faint' }, ` (away ${clock(sh.away)})`)))),
+        h('b', { style: { color: sh.ship ? SHIP_COL : sh.harm ? '#7cf' : COL.short } }, `${sh.harm ? '~' : ''}${clock(sh.hits)}`),
+        h('span', { class: 'grow' }, h('span', { style: sh.ship ? { color: SHIP_COL } : sh.k ? { color: B_COL } : null }, `${both && !sh.k && !sh.ship ? 'A · ' : ''}${sh.jet}`), `: ${sh.n > 1 ? sh.n + '× ' : ''}${sh.short} at ${sh.what}`, h('span', { class: 'faint' }, ` (away ${clock(sh.away)})`)))),
       ...home);
+  }
+
+  /** The ships at sea (planned, or in the strike): their missile ring, the hull, the name, and in the planner a line
+   *  to each salvo's site. While one is being put to sea, how close to each known site it may go. */
+  drawFleet(ctx, v) {
+    const live = this.sim instanceof StrikeSim ? this.sim.ships : null;
+    if (this.phase === 'brief' && this.placing) for (const s of this.mission.sites) if (this.mission.known[s.id]) v.circle(s.x, s.y, SHIP_STANDOFF, 'rgba(255,120,120,0.45)', 'rgba(255,80,80,0.05)', [4, 6]);
+    if (!live && this.phase !== 'brief') return;
+    const fleet = this.fleet();
+    const list = live || (this.ships || []).map((d) => { const f = fleet.find((x) => x.id === d.id); return f && { ...d, type: f.type, nm: f.name }; }).filter(Boolean);
+    for (const sh of list) {
+      const S = SHIPS[sh.type], x = v.sx(sh.x), y = v.sy(sh.y);
+      v.circle(sh.x, sh.y, S.missile.km, `${SHIP_COL}99`, `${SHIP_COL}0c`, [6, 5]);
+      if (this.phase === 'brief') for (const sv of sh.salvos) {
+        const s = this.mission.sites.find((q) => q.id === sv.site);
+        if (!s) continue;
+        ctx.strokeStyle = `${SHIP_COL}aa`; ctx.setLineDash([3, 5]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(v.sx(s.x), v.sy(s.y)); ctx.stroke(); ctx.setLineDash([]);
+        v.label(`${this.salvoCount(sv.site)}× TLAM ${clock(sv.t).slice(3)} → ${clock(sv.t + this.tlamTime(sh, s)).slice(3)}`, (sh.x + s.x) / 2, (sh.y + s.y) / 2, SHIP_COL, { dx: 6, dy: 12, font: '9.5px ui-monospace, Consolas, monospace' });
+      }
+      // the hull, bow to the east
+      ctx.fillStyle = SHIP_COL;
+      ctx.beginPath(); ctx.moveTo(x + 10, y); ctx.lineTo(x + 4, y - 3.5); ctx.lineTo(x - 8, y - 3.5); ctx.lineTo(x - 9, y); ctx.lineTo(x - 8, y + 3.5); ctx.lineTo(x + 4, y + 3.5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#0b1219'; ctx.fillRect(x - 3, y - 1.5, 4, 3);
+      v.label(sh.nm, sh.x, sh.y, SHIP_COL, { dx: 13, dy: -6 });
+    }
   }
 
   drawSniffer(ctx, v) {
@@ -1691,7 +2017,7 @@ export class StrikeEditor extends BaseEditor {
     for (const d of s.decoys) if (d.alive) { ctx.fillStyle = COL.short; ctx.fillRect(v.sx(d.x) - 2, v.sy(d.y) - 2, 4, 4); }
     for (const w of s.weapons) {
       if (w.dead || w.delay > 0) continue;
-      ctx.fillStyle = w.mu === 'harm' ? '#7cf' : '#ffd84a';
+      ctx.fillStyle = w.ship ? SHIP_COL : MUNITIONS[w.mu]?.kind === 'arm' && !w.gps ? '#7cf' : '#ffd84a';
       ctx.beginPath(); ctx.arc(v.sx(w.x), v.sy(w.y), 2, 0, Math.PI * 2); ctx.fill();
     }
     for (const j of s.jets) if (j.alive) this.jetIcon(ctx, v.sx(j.x), v.sy(j.y), j.f.pos.hdg || 0, j.f.k ? B_COL : COL.friend, 7);
@@ -1743,7 +2069,7 @@ export class StrikeEditor extends BaseEditor {
 
   onShow() { this.view?.resize(); }
   onHide() { if (this.sim && !this.sim.done && !this.paused) this.setPaused(true); } // off screen: the clock stops
-  destroy() { removeEventListener('keydown', this.zKeys); removeEventListener('keyup', this.zKeys); removeEventListener('blur', this.zOff); this.stopLoop(); this.ro?.disconnect(); clearTimeout(this.saveT); if (this.pauseMenu) this.closePauseMenu(); this.closeMenu(); this.closePop(); }
+  destroy() { this.stopPlacing(); removeEventListener('keydown', this.zKeys); removeEventListener('keyup', this.zKeys); removeEventListener('blur', this.zOff); this.stopLoop(); this.ro?.disconnect(); clearTimeout(this.saveT); if (this.pauseMenu) this.closePauseMenu(); this.closeMenu(); this.closePop(); }
 }
 
 export { THEATRE };

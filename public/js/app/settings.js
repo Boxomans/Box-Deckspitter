@@ -127,6 +127,7 @@ export class SettingsPart {
             return h('label', { class: 'row', style: { gap: '8px', alignItems: 'center' } }, h('span', { class: 'dim' }, 'Volume'), r);
           })()),
         this.soundSettings(),
+        this.screensaverSettings(),
         h('div', { class: 'settings-group' }, h('h4', {}, 'Documents'),
           h('span', { class: 'dim' }, 'Default font for new documents'),
           sel('docFont', ['Calibri', 'Arial', 'Georgia', 'Times New Roman', 'Cambria', 'Segoe UI', 'Verdana', 'Garamond', 'Inter'].map((f) => [f, f])),

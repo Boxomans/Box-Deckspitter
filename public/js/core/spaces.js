@@ -1,6 +1,6 @@
 // BoxSpaces — open a folder as a workspace: file tree, git status, search across files, quick open.
 
-import { h, clear, basename, dirname, joinPath, extOf, debounce, formatBytes } from './dom.js';
+import { h, clear, basename, dirname, joinPath, extOf, debounce, formatBytes, fileManager } from './dom.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
 import { contextMenu, promptDialog, confirmDialog, toast, errorToast, hoverKeys, rubberSelect, modal } from './ui.js';
@@ -100,7 +100,7 @@ export class Spaces {
             h('span', { class: 'fr-x', role: 'button', 'data-tip': 'Remove from recent (the folder itself stays)', onclick: (e) => { e.stopPropagation(); this.forgetRecent(r, host); } }, icon('x', 'sm')));
           row.addEventListener('contextmenu', (e) => contextMenu(e, [
             { label: 'Open', icon: 'folder-open', action: async () => { await this.open(r); this.render(host); } },
-            { label: 'Show in Explorer', icon: 'external', action: () => api.reveal(r) },
+            { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.reveal(r) },
             { label: 'Copy path', icon: 'copy', action: () => { navigator.clipboard.writeText(r); toast('Copied', { timeout: 1200 }); } },
             { sep: true },
             { label: 'Remove from recent', icon: 'x', action: () => this.forgetRecent(r, host) },
@@ -171,7 +171,7 @@ export class Spaces {
       { sep: true },
       { label: 'Copy path', action: () => navigator.clipboard.writeText(e.path) },
       { label: 'Copy relative path', action: () => navigator.clipboard.writeText(e.path.slice(this.root.length + 1)) },
-      { label: 'Show in Explorer', icon: 'external', action: () => api.reveal(e.path) },
+      { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.reveal(e.path) },
     ];
   }
 
@@ -183,7 +183,7 @@ export class Spaces {
       { sep: true },
       ...(dir !== this.root ? [{ label: 'Rename…', action: () => this.rename(dir) }, { label: 'Delete (Recycle Bin)', icon: 'trash', action: () => this.trash(dir) }, { sep: true }] : []),
       { label: 'Copy path', action: () => navigator.clipboard.writeText(dir) },
-      { label: 'Show in Explorer', icon: 'external', action: () => api.reveal(dir) },
+      { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.reveal(dir) },
     ];
   }
 

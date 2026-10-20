@@ -4,7 +4,7 @@
 // emulator: programs that take over the screen or wait for a keypress (vim, less, "Press any key") won't work.
 
 import { BaseEditor } from './base.js';
-import { h, clear, clamp, basename } from '../core/dom.js';
+import { h, clear, clamp, basename, fileManager } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { tbButton, tbSep, toast, errorToast, showMenu, contextMenu, confirmDialog } from '../core/ui.js';
@@ -128,7 +128,7 @@ export class TerminalEditor extends BaseEditor {
     this.shellBtn = tbButton('terminal', 'Which shell', (e) => showMenu((this.shells || []).map((s) => ({ label: s.name, checked: s.id === this.shell, action: () => this.switchShell(s.id) })), { anchor: e.currentTarget }), { text: 'Shell' });
     return h('div', { class: 'toolbar' },
       tbButton('folder-open', 'Run in a different folder', () => this.chooseFolder(), { text: 'Folder…' }),
-      tbButton('external', 'Show this folder in Explorer', () => this.cwd && api.post('/api/reveal', { path: this.cwd }).catch(() => {})),
+      tbButton('external', `Show this folder in ${fileManager()}`, () => this.cwd && api.post('/api/reveal', { path: this.cwd }).catch(() => {})),
       tbSep(), this.shellBtn,
       tbSep(),
       tbButton('square', 'Stop the running command (Ctrl+C)', () => this.stop()),

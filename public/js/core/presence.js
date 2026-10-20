@@ -30,6 +30,7 @@ const LINES = {
   swap: { plain: ['Swapping files'], silly: ['shuffling file profiles', 'hot-swapping a folder', 'swapping loadouts'] },
   ticker: { plain: ['Checking the markets'], silly: ['watching numbers go up (hopefully)', 'staring at a stock chart', 'pretending to understand the market'] },
   weather: { plain: ['Checking the weather'], silly: ['checking if it’s raining', 'looking out a digital window', 'reading the forecast'] },
+  saver: { plain: ['Making a screensaver'], silly: ['making a screensaver', 'stacking weird layers', 'bouncing things into corners', 'staring at plasma'] },
   todo: { plain: ['Making a to-do list'], silly: ['writing a to-do list', 'ticking things off', 'putting it on the list', 'procrastinating productively'] },
   tunnel: { plain: ['Routing audio'], silly: ['plumbing some audio', 'running sound through a tunnel', 'patching cables'] },
   convert: { plain: ['Converting files'], silly: ['turning files into other files', 'changing a file’s outfit', 'translating file formats'] },

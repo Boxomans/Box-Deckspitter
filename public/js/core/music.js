@@ -7,7 +7,7 @@
 // Full screen fills the window with the player, a big cover and a visualizer.
 
 import { api } from './api.js';
-import { h, clear, formatBytes, stripExt, extOf } from './dom.js';
+import { h, clear, formatBytes, stripExt, extOf, fileManager } from './dom.js';
 import { icon } from './icons.js';
 import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal, promptDialog, confirmDialog } from './ui.js';
 import { pickOpen } from './files.js';
@@ -1109,7 +1109,7 @@ export function createMusic(app) {
         ] },
         ...(realPl() && inPl(tr.name, realPl()) ? [{ label: `Remove from “${realPl()}”`, icon: 'x', action: () => removeSongs([tr.name], realPl()) }] : []),
         { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => renameInline(row) },
-        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal('audio', tr.name) },
+        { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.dumpReveal('audio', tr.name) },
         { label: 'Remove from audio dump', icon: 'trash', shortcut: 'Del', action: remove },
       ]));
       ui.list.append(row);

@@ -37,13 +37,18 @@ export const FEATS = [
   { id: 'heat', name: 'Speed of heat', what: 'Only F-15Es, every leg at Dash', test: (r) => r.jets > 0 && r.allF15 && r.allDash },
 ];
 
-/** Points a flown strike earns, to spend on jets in the hangar: 100 for the objective (only the first time
+/** Points a flown strike earns, to spend on jets in the hangar: 50 for the objective, 50 for each on a mission with two (only the first time
  *  for a mission, so flying it again doesn't farm them), 25 more with every jet home, 10 just for flying; twice that
- *  on a large mission; 12 for each new badge. Returns [[what, points]]. */
+ *  on a large mission; with the objective, 5 for each other target destroyed and 10 for each fighter shot down (twice
+ *  that on a large mission, and again only the first time; the ships' Tomahawk kills don't count); 12 for each new
+ *  badge. Returns [[what, points]]. */
 export function strikePoints(r, large, repeat, badges) {
   const x = large ? 2 : 1, out = [['Flown', 10 * x]];
-  if (r.won && !repeat) out.push(['Objective destroyed', 50 * x]);
+  const objs = r.objectives || 1;
+  if (r.won && !repeat) out.push([objs > 1 ? `Objectives destroyed (${objs})` : 'Objective destroyed', 50 * objs * x]);
   if (r.won && !repeat && !r.lost) out.push(['Every jet home', 25 * x]);
+  if (r.won && !repeat && r.groundKills) out.push([`Other targets destroyed (${r.groundKills})`, 5 * r.groundKills * x]);
+  if (r.won && !repeat && r.airKills) out.push([`Fighters shot down (${r.airKills})`, 10 * r.airKills * x]);
   if (badges) out.push([`New badge${badges === 1 ? '' : 's'} (${badges})`, 12 * badges]);
   return out;
 }
@@ -79,17 +84,17 @@ export function strikeResult(plan, sim, cost) {
   const onOne = {}; // SDBs per target
   let loaded = 0;
   for (const a of pkg) for (const s of a.stations) {
-    if (!s.mu || s.mu === 'pod' || MUNITIONS[s.mu].kind === 'aam') continue; // the jamming pod stays on, and air-to-air missiles only go if there's a fighter
+    if (!s.mu || s.mu === 'pod' || s.mu === 'tank' || MUNITIONS[s.mu].kind === 'aam') continue; // the jamming pod stays on, air-to-air missiles only go if there's a fighter, and a drop tank isn't a weapon
     const n = s.n || MUNITIONS[s.mu].per;
     loaded += n;
     if (s.mu === 'sdb' && s.target?.site) onOne[`${s.target.site}:${s.target.idx}`] = (onOne[`${s.target.site}:${s.target.idx}`] || 0) + n;
   }
-  const left = sim.jets.reduce((n, j) => n + j.stations.reduce((k, s) => k + (s.mu === 'pod' || MUNITIONS[s.mu]?.kind === 'aam' ? 0 : s.n || 0), 0), 0);
+  const left = sim.jets.reduce((n, j) => n + j.stations.reduce((k, s) => k + (s.mu === 'pod' || s.mu === 'tank' || MUNITIONS[s.mu]?.kind === 'aam' ? 0 : s.n || 0), 0), 0);
   return {
-    won: sim.objectiveDone(), home: sim.done?.why === 'home', budget: plan.mission.budget, cost,
+    won: sim.objectiveDone(), objectives: (plan.mission.objectives || [0]).length, home: sim.done?.why === 'home', budget: plan.mission.budget, cost,
     jets: pkg.length, lost: sim.lost.length, lostFuel: sim.lost.filter((l) => l.why === 'fuel').length,
     fumes: sim.jets.some((j) => j.alive && j.fuel >= 0.97),
-    samShots: sim.samShots || 0, harmKills: sim.harmKills || 0,
+    samShots: sim.samShots || 0, harmKills: sim.harmKills || 0, groundKills: sim.groundKills || 0, airKills: sim.airKills || 0,
     maxSdb: Math.max(0, ...Object.values(onOne)), loaded, released: loaded - left,
     allDeck: legs.length > 0 && legs.every((p) => p.alt === 'deck'), allDash: legs.length > 0 && legs.every((p) => p.spd === 'dash'),
     allF15: pkg.length > 0 && pkg.every((a) => AIRCRAFT[a.type].id === 'f15e'),

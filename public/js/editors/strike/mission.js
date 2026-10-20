@@ -2,7 +2,7 @@
 // somewhere in one of the field's regions, the targets inside it, and the air defence network around it. Everything
 // but the airfields' positions is made up from the mission's seed: no real deployments.
 
-import { SAMS, TARGETS, RUNWAY_HP, RUNWAY_LEN, BUDGET, LARGE_BUDGET, CODEWORDS } from './data.js';
+import { SAMS, TARGETS, RUNWAY_HP, RUNWAY_LEN, BUDGET, LARGE_BUDGET, CODEWORDS, homes } from './data.js';
 import { rng, whereIs, onLand, inField, inRegion, zoneAt, makeZones, arcDist, arcSpan, ARC_HALF } from './geo.js';
 
 /** Which airfields have the long runway (the rest of the medium ones are medium). */
@@ -127,11 +127,31 @@ export function makeMission(world, proj, seed = (Math.random() * 2 ** 31) >>> 0,
       x: primary.x + Math.cos(ang) * back - Math.sin(ang) * side, y: primary.y + Math.sin(ang) * back + Math.cos(ang) * side });
   }
 
+  const code = r.pick(CODEWORDS);
+  // now and then a second objective: the engagement radar of a long-range site covering the first (it goes on the map
+  // from the start), or failing one, another part of the objective itself. Both have to go.
+  const objectives = [{ site: primary.id, idx: objective }], known = { [primary.id]: true };
+  if (r() < 0.3) {
+    const longs = sites.filter((s) => s !== primary && s.sam && SAMS[s.sam].ring === 'long');
+    if (longs.length) {
+      const s = r.pick(longs);
+      objectives.push({ site: s.id, idx: s.targets.findIndex((t) => t.k === 'fc') });
+      known[s.id] = true;
+    } else {
+      const rest = pickable.filter(([, i]) => i !== objective);
+      if (rest.length) objectives.push({ site: primary.id, idx: r.pick(rest)[1] });
+    }
+  }
   return {
-    v: 1, seed, type, region, size: big ? 'large' : 'normal', code: r.pick(CODEWORDS), budget: BUDGET[type] * (big ? LARGE_BUDGET : 1), origin, arc, primary: primary.id, objective: { site: primary.id, idx: objective },
-    sites, known: { [primary.id]: true }, cap, zones,
+    v: 1, seed, type, region, size: big ? 'large' : 'normal', code, budget: BUDGET[type] * (big ? LARGE_BUDGET : 1), origin, arc, primary: primary.id, objective: objectives[0],
+    ...(objectives.length > 1 ? { objectives } : {}), sites, known, cap, zones,
   };
 }
+
+/** A mission's objectives: [{ site, idx }], one or two (every one has to be destroyed). */
+export const objectivesOf = (m) => m.objectives || [m.objective];
+/** Is target idx of this site one of the objectives? Its number (1, 2) if so, else 0. */
+export const objectiveNo = (m, site, idx) => objectivesOf(m).findIndex((o) => o.site === site && o.idx === idx) + 1;
 
 // ---- the inside of each site: positions in metres from its middle (x east, y south)
 
@@ -187,14 +207,23 @@ export const targetHp = (t) => t.hp ?? TARGETS[t.k]?.hp ?? 1;
 export const isHard = (t) => !!TARGETS[t.k]?.hard;
 export const alive = (t) => (t.dmg || 0) < targetHp(t);
 
-/** Radars that can search: a site's search radar, or a Tor/Pantsir vehicle (it has its own). */
-export const searchRadars = (s) => s.targets.filter((t) => (t.k === 'search' || t.k === 'tlar') && alive(t));
-/** Radars that can guide a missile: the engagement radar, a Buk TELAR, a Tor/Pantsir vehicle. */
-export const fcRadars = (s) => s.targets.filter((t) => (t.k === 'fc' || t.k === 'telar' || t.k === 'tlar') && alive(t));
+/** A site whose command post is destroyed: its radars go off the air (still standing, but nobody runs them). */
+export const headless = (s) => s.targets.some((t) => t.k === 'post') && !s.targets.some((t) => t.k === 'post' && alive(t));
+/** Radars that can search: a site's search radar, or a Tor/Pantsir vehicle (it has its own). None once the command post is gone. */
+export const searchRadars = (s) => (headless(s) ? [] : s.targets.filter((t) => (t.k === 'search' || t.k === 'tlar') && alive(t)));
+/** Radars that can guide a missile: the engagement radar, a Buk TELAR, a Tor/Pantsir vehicle. None once the command post is gone. */
+export const fcRadars = (s) => (headless(s) ? [] : s.targets.filter((t) => (t.k === 'fc' || t.k === 'telar' || t.k === 'tlar') && alive(t)));
 /** Something left that can launch. */
 export const launchers = (s) => s.targets.filter((t) => (t.k === 'launcher' || t.k === 'telar' || t.k === 'tlar') && alive(t));
 export const canEngage = (s) => !!s.sam && fcRadars(s).length > 0 && launchers(s).length > 0 && s.fired < s.missiles;
 export const isRadar = (t) => ['search', 'fc', 'telar', 'tlar'].includes(t.k);
+
+/** Smart targeting (a station's target 'smart'): this many at each target along the route. */
+export const SMART_RIPPLE = 2;
+/** Smart targeting's order: 0 the objectives, 1 radars and air defences (launchers, command posts), 2 the rest. */
+export const smartTier = (m, s, i) => (objectiveNo(m, s.id, i) ? 0 : isRadar(s.targets[i]) || ['launcher', 'telar', 'tlar', 'post'].includes(s.targets[i].k) ? 1 : 2);
+/** Can a smart station go for this target at all? A weapon in radar mode only at radars. */
+export const smartFits = (st, t) => alive(t) && (!homes(st) || isRadar(t));
 
 /** Where a target inside a site is on the map (km). */
 export const targetXY = (s, t) => ({ x: s.x + t.x / 1000, y: s.y + t.y / 1000 });

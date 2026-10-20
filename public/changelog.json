@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.1.6",
+    "date": "2026-10-20",
+    "notes": [
+      "BoxSaver, in the Toolbox: make your own screensavers. Stack layers (bouncing things, starfield, code rain, plasma, Mystify lines, tunnel, wavy words, clock, fireworks, Game of Life, a picture, TV static, or your own code), each with its own settings, over a background with whole-screen effects. A live preview shows it as you go, Random throws one together, and the examples can be copied and changed. Screensavers are kept in the settings export.",
+      "Screensaver, in Settings › Screensaver (off until you switch it on): after 1 minute to 1 hour with no key or mouse move on the PC, one of your BoxSaver screensavers (or a random one, or an example) covers the window. Any key, click, scroll or mouse move ends it. It waits while a video plays, and not while the app is locked or minimised. Preview shows it right away.",
+      "BoxWave: Change speed can keep the pitch (otherwise the pitch goes with the speed, like a tape). Insert silence, Amplify, Change speed and the effects now open a window with a slider for the amount; the mouse wheel moves it.",
+      "Toolbox: hover a tool and press F2 to rename it (Ctrl+F2 puts the original name back). The name is the same one its home card shows, so renaming either changes both. Tools that are only in the Toolbox can now be renamed too.",
+      "Screenshots: no longer come out black on HDR screens.",
+      "Weather: no longer shows an error on the first start of a new copy.",
+      "Linux: menus and tips name your file manager instead of Windows Explorer, and BoxTerminal's Toolbox line says bash.",
+      "Deep Strike: added new content."
+    ]
+  },
+  {
     "version": "1.1.5",
     "date": "2026-10-19",
     "notes": [

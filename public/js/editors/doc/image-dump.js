@@ -3,7 +3,7 @@
 // Right-click copies (image → picture, PDF → file); Shift+right-click shows every option.
 // Drag a thumbnail into the page, or (in the app window) out to Explorer / the desktop / Discord as a real file.
 
-import { h, clear, formatBytes, timeAgo, blobToDataURL, basename, extOf, vendor } from '../../core/dom.js';
+import { h, clear, formatBytes, timeAgo, blobToDataURL, basename, extOf, vendor, fileManager } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
 import { api } from '../../core/api.js';
 import { contextMenu, toast, errorToast, promptDialog, hoverKeys, renameInline, PATHS_MIME, draggedPaths } from '../../core/ui.js';
@@ -101,7 +101,7 @@ export class ImageDump {
         kind === 'doc' && onSaveDoc ? h('button', { class: 'btn sm', 'data-tip': 'Save the open document into the doc dump as a PDF', onclick: () => this.saveDoc() }, icon('file-pdf', 'sm'), 'Save this doc here') : null,
         h('button', { class: 'btn sm', onclick: () => this.addFromDisk() }, icon('plus', 'sm'), kind === 'doc' ? 'Add documents' : 'Add images'),
         h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => this.refresh(true) }, icon('refresh', 'sm')),
-        h('button', { class: 'icon-btn', 'data-tip': 'Open folder in Explorer', onclick: () => api.dumpReveal(kind, null, this.sub || null) }, icon('external', 'sm')),
+        h('button', { class: 'icon-btn', 'data-tip': `Open the folder in ${fileManager()}`, onclick: () => api.dumpReveal(kind, null, this.sub || null) }, icon('external', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': 'Close', onclick: () => this.toggle(false) }, icon('chevron-down', 'sm'))),
       h('div', { class: 'dump-scroll' }, this.grid, this.empty));
     this.drawer.hidden = true;
@@ -215,7 +215,7 @@ export class ImageDump {
       card.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Open', icon: 'folder-open', action: () => this.openFolder(f.name) },
         { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { if (!renameInline(card)) this.rename(f); } },
-        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(this.kind, f.name) },
+        { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.dumpReveal(this.kind, f.name) },
         { sep: true },
         { label: 'Remove folder', icon: 'trash', shortcut: 'Del', action: () => this.remove(f) },
       ]));
@@ -262,7 +262,7 @@ export class ImageDump {
       { label: 'Compare with…', icon: 'diff', action: () => this.app.compareWith(it.path) },
       { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { const c = [...this.grid.children].find((x) => x.querySelector('.dump-name')?.textContent === (it.base || it.name)); if (!c || !renameInline(c)) this.rename(it); } },
       ...(this.sub ? [{ label: 'Move up a folder', icon: 'arrow-up', action: () => api.dumpMove([it.name], this.sub.split('/').slice(0, -1).join('/'), this.kind).then(() => this.refresh(true), errorToast) }] : []),
-      { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(this.kind, it.name) },
+      { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.dumpReveal(this.kind, it.name) },
       { sep: true },
       { label: 'Remove from dump', icon: 'trash', shortcut: 'Del', action: () => this.remove(it) },
     ];
@@ -360,7 +360,7 @@ export class ImageDump {
     try {
       await api.dumpClip(it.name, this.kind);
       this.app.clips?.add({ type: 'file', name: it.name, path: it.path, source: this.cfg.label });
-      toast(`Copied ${it.name} — paste it into Explorer, Discord, an email…`, { type: 'ok', timeout: 2200 });
+      toast(`Copied ${it.name} — paste it into ${fileManager()}, Discord, an email…`, { type: 'ok', timeout: 2200 });
     } catch (e) { errorToast(e, 'Copy failed'); }
   }
 

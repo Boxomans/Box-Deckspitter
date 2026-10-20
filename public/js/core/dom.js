@@ -305,6 +305,15 @@ export function rgbToHex(rgb) {
 
 export function isMac() { return /Mac/.test(navigator.platform); }
 
+// the server's OS (app.js sets it from /api/info), for labels that name the system's own programs
+let hostPlatform = /Win/.test(navigator.platform) ? 'win32' : /Mac/.test(navigator.platform) ? 'darwin' : 'linux';
+export function setHostPlatform(p) { if (p) hostPlatform = p; }
+export function hostIsWindows() { return hostPlatform === 'win32'; }
+/** What "Show in …" opens: Explorer on Windows, Finder on a Mac, the file manager elsewhere. */
+export function fileManager(long = false) {
+  return hostPlatform === 'win32' ? (long ? 'Windows Explorer' : 'Explorer') : hostPlatform === 'darwin' ? 'Finder' : 'the file manager';
+}
+
 export function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = h('a', { href: url, download: name });

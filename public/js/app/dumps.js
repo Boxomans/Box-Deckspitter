@@ -1,7 +1,7 @@
 // Box-Deckspitter app shell, the dump panels (images, media, docs, audio).
 // Methods of App (app.js mixes this class into it).
 
-import { $, h, clear, basename, extOf, formatBytes, timeAgo } from '../core/dom.js';
+import { $, h, clear, basename, extOf, formatBytes, timeAgo, fileManager } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import {
@@ -76,7 +76,7 @@ export class DumpsPart {
       h('button', { class: 'icon-btn', 'data-tip': 'New folder', onclick: newFolder }, icon('folder-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Add files', onclick: addFiles }, icon('plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => again() }, icon('refresh', 'sm')),
-      h('button', { class: 'icon-btn', 'data-tip': 'Open this folder in Explorer', onclick: () => api.dumpReveal(kind, null, sub || null) }, icon('external', 'sm')),
+      h('button', { class: 'icon-btn', 'data-tip': `Open this folder in ${fileManager()}`, onclick: () => api.dumpReveal(kind, null, sub || null) }, icon('external', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Hide panel', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
     h('div', { class: 'explorer-path' },
       h('button', { class: 'icon-btn', 'data-tip': 'Up one folder (Mouse 4)', disabled: !sub, onclick: () => again(parts.slice(0, -1).join('/')) }, icon('arrow-up', 'sm')),
@@ -139,7 +139,7 @@ export class DumpsPart {
       row.addEventListener('contextmenu', (e) => contextMenu(e, [
         { label: 'Open', icon: 'folder-open', action: () => again(f.name) },
         { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { if (!renameInline(row)) promptDialog('Rename folder', 'New name', f.base).then((n) => n && rename(f, n).catch(errorToast)); } },
-        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(kind, f.name) },
+        { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.dumpReveal(kind, f.name) },
         { sep: true },
         { label: 'Remove folder', icon: 'trash', shortcut: 'Del', action: () => remove([f]) },
       ]));
@@ -174,7 +174,7 @@ export class DumpsPart {
         { label: 'Copy as file', icon: 'copy', shortcut: 'Right-click', action: copyFile },
         { label: 'Copy path', icon: 'link', action: () => navigator.clipboard.writeText(it.path) },
         { label: 'Rename…', icon: 'edit', shortcut: 'F2', action: () => { if (!renameInline(row)) promptDialog('Rename', 'New name', it.base, { selectBase: true }).then((n) => n && rename(it, n).catch(errorToast)); } },
-        { label: 'Show in Explorer', icon: 'external', action: () => api.dumpReveal(kind, it.name) },
+        { label: `Show in ${fileManager()}`, icon: 'external', action: () => api.dumpReveal(kind, it.name) },
         ...(sub ? [{ label: 'Move up a folder', icon: 'arrow-up', action: () => api.dumpMove([it.name], parts.slice(0, -1).join('/'), kind).then(() => again(), errorToast) }] : []),
         { sep: true },
         { label: 'Remove from the dump', icon: 'trash', shortcut: 'Del', action: () => remove([it]) },

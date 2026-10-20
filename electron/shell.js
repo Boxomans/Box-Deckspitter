@@ -472,6 +472,8 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     if (win) win.setFullScreen(!!on);
   });
   ipcMain.handle('bds:is-fullscreen', (e) => !!winOf(e)?.isFullScreen());
+  // the screensaver (public/js/app/screensaver.js): seconds since the last key or mouse move anywhere on the PC
+  ipcMain.handle('bds:idle-seconds', () => powerMonitor.getSystemIdleTime());
 
   ipcMain.handle('bds:dialog', async (e, opts) => {
     const win = winOf(e);

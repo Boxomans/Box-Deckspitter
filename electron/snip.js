@@ -205,8 +205,14 @@ public static class BdsHdr {
     try {
       Fn<DVoidPtr>(dup, 7)(dup, buf);
       w = Marshal.ReadInt32(buf, 0); h = Marshal.ReadInt32(buf, 4);
-      for (int i = 0; i < 6; i++) { hr = Fn<DAcquire>(dup, 8)(dup, 200, buf, out res); if (hr == 0) break; }
-      if (hr != 0) throw new Exception("frame " + hr.ToString("X8"));
+      // a frame with no present time (only the mouse moved, or the first one) can hold no picture yet: black
+      for (int i = 0; i < 8; i++) {
+        hr = Fn<DAcquire>(dup, 8)(dup, 200, buf, out res);
+        if (hr != 0) continue;
+        if (Marshal.ReadInt64(buf, 0) != 0) break;
+        Fn<DSimple>(dup, 14)(dup); Rel(res); res = IntPtr.Zero; hr = 1;
+      }
+      if (hr != 0) throw new Exception("frame " + hr.ToString("X8")); // the usual capture stands in
       frame = true;
       Guid gt = new Guid("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
       if (Fn<DQi>(res, 0)(res, ref gt, out tex) != 0) throw new Exception("texture");

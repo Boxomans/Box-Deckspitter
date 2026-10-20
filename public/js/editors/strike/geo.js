@@ -296,6 +296,16 @@ export function inField(world, x, y) {
   return inFieldOf(world.field, x, y);
 }
 
+/** The Caspian [lon0, lat0, lon1, lat1]: the map has it as sea, but it's cut off from the ocean, so no ships. */
+const CASPIAN = [46.4, 36.4, 55.2, 47.4];
+/** Can a ship sail here: open water in the field joined to the ocean (the Black Sea and the Baltic count, lakes and
+ *  the Caspian don't)? proj turns the point back into lon/lat. */
+export function onSea(world, proj, x, y) {
+  if (!inFieldOf(world.field, x, y) || probe.isPointInPath(world.land, x, y, 'evenodd') || probe.isPointInPath(world.lakes, x, y)) return false;
+  const [lon, lat] = proj.ll(x, y);
+  return !(lon > CASPIAN[0] && lat > CASPIAN[1] && lon < CASPIAN[2] && lat < CASPIAN[3]);
+}
+
 /** Is this point (km) on the land of a mission region (REGION_LANDS)? */
 export function inRegion(world, region, x, y) {
   return onLand(world, x, y) && probe.isPointInPath(world.regions[region], x, y);

@@ -1,7 +1,7 @@
 // Box-Deckspitter app shell, the file explorer panel and what you can do to files in it.
 // Methods of App (app.js mixes this class into it).
 
-import { $, $$, h, clear, basename, dirname, extOf, formatBytes, formatDate, joinPath } from '../core/dom.js';
+import { $, $$, h, clear, basename, dirname, extOf, formatBytes, formatDate, joinPath, fileManager } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { contextMenu, confirmDialog, promptDialog, toast, errorToast, hoverKeys, rubberSelect } from '../core/ui.js';
@@ -74,7 +74,7 @@ export class ExplorerPart {
       h('div', { class: 'explorer-path' },
         h('button', { class: 'icon-btn', 'data-tip': 'Up one folder', disabled: !ex.parent, onclick: () => ex.parent && this.renderExplorer(ex.parent) }, icon('arrow-up', 'sm')),
         h('span', { class: 'crumbs', title: ex.dir }, ex.dir),
-        h('button', { class: 'icon-btn', 'data-tip': 'Open in Windows Explorer', onclick: () => api.reveal(ex.dir) }, icon('external', 'sm'))),
+        h('button', { class: 'icon-btn', 'data-tip': `Open in ${fileManager(true)}`, onclick: () => api.reveal(ex.dir) }, icon('external', 'sm'))),
       h('div', { class: 'explorer-filter' }, filter),
       h('div', { class: 'panel-body' }, list));
     renderList();
@@ -85,7 +85,7 @@ export class ExplorerPart {
       return [
         { label: 'Open folder', icon: 'folder-open', action: () => this.renderExplorer(e.path) },
         { label: `Open in ${this.toolName('BoxTerminal')}`, icon: 'terminal', action: () => this.newDocument('terminal', { another: true, cwd: e.path }) },
-        { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
+        { label: `Show in ${fileManager(true)}`, icon: 'external', action: () => api.reveal(e.path) },
         { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
         { label: 'Rename…', shortcut: 'F2', action: () => this.explorerRename(e) },
       ];
@@ -96,7 +96,7 @@ export class ExplorerPart {
       ...this.videoEditorMenu([e.path]),
       ...this.backgroundMenu([e.path]),
       { sep: true },
-      { label: 'Show in Windows Explorer', icon: 'external', action: () => api.reveal(e.path) },
+      { label: `Show in ${fileManager(true)}`, icon: 'external', action: () => api.reveal(e.path) },
       { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(e.path) },
       { label: 'Compare with…', icon: 'diff', action: () => this.compareWith(e.path) },
       { label: 'Rename…', shortcut: 'F2', action: () => this.explorerRename(e) },

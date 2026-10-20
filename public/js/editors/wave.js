@@ -1,6 +1,6 @@
 // BoxWave: a plain audio editor. Open a sound (or the sound of a video), or record from a mic; see the waveform;
 // select with the mouse and cut, copy, paste, delete, trim or silence it; amplify, normalize, fade, reverse,
-// change the speed, or put BoxTunnel's effects (pitch, echo, reverb, robot, radio…) on it; then export it as WAV,
+// change the speed (keeping the pitch or not), or put BoxTunnel's effects (pitch, echo, reverb, robot, radio…) on it; then export it as WAV,
 // MP3, FLAC, OGG, Opus or M4A (everything but WAV through ffmpeg, studio-server.js). Everything is kept in memory
 // as 48 kHz floats; undo keeps whole copies, so very long files keep fewer steps.
 
@@ -8,7 +8,7 @@ import { BaseEditor } from './base.js';
 import { h, clear, clamp, basename, extOf, stripExt } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
-import { tbButton, tbSep, toast, errorToast, showMenu, contextMenu, promptDialog, modal, draggedPaths } from '../core/ui.js';
+import { tbButton, tbSep, toast, errorToast, showMenu, contextMenu, modal, draggedPaths } from '../core/ui.js';
 import { pickOpen, pickSave } from '../core/files.js';
 import { FX, VOICES, PITCH_URL, REVERB_MIX, buildFx, newFx } from '../core/tunnel-fx.js';
 import { wheelSlider } from '../core/music.js';
@@ -25,7 +25,46 @@ const parseTime = (t) => {
   return p.reduce((acc, x) => acc * 60 + parseFloat(x), 0);
 };
 const fmt = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(3).padStart(6, '0')}`; };
-const REC_WORKLET = URL.createObjectURL(new Blob([`registerProcessor('bds-rec', class extends AudioWorkletProcessor {
+/** Speed changed by ×k with the pitch kept (WSOLA): short overlapping windows are laid down at a steady pace, each
+ *  read from about where the speed puts it, nudged to the spot that lines up best with the last one so the waves
+ *  join without warble. Two channels back; yields now and then so the window stays responsive. */
+async function stretch(chs, k) {
+  const L = chs[0], R = chs[1] || chs[0], n = L.length;
+  const N = 2048, Hs = N / 2, Ha = Hs * k, D = 384;
+  const outLen = Math.max(1, Math.round(n / k));
+  const oL = new Float32Array(outLen + N), oR = new Float32Array(outLen + N), norm = new Float32Array(outLen + N);
+  const win = new Float32Array(N);
+  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / N);
+  const M = new Float32Array(n + N + 2 * D); // both channels summed, padded with silence for the search
+  for (let i = 0; i < n; i++) M[i] = L[i] + R[i];
+  let last = 0;
+  for (let j = 0, t0 = performance.now(); j * Hs < outLen; j++) {
+    let pos = Math.round(j * Ha);
+    if (j > 0) {
+      // the stretch that would carry on from the last window best: the one most like what follows it
+      const want = Math.min(last + Hs, n);
+      let best = -Infinity, bestD = 0;
+      for (let d = -D; d <= D; d += 2) {
+        const p = pos + d;
+        if (p < 0 || p >= n) continue;
+        let s = 0;
+        for (let i = 0; i < Hs; i += 4) s += M[p + i] * M[want + i];
+        if (s > best) { best = s; bestD = d; }
+      }
+      pos = Math.max(0, pos + bestD);
+    }
+    const o = j * Hs;
+    for (let i = 0; i < N && pos + i < n; i++) {
+      const w = win[i];
+      oL[o + i] += L[pos + i] * w; oR[o + i] += R[pos + i] * w; norm[o + i] += w;
+    }
+    last = pos;
+    if (performance.now() - t0 > 30) { await new Promise((r) => setTimeout(r)); t0 = performance.now(); }
+  }
+  for (let i = 0; i < outLen; i++) if (norm[i] > 1e-3) { oL[i] /= norm[i]; oR[i] /= norm[i]; }
+  return [oL.slice(0, outLen), oR.slice(0, outLen)];
+}
+const REC_WORKLET =URL.createObjectURL(new Blob([`registerProcessor('bds-rec', class extends AudioWorkletProcessor {
   process(inputs) { const i = inputs[0]; if (i && i.length) this.port.postMessage(i.map((c) => c.slice(0))); return true; }
 });`], { type: 'text/javascript' }));
 
@@ -204,9 +243,11 @@ export class WaveEditor extends BaseEditor {
     this.changed();
   }
   insertSilence = async () => {
-    const v = await promptDialog('Insert silence', 'Seconds', '1');
-    const s = +v;
-    if (!(s > 0)) return;
+    const got = await this.sliderDialog('Insert silence', [
+      { label: 'Length', min: 0.1, max: 30, step: 0.1, value: this.silenceLast ?? 1, fmt: (v) => `${v.toFixed(1)} s`, wheel: 0.5 },
+    ]);
+    if (!got) return;
+    const s = this.silenceLast = got[0];
     const n = Math.round(Math.min(3600, s) * SR);
     const at = this.sel.a;
     const add = () => {
@@ -238,9 +279,14 @@ export class WaveEditor extends BaseEditor {
     const [a, b] = this.range();
     const p = this.peak(a, b);
     const most = p > 0 ? -20 * Math.log10(p) : 0;
-    const v = await promptDialog('Amplify', `Change in dB (up to ${most.toFixed(1)} dB before it clips)`, String(+most.toFixed(1)));
-    const db = parseFloat(v);
-    if (!Number.isFinite(db)) return;
+    const top = Math.round(most * 10) / 10;
+    const got = await this.sliderDialog('Amplify', [
+      { label: 'Change', min: -30, max: Math.max(30, Math.ceil(top)), step: 0.1, value: Math.min(top, 30), wheel: 1,
+        fmt: (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB${v > top + 0.05 ? ' · clips' : ''}` },
+    ], `Up to ${top > 0 ? '+' : ''}${top.toFixed(1)} dB before it clips.`);
+    if (!got) return;
+    const db = got[0];
+    if (!db) return;
     const k = Math.pow(10, db / 20);
     this.process(`Amplify ${db > 0 ? '+' : ''}${db} dB`, (c, a2, b2) => { for (let i = a2; i < b2; i++) c[i] *= k; });
   }
@@ -273,16 +319,17 @@ export class WaveEditor extends BaseEditor {
   }
 
   /** Render part of the sound through an OfflineAudioContext graph: build(ctx, input, output). */
-  async renderPart(label, build, { speed = 1 } = {}) {
+  async renderPart(label, build, { speed = 1, compute } = {}) {
     if (!this.need(false)) return;
     const [a, b] = this.range();
-    const n = b - a;
     this.busy(`${label}…`);
+    // compute(a, b) → new channels, for changes a Web Audio graph can't make
+    const make = (a2, b2) => (compute ? compute(a2, b2) : this.renderRange(a2, b2, build, speed));
     try {
-      const outLen = Math.max(1, Math.round(n / speed));
-      const r = await this.renderRange(a, b, build, speed);
+      const r = await make(a, b);
+      const outLen = r[0].length;
       this.stop();
-      this.snapshot(label, null, [a, b], async (a2, b2) => this.splice(a2, b2, await this.renderRange(a2, b2, build, speed)));
+      this.snapshot(label, null, [a, b], async (a2, b2) => this.splice(a2, b2, await make(a2, b2)));
       this.splice(a, b, r);
       this.sel = { a, b: a + outLen };
       this.clampView();
@@ -352,10 +399,18 @@ export class WaveEditor extends BaseEditor {
   removeFx(k) { return this.rebuild(k); }
 
   async speed() {
-    const v = await promptDialog('Change speed', 'Speed (0.25–4; the pitch goes with it, like a tape)', '1.25');
-    const k = parseFloat(v);
-    if (!(k >= 0.25 && k <= 4)) return;
-    this.renderPart(`Speed ×${k}`, (ctx, src, out) => { src.connect(out); }, { speed: k });
+    if (!this.need(false)) return;
+    const last = this.speedLast || { k: 1.25, keep: true };
+    const got = await this.sliderDialog('Change speed', [
+      { label: 'Speed', min: 0.25, max: 4, step: 0.05, value: last.k, fmt: (v) => `×${v.toFixed(2)}`, wheel: 0.05 },
+      { label: 'Keep the pitch (otherwise it goes with the speed, like a tape)', check: last.keep },
+    ]);
+    if (!got) return;
+    const [k, keep] = got;
+    this.speedLast = { k, keep };
+    if (k === 1) return;
+    if (keep) this.renderPart(`Speed ×${k} (same pitch)`, null, { compute: (a, b) => stretch(this.ch.map((c) => c.subarray(a, b)), k) });
+    else this.renderPart(`Speed ×${k}`, (ctx, src, out) => { src.connect(out); }, { speed: k });
   }
 
   async applyFx(list, label) {
@@ -370,32 +425,49 @@ export class WaveEditor extends BaseEditor {
   async oneFx(type) {
     if (type === 'reverb') return this.reverbFx();
     const d = FX[type];
-    const v = await promptDialog(d.name, `Amount (${d.min} to ${d.max} ${d.unit})`, String(d.def));
-    const x = parseFloat(v);
-    if (!Number.isFinite(x)) return;
-    this.applyFx([newFx(type, clamp(x, d.min, d.max))], `${d.name}`);
+    this.fxLast ||= {};
+    const unit = d.unit === '%' ? '%' : ` ${d.unit}`;
+    const got = await this.sliderDialog(d.name, [
+      { label: 'Amount', min: d.min, max: d.max, step: d.step, value: this.fxLast[type] ?? d.def, fmt: (v) => `${+v.toFixed(d.step < 1 ? 1 : 0)}${unit}` },
+    ]);
+    if (!got) return;
+    this.fxLast[type] = got[0];
+    this.applyFx([newFx(type, clamp(got[0], d.min, d.max))], `${d.name}`);
+  }
+
+  /** A popup of sliders (and checkboxes): rows [{ label, min, max, step, value, fmt, wheel }] or [{ label, check }].
+   *  Resolves with each row's value in order, or null when cancelled. */
+  async sliderDialog(title, rows, note = '') {
+    const els = rows.map((row) => {
+      if ('check' in row) {
+        const c = h('input', { type: 'checkbox', checked: !!row.check });
+        return { get: () => c.checked, el: h('label', { class: 'check' }, c, row.label) };
+      }
+      const { label, min, max, step, value, fmt = (v) => String(v), wheel = step } = row;
+      const r = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(value) });
+      const out = h('span', { class: 'mono' }, fmt(+r.value));
+      r.addEventListener('input', () => { out.textContent = fmt(+r.value); });
+      wheelSlider(r, wheel);
+      return { get: () => +r.value, el: h('label', { class: 'wv-rv-row' }, h('span', {}, label), r, out) };
+    });
+    const ok = await modal({
+      title,
+      body: h('div', { class: 'wv-rv' }, els.map((e) => e.el),
+        h('div', { class: 'faint', style: { fontSize: '10.5px' } }, `${note ? note + ' ' : ''}The mouse wheel moves a slider (Shift for fine steps).`)),
+      buttons: [{ label: 'Cancel', value: false, ghost: true }, { label: 'Apply', value: true, primary: true }],
+    });
+    return ok ? els.map((e) => e.get()) : null;
   }
 
   /** Reverb: two sliders, the room's size (how long the tail rings) and the strength (how much of it you hear). */
   async reverbFx() {
     const d = FX.reverb, last = this.reverbLast || { v: d.def, mix: REVERB_MIX };
-    const slider = (label, min, max, step, val, fmt, wheel) => {
-      const r = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(val) });
-      const out = h('span', { class: 'mono' }, fmt(val));
-      r.addEventListener('input', () => { out.textContent = fmt(+r.value); });
-      wheelSlider(r, wheel);
-      return { r, el: h('label', { class: 'wv-rv-row' }, h('span', {}, label), r, out) };
-    };
-    const size = slider('Room size', d.min, d.max, d.step, last.v, (v) => `${v.toFixed(1)} s`, 0.2);
-    const mix = slider('Strength', 0, 100, 1, last.mix, (v) => `${v}%`, 5);
-    const ok = await modal({
-      title: 'Reverb',
-      body: h('div', { class: 'wv-rv' }, size.el, mix.el,
-        h('div', { class: 'faint', style: { fontSize: '10.5px' } }, 'Room size: how long the sound rings on. Strength: how much of the room you hear over the dry sound. The mouse wheel moves a slider (Shift for fine steps).')),
-      buttons: [{ label: 'Cancel', value: false, ghost: true }, { label: 'Apply', value: true, primary: true }],
-    });
-    if (!ok) return;
-    this.reverbLast = { v: +size.r.value, mix: +mix.r.value };
+    const got = await this.sliderDialog('Reverb', [
+      { label: 'Room size', min: d.min, max: d.max, step: d.step, value: last.v, fmt: (v) => `${v.toFixed(1)} s`, wheel: 0.2 },
+      { label: 'Strength', min: 0, max: 100, step: 1, value: last.mix, fmt: (v) => `${v}%`, wheel: 5 },
+    ], 'Room size: how long the sound rings on. Strength: how much of the room you hear over the dry sound.');
+    if (!got) return;
+    this.reverbLast = { v: got[0], mix: got[1] };
     this.applyFx([{ ...newFx('reverb', this.reverbLast.v), mix: this.reverbLast.mix }], 'Reverb');
   }
 

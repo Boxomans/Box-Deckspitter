@@ -1,6 +1,6 @@
 // Box-Deckspitter — application shell. App is spread over app/*.js, a part per file.
 
-import { $, h, uid } from './core/dom.js';
+import { $, h, uid, setHostPlatform } from './core/dom.js';
 import { toast } from './core/ui.js';
 import { api } from './core/api.js';
 import { configureFiles } from './core/files.js';
@@ -15,6 +15,7 @@ import { createTranslate } from './core/translate.js';
 import { createCalendar } from './core/calendar.js';
 import { createMailAlerts } from './core/mail-alerts.js';
 import { LockPart } from './app/lock.js';
+import { ScreensaverPart } from './app/screensaver.js';
 import { EasterEggsPart } from './app/easter-eggs.js';
 import { RailPart } from './app/rail.js';
 import { SidebarsPart } from './app/sidebars.js';
@@ -62,6 +63,7 @@ class App {
     try {
       const [info, settings] = await Promise.all([api.info(), api.settings()]);
       this.info = info;
+      setHostPlatform(info?.platform);
       this.settings = { ...DEFAULT_SETTINGS, ...settings };
       this.renameToolKey('BoxVidKlep', 'BoxKlep');
     } catch (e) {
@@ -77,6 +79,7 @@ class App {
     this.applyLook();
     this.loadUserFonts();
     this.setupAppLock(); // before anything is drawn: the lock screen covers it straight away
+    this.setupScreensaver();
     this.presence = createPresence(this);
     this.sounds = createSounds(this);
     this.clips = createClips(this);
@@ -142,7 +145,7 @@ class App {
 }
 
 // The rest of App lives in app/*.js, a part per file; their methods are App's.
-for (const part of [LockPart, EasterEggsPart, RailPart, SidebarsPart, ThemesPart, MenusPart, TabsPart, DocumentsPart, HomePart, PanelsPart, ExplorerPart, DumpsPart, SettingsPart, SettingsSectionsPart, StartupPart, WindowPart]) {
+for (const part of [LockPart, ScreensaverPart, EasterEggsPart, RailPart, SidebarsPart, ThemesPart, MenusPart, TabsPart, DocumentsPart, HomePart, PanelsPart, ExplorerPart, DumpsPart, SettingsPart, SettingsSectionsPart, StartupPart, WindowPart]) {
   for (const key of Object.getOwnPropertyNames(part.prototype)) {
     if (key !== 'constructor') Object.defineProperty(App.prototype, key, Object.getOwnPropertyDescriptor(part.prototype, key));
   }

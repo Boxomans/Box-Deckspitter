@@ -4,7 +4,7 @@
 import { $, $$, h, clear, timeAgo } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
-import { contextMenu, rubberSelect } from '../core/ui.js';
+import { contextMenu, rubberSelect, hoverKeys } from '../core/ui.js';
 import { iconForName } from '../core/filetypes.js';
 import { TOOLS, offered } from '../core/tools.js';
 
@@ -42,11 +42,14 @@ export class PanelsPart {
   /** The Toolbox at the foot of the left rail: every tool in one list. */
   renderToolsPanel() {
     const p = clear(this.sidepanel);
+    // the tools (not the games or the extras) rename with F2, the same name their home card shows
     const row = ([ic, key, sub, open, cls = ''], movable = false) => {
-      const b = h('button', { class: `file-row tools-row ${cls}`, title: movable ? `${sub} · drag to reorder` : sub, dataset: movable ? { key } : {} }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
-        h('span', { class: 'tools-text' }, h('span', { class: 'fr-name' }, this.toolName(key)), h('span', { class: 'tools-sub' }, sub)));
+      const nameEl = h('span', { class: 'fr-name', dataset: movable ? { toolname: key } : {} }, movable ? this.toolName(key) : key);
+      const b = h('button', { class: `file-row tools-row ${cls}`, title: movable ? `${sub} · F2 to rename · Ctrl+F2 to reset · drag to reorder` : sub, dataset: movable ? { key } : {} }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
+        h('span', { class: 'tools-text' }, nameEl, h('span', { class: 'tools-sub' }, sub)));
       b.addEventListener('click', open);
-      b._find = `${this.toolName(key)} ${key} ${sub}`.toLowerCase();
+      if (movable) hoverKeys(b, { nameEl, value: () => this.toolName(key), commit: (n) => this.setToolName(key, n), reset: () => this.setToolName(key, '') });
+      Object.defineProperty(b, '_find', { get: () => `${nameEl.textContent} ${key} ${sub}`.toLowerCase() }); // follows a rename
       return b;
     };
     // Every tool in one list with its own order, dragged into place here and kept apart from the home page's. Until you move

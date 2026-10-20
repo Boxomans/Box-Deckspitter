@@ -101,7 +101,7 @@ export function createWeather(app) {
   function notify() { paint(); updateMini(); if (open) render(); for (const f of subs) { try { f(); } catch { /* a closed view */ } } }
   setInterval(() => refresh(), 60_000);
   addEventListener('focus', () => refresh());
-  refresh();
+  queueMicrotask(() => refresh()); // once everything below is set up (the pop-out widget's switch)
 
   // ------------------------------------------------------------------ the button
   function paint() {

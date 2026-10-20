@@ -4,7 +4,7 @@
 // never changes a log.
 
 import { BaseEditor } from './base.js';
-import { h, clear, clamp, debounce, formatBytes } from '../core/dom.js';
+import { h, clear, clamp, debounce, formatBytes, fileManager } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { tbButton, tbSep, toast, errorToast, showMenu, contextMenu, promptDialog } from '../core/ui.js';
@@ -535,7 +535,7 @@ export class LogEditor extends BaseEditor {
         { label: 'Show only this source', icon: 'sliders', action: () => this.soloSource(src) },
       ] : []),
       ...(def.kind === 'file' ? [
-        { label: 'Reveal in Explorer', icon: 'folder-open', action: () => api.post('/api/reveal', { path: def.path }).catch(() => {}) },
+        { label: `Show in ${fileManager()}`, icon: 'folder-open', action: () => api.post('/api/reveal', { path: def.path }).catch(() => {}) },
         { label: 'Copy path', icon: 'copy', action: () => navigator.clipboard.writeText(def.path).then(() => toast('Copied')) },
       ] : []),
     ];
