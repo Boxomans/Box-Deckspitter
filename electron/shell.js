@@ -227,7 +227,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     appWins.add(win);
     if (mainWinId == null) mainWinId = win.id;
     const id = win.id;
-    win.on('closed', () => { appWins.delete(win); if (mainWinId === id) nextMainWindow(); });
+    win.on('closed', () => { appWins.delete(win); if (mainWinId === id) nextMainWindow(); if (!appWins.size) saver.stop(); });
     // the page asks the window itself whether it's full screen (guessing from sizes fails with zoom or display scaling)
     for (const ev of ['enter-full-screen', 'leave-full-screen']) win.on(ev, () => { if (!win.isDestroyed()) win.webContents.send('bds:fullscreen-changed', win.isFullScreen()); });
     win.once('ready-to-show', () => win.show());
@@ -432,6 +432,10 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   app.whenReady().then(() => snip.register());
   // ---- BoxStudio: capture sources, global hotkeys, full speed while recording (electron/studio.js)
   const studio = require('./studio.js')({ isAppSender: fromApp, pickArea: (cb) => snip.pickArea(cb), log: (msg) => console.log(`[studio] ${msg}`) });
+  // ---- the screensaver over every screen and program (electron/saver.js); the page says when
+  const saver = require('./saver.js')({ origin: () => origin, log: (msg) => console.log(`[saver] ${msg}`) });
+  ipcMain.handle('bds:saver-playing', (e) => (fromApp(e) ? saver.playing() : false));
+  ipcMain.handle('bds:saver-start', (e, s) => (fromApp(e) && s && Array.isArray(s.layers) ? saver.start(s) : false));
 
   // The taskbar takes its icon from this copy's shortcuts (the ones Windows keeps for the app id, plus the
   // Desktop and Start menu ones), not from the window. After the icon file changes, point them at the new one;
@@ -461,6 +465,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
   app.whenReady().then(() => {
     for (const ev of ['lock-screen', 'suspend']) {
       powerMonitor.on(ev, () => {
+        saver.stop();
         notes.lock({ reason: ev });
         for (const w of BrowserWindow.getAllWindows()) w.webContents.send('bds:system-lock', ev);
       });
@@ -513,6 +518,7 @@ if (!(boot ? boot.gotLock : app.requestSingleInstanceLock())) {
     notes.lock({ hard: true, reason: 'quit' });
     snip.dispose();
     studio.dispose();
+    saver.dispose();
     if (server) { try { server.disconnect(); } catch { /* gone */ } try { server.kill(); } catch { /* gone */ } }
   });
 }

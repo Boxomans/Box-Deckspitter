@@ -39,16 +39,16 @@ export const FEATS = [
 
 /** Points a flown strike earns, to spend on jets in the hangar: 50 for the objective, 50 for each on a mission with two (only the first time
  *  for a mission, so flying it again doesn't farm them), 25 more with every jet home, 10 just for flying; twice that
- *  on a large mission; with the objective, 5 for each other target destroyed and 10 for each fighter shot down (twice
+ *  on a large mission, half on a small one; with the objective, 5 for each other target destroyed and 10 for each fighter shot down (twice
  *  that on a large mission, and again only the first time; the ships' Tomahawk kills don't count); 12 for each new
  *  badge. Returns [[what, points]]. */
-export function strikePoints(r, large, repeat, badges) {
-  const x = large ? 2 : 1, out = [['Flown', 10 * x]];
+export function strikePoints(r, size, repeat, badges) {
+  const x = size === 'large' ? 2 : size === 'small' ? 0.5 : 1, out = [['Flown', Math.round(10 * x)]];
   const objs = r.objectives || 1;
-  if (r.won && !repeat) out.push([objs > 1 ? `Objectives destroyed (${objs})` : 'Objective destroyed', 50 * objs * x]);
-  if (r.won && !repeat && !r.lost) out.push(['Every jet home', 25 * x]);
-  if (r.won && !repeat && r.groundKills) out.push([`Other targets destroyed (${r.groundKills})`, 5 * r.groundKills * x]);
-  if (r.won && !repeat && r.airKills) out.push([`Fighters shot down (${r.airKills})`, 10 * r.airKills * x]);
+  if (r.won && !repeat) out.push([objs > 1 ? `Objectives destroyed (${objs})` : 'Objective destroyed', Math.round(50 * objs * x)]);
+  if (r.won && !repeat && !r.lost) out.push(['Every jet home', Math.round(25 * x)]);
+  if (r.won && !repeat && r.groundKills) out.push([`Other targets destroyed (${r.groundKills})`, Math.round(5 * r.groundKills * x)]);
+  if (r.won && !repeat && r.airKills) out.push([`Fighters shot down (${r.airKills})`, Math.round(10 * r.airKills * x)]);
   if (badges) out.push([`New badge${badges === 1 ? '' : 's'} (${badges})`, 12 * badges]);
   return out;
 }

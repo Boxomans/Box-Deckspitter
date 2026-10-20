@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('bdsShell', {
   setFullScreen: (on) => ipcRenderer.invoke('bds:fullscreen', !!on),
   isFullScreen: () => ipcRenderer.invoke('bds:is-fullscreen'),
   idleSeconds: () => ipcRenderer.invoke('bds:idle-seconds'),
+  // the screensaver over every screen (electron/saver.js): is something else playing; put it up
+  saverPlaying: () => ipcRenderer.invoke('bds:saver-playing'),
+  saverStart: (saver) => ipcRenderer.invoke('bds:saver-start', saver),
   onFullScreen: (cb) => { ipcRenderer.on('bds:fullscreen-changed', (_e, on) => cb(!!on)); },
   dialog: (opts) => ipcRenderer.invoke('bds:dialog', opts),
   startDrag: (file) => ipcRenderer.send('bds:drag', file),

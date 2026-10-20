@@ -488,7 +488,7 @@ export class StrikeSim extends Base {
     }
   }
 
-  /** Air-to-air shots, both ways. Theirs: an R-77-1 at a jet their radar holds. Ours: an AMRAAM at a fighter our
+  /** Air-to-air shots, both ways. Theirs: an R-77-1 at a jet their radar holds, two in the air at a time. Ours: an AMRAAM at a fighter our
    *  jet's radar holds within reach, or an AIM-9X at one close enough to see. Two missiles at most on one target. */
   airToAir() {
     const live = this.bandits.filter((b) => b.alive);
@@ -500,7 +500,8 @@ export class StrikeSim extends Base {
       b.seen = true; // our warning receivers hear its radar
       if (!this.rwrHeard.has(b.cap.id)) { this.rwrHeard.add(b.cap.id); this.event(`RWR: ${b.F.name} radar painting ${pkg(held[0])}.`, 'warn', b); }
       if (!this.alert) { this.alert = true; this.event(`Seen by enemy fighters. The defences are awake.`, 'warn', b); }
-      if (!b.missiles || this.t < b.cool) continue;
+      // two of its own in the air at most, as our jets get two at a fighter: then it waits for them to land or miss
+      if (!b.missiles || this.t < b.cool || this.aams.filter((a) => !a.dead && a.from === b).length >= 2) continue;
       const rk = (j) => aamReach(R77, b.alt, j.alt, b.F.kmh.cap);
       const tg = held.filter((j) => (j.engaged || 0) < 2 && dist(b, j) <= rk(j)).sort((x, y) => dist(b, x) - dist(b, y))[0];
       if (!tg) continue;
@@ -703,20 +704,28 @@ export class StrikeSim extends Base {
       // point defence on the way in: the two closest sites covering the target each get a go. Tor and Pantsir see it
       // coming with their own radar and fire even before the alarm (and wake the network doing it); a slow glide bomb
       // gives them time to shoot, look and shoot again. Each takes on only so many at once: a big salvo saturates it.
-      // an arcing weapon (Mako) is seen high up from far off: S-300s and S-400s covering the target try to intercept it,
-      // alarm or not (their search radars pick it up, and it wakes the network). Hard to hit at Mach 5 and manoeuvring.
-      if (mu.arc && !w.arced && d < 90) {
+      // long-range intercepts (mu.lr): S-300s and S-400s covering the target try for it lr.km out. An arcing weapon
+      // (Mako) is seen high up from far off, alarm or not (their search radars pick it up, and it wakes the network); hard
+      // to hit at Mach 5 and manoeuvring. A big, slower missile (AGM-130) once the network is awake, a shot each, and
+      // only so many at once from one site.
+      const lr = mu.lr;
+      if (lr && !w.arced && d < lr.km && (lr.wakes || this.alert)) {
         w.arced = true;
         const longs = this.m.sites.filter((s) => s.sam && SAMS[s.sam].ring === 'long' && canEngage(s) && !this.blinded(s) && Math.hypot(s.x - w.tx, s.y - w.ty) <= SAMS[s.sam].missile.km)
           .sort((a, b) => Math.hypot(a.x - w.tx, a.y - w.ty) - Math.hypot(b.x - w.tx, b.y - w.ty)).slice(0, 2);
         let down = null;
         for (const ls of longs) {
           const S = SAMS[ls.sam];
+          if (!lr.wakes) {
+            const slot = Math.floor(this.t / 4);
+            ls.lrLoad = ls.lrSlot === slot ? ls.lrLoad + 1 : 1; ls.lrSlot = slot;
+            if (ls.lrLoad > S.ch) continue; // busy with the others
+          }
           if (!this.m.known[ls.id]) this.m.known[ls.id] = true;
           if (!this.alert) { this.alert = true; this.event(`${S.long} is tracking an incoming ${mu.short}. The defences are awake.`, 'warn', ls); }
-          for (let k = S.salvo; k > 0 && !down && ls.fired < ls.missiles; k--) {
+          for (let k = lr.shots || S.salvo; k > 0 && !down && ls.fired < ls.missiles; k--) {
             ls.fired++;
-            if (Math.random() < S.missile.pk * 0.3) down = S;
+            if (Math.random() < S.missile.pk * lr.pk) down = S;
           }
           if (down) break;
         }

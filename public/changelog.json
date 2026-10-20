@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.1.7",
+    "date": "2026-10-20",
+    "notes": [
+      "Screensaver: it now covers every screen and runs over every program while the app is open, minimised too. It waits while sound is playing or a program is full screen, and any key or mouse move ends it.",
+      "Music player: a Stats tab next to Library and Queue shows listening time per playlist, the songs played more than 5 times, your favourite band and genre and the average BPM. It counts from now on.",
+      "Settings › Screensaver: screensavers made in BoxSaver while Settings is open now show in the list right away.",
+      "BoxSaver: the examples can be changed right away (layers, settings, the name). The first change saves it as one of yours; the example itself stays as it was.",
+      "Deep Strike: added new content."
+    ]
+  },
+  {
     "version": "1.1.6",
     "date": "2026-10-20",
     "notes": [

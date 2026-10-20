@@ -44,9 +44,33 @@ export class SaverEditor extends BaseEditor {
       this.insp = h('div', { class: 'saver-insp' }));
     this.pane.append(this.root);
     const pick = this.app.settings.screensaverPick;
-    this.cur = this.find(pick) || this.list[0] || EXAMPLES[0];
+    this.cur = this.draft(this.find(pick) || this.list[0] || EXAMPLES[0]);
     this.sel = this.cur.layers[0]?.id || null;
     this.render();
+  }
+
+  /** An example opens as a copy of its own (from: the example's id) that becomes yours with its first change (see
+   *  edited); the example stays as it was. Your own open as they are. */
+  draft(s) {
+    if (!s.example) return s;
+    const c = clone(s);
+    delete c.example;
+    c.from = s.id;
+    return c;
+  }
+
+  /** The open screensaver changed: saved, and an example's copy kept as yours first. */
+  edited() {
+    const c = this.cur;
+    if (c.from) {
+      delete c.from;
+      c.id = blankSaver().id;
+      this.list.push(c);
+      this.insp.querySelector('.saver-banner')?.remove(); // not the whole side: a slider may be mid-drag
+      this.renderSide(); this.renderHead(); this.refreshStatus();
+      toast(`“${c.name}” is yours now. The example stays as it was.`, { type: 'ok' });
+    }
+    this.save();
   }
 
   find(id) { return this.list.find((s) => s.id === id) || EXAMPLES.find((s) => s.id === id) || null; }
@@ -54,7 +78,7 @@ export class SaverEditor extends BaseEditor {
   /** Saves a moment after the last change. */
   save() {
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => { this.saveTimer = null; this.app.saveSettings({ screensavers: clone(this.list) }); }, 500);
+    this.saveTimer = setTimeout(() => { this.saveTimer = null; this.app.saveSettings({ screensavers: clone(this.list) }); this.app.redrawSaverSettings?.(); }, 500);
   }
 
   render() {
@@ -78,12 +102,12 @@ export class SaverEditor extends BaseEditor {
   }
 
   /** Something about the layers' stack changed (added, removed, moved). */
-  restack() { this.player?.set(this.cur); this.save(); this.renderInsp(); this.refreshStatus(); }
+  restack() { this.player?.set(this.cur); this.edited(); this.renderInsp(); this.refreshStatus(); }
 
   // ---------------------------------------------------------------- the list
   renderSide() {
     const row = (s) => {
-      const el = h('div', { class: 'saver-item' + (s === this.cur ? ' active' : ''), title: s.example ? 'An example: “Make it yours” to change it' : 'Double-click to rename · right-click for more',
+      const el = h('div', { class: 'saver-item' + (s === this.cur || this.cur.from === s.id ? ' active' : ''), title: s.example ? 'An example: change anything and it’s saved as yours' : 'Double-click to rename · right-click for more',
         onclick: () => this.open(s),
         ondblclick: () => !s.example && this.rename(s),
         oncontextmenu: (e) => contextMenu(e, [
@@ -109,8 +133,8 @@ export class SaverEditor extends BaseEditor {
   }
 
   open(s) {
-    if (s === this.cur) return;
-    this.cur = s;
+    if (s === this.cur || this.cur.from === s.id) return;
+    this.cur = this.draft(s);
     this.sel = s.layers[0]?.id || null;
     this.render();
   }
@@ -148,7 +172,7 @@ export class SaverEditor extends BaseEditor {
     this.list.splice(at, 1);
     if (this.app.settings.screensaverPick === s.id) this.app.saveSettings({ screensaverPick: 'random' });
     this.save();
-    if (this.cur === s) { this.cur = this.list[Math.max(0, at - 1)] || EXAMPLES[0]; this.sel = this.cur.layers[0]?.id || null; }
+    if (this.cur === s) { this.cur = this.list[Math.max(0, at - 1)] || this.draft(EXAMPLES[0]); this.sel = this.cur.layers[0]?.id || null; }
     this.render();
   }
 
@@ -170,13 +194,13 @@ export class SaverEditor extends BaseEditor {
   // ---------------------------------------------------------------- the head and the note under the preview
   renderHead() {
     const s = this.cur;
-    const name = h('input', { type: 'text', class: 'saver-name', value: s.name, maxlength: '80', disabled: !!s.example, spellcheck: 'false' });
-    name.addEventListener('change', () => { const v = name.value.trim(); if (!v) { name.value = s.name; return; } s.name = v; this.save(); this.renderSide(); this.refreshStatus(); });
+    const name = h('input', { type: 'text', class: 'saver-name', value: s.name, maxlength: '80', spellcheck: 'false' });
+    name.addEventListener('change', () => { const v = name.value.trim(); if (!v) { name.value = s.name; return; } s.name = v; this.edited(); this.renderSide(); this.refreshStatus(); });
     name.addEventListener('keydown', (e) => { if (e.key === 'Enter') name.blur(); });
     clear(this.head).append(
       name,
       h('div', { class: 'grow' }),
-      s.example ? h('button', { class: 'btn sm primary', onclick: () => this.copy(s) }, icon('copy', 'sm'), 'Make it yours') : null,
+      s.from ? h('button', { class: 'btn sm primary', onclick: () => this.edited() }, icon('copy', 'sm'), 'Make it yours') : null,
       h('button', { class: 'btn sm', 'data-tip': 'Shows it the way the screensaver does. Any key or mouse move ends it.', onclick: () => this.app.startScreensaver(s) }, icon('play', 'sm'), 'Try it full screen'),
       h('button', { class: 'btn sm' + (this.app.settings.screensaverPick === s.id ? ' on' : ''), onclick: () => this.use(s) }, icon('check', 'sm'), 'Use as my screensaver'));
   }
@@ -198,7 +222,7 @@ export class SaverEditor extends BaseEditor {
     const s = this.cur;
     const y = this.insp.scrollTop;
     const L = s.layers.find((x) => x.id === this.sel) || null;
-    const body = h('fieldset', { class: 'saver-fields', disabled: !!s.example },
+    const body = h('fieldset', { class: 'saver-fields' },
       h('div', { class: 'saver-sec' }, 'Whole screen'),
       ...this.controls(SAVER_PARAMS, s),
       h('div', { class: 'saver-sec row' }, h('span', {}, 'Layers'), h('div', { class: 'grow' }),
@@ -212,23 +236,23 @@ export class SaverEditor extends BaseEditor {
       L ? h('div', { class: 'saver-sub' }, 'Effects') : null,
       ...(L ? this.controls(COMMON, L) : []));
     clear(this.insp).append(
-      s.example ? h('div', { class: 'saver-banner' }, h('span', {}, 'This is an example.'),
-        h('button', { class: 'btn sm primary', onclick: () => this.copy(s) }, 'Make it yours')) : null,
+      s.from ? h('div', { class: 'saver-banner' }, h('span', {}, 'An example: change anything and it’s saved as yours.'),
+        h('button', { class: 'btn sm primary', onclick: () => this.edited() }, 'Make it yours')) : null,
       body);
     this.insp.scrollTop = y;
   }
 
   layerRow(L) {
     const s = this.cur, i = s.layers.indexOf(L);
-    const move = (d) => { const j = i + d; if (j < 0 || j >= s.layers.length) return; s.layers.splice(i, 1); s.layers.splice(j, 0, L); this.restack(); };
+    const move = (d) => { const i = s.layers.findIndex((x) => x.id === L.id), j = i + d; if (i < 0 || j < 0 || j >= s.layers.length) return; s.layers.splice(j, 0, s.layers.splice(i, 1)[0]); this.restack(); };
     const el = h('div', { class: 'saver-layer-row' + (L.id === this.sel ? ' active' : '') + (L.on === false ? ' off' : ''),
       onclick: () => { this.sel = L.id; this.renderInsp(); },
       oncontextmenu: (e) => contextMenu(e, [
         { label: 'Duplicate', icon: 'copy', action: () => this.addLayer({ ...clone(L), id: newLayer(L.type).id }) },
-        { label: L.on === false ? 'Show' : 'Hide', icon: L.on === false ? 'eye' : 'eye-off', action: () => { L.on = L.on === false; this.save(); this.renderInsp(); } },
+        { label: L.on === false ? 'Show' : 'Hide', icon: L.on === false ? 'eye' : 'eye-off', action: () => { L.on = L.on === false; this.edited(); this.renderInsp(); } },
         { label: 'Delete', icon: 'trash', action: () => this.removeLayer(L) },
       ]) },
-    h('button', { class: 'icon-btn', 'data-tip': L.on === false ? 'Show' : 'Hide', onclick: (e) => { e.stopPropagation(); L.on = L.on === false; this.save(); this.renderInsp(); } }, icon(L.on === false ? 'eye-off' : 'eye', 'sm')),
+    h('button', { class: 'icon-btn', 'data-tip': L.on === false ? 'Show' : 'Hide', onclick: (e) => { e.stopPropagation(); L.on = L.on === false; this.edited(); this.renderInsp(); } }, icon(L.on === false ? 'eye-off' : 'eye', 'sm')),
     icon(LAYERS[L.type].icon, 'sm'),
     h('span', { class: 'saver-layer-name' }, LAYERS[L.type].name + (this.codeErrors.has(L.id) ? ' ⚠' : '')),
     h('button', { class: 'icon-btn', 'data-tip': 'Up (in front)', disabled: i === s.layers.length - 1, onclick: (e) => { e.stopPropagation(); move(1); } }, icon('arrow-up', 'sm')),
@@ -248,8 +272,10 @@ export class SaverEditor extends BaseEditor {
   }
 
   removeLayer(L) {
-    const s = this.cur, at = s.layers.indexOf(L);
-    s.layers.splice(at, 1);
+    // by id: the row's layer may not be the very object in the list any more
+    const s = this.cur, at = s.layers.findIndex((x) => x.id === L.id);
+    if (at < 0) return;
+    L = s.layers.splice(at, 1)[0];
     if (this.sel === L.id) this.sel = s.layers[Math.min(at, s.layers.length - 1)]?.id || null;
     this.restack();
     toast(`Removed ${LAYERS[L.type].name}`, { action: { label: 'Undo', fn: () => { s.layers.splice(at, 0, L); this.sel = L.id; this.restack(); } } });
@@ -258,14 +284,14 @@ export class SaverEditor extends BaseEditor {
   shuffle(L) {
     const r = randomLayer(L.type);
     for (const p of LAYERS[L.type].params) if (p.kind !== 'image' && p.kind !== 'code') L[p.key] = r[p.key];
-    this.save();
+    this.edited();
     this.renderInsp();
   }
 
   /** Controls for a list of params on obj (the screensaver or a layer). Changes show in the preview straight away. */
   controls(params, obj) {
     return params.filter((p) => !p.when || p.when(obj)).map((p) => {
-      const set = (v, redraw) => { obj[p.key] = v; this.save(); if (redraw) this.renderInsp(); };
+      const set = (v, redraw) => { obj[p.key] = v; this.edited(); if (redraw) this.renderInsp(); };
       const label = h('span', { class: 'saver-label' }, p.label);
       switch (p.kind) {
         case 'range': {
@@ -336,14 +362,14 @@ export class SaverEditor extends BaseEditor {
   status() {
     if (!this.cur) return { left: [], right: [] };
     const n = this.cur.layers.length;
-    return { left: [{ text: this.cur.name + (this.cur.example ? ' (example)' : '') }], right: [{ text: `${n} layer${n === 1 ? '' : 's'}` }] };
+    return { left: [{ text: this.cur.name + (this.cur.from ? ' (example)' : '') }], right: [{ text: `${n} layer${n === 1 ? '' : 's'}` }] };
   }
 
   onShow() { if (this.cur && !this.player) this.startPlayer(); }
   onHide() { this.player?.destroy(); this.player = null; }
   destroy() {
     this.player?.destroy(); this.player = null;
-    if (this.saveTimer) { clearTimeout(this.saveTimer); this.app.saveSettings({ screensavers: clone(this.list) }); }
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.app.saveSettings({ screensavers: clone(this.list) }); this.app.redrawSaverSettings?.(); }
   }
 }
 

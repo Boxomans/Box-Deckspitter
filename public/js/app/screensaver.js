@@ -1,7 +1,9 @@
 // Box-Deckspitter app shell, the screensaver (Settings → Screensaver; off unless switched on). After the minutes set
-// there with no key or mouse move on the PC (the desktop app asks the system; in a plain browser tab it's this page
-// only), one of your BoxSaver screensavers covers the window. Any key, click, scroll or mouse move ends it. Not while a
-// video plays, the window is minimised or the app is locked.
+// there with no key or mouse move on the PC, one of your BoxSaver screensavers comes on. In the desktop app it covers
+// every screen, over every program, while the app is open at all (minimised too: electron/saver.js), and waits while
+// something plays (a video here, sound from the PC, a program full screen). In a plain browser tab it covers this page,
+// counts only this page's keys and moves, and not while the tab is hidden. Any key, click, scroll or mouse move ends
+// it. Not while the app is locked.
 // Methods of App (app.js mixes this class into it).
 
 import { h } from '../core/dom.js';
@@ -23,33 +25,44 @@ export class ScreensaverPart {
   async saverCheck() {
     const s = this.settings;
     if (this.saverEl) { if (this.appLocked) this.stopScreensaver(); return; }
-    if (!s.screensaverOn || this.appLocked || document.hidden || this.saverChecking) return;
+    const shell = window.bdsShell?.saverStart ? window.bdsShell : null; // the desktop app: every screen
+    if (!s.screensaverOn || this.appLocked || (!shell && document.hidden) || this.saverChecking) return;
     const wait = Math.max(1, Number(s.screensaverMin) || 10) * 60000;
     let idle = Date.now() - this.saverInput;
-    if (idle < wait) return;
+    if (idle < wait && !this.saverUp) return;
     this.saverChecking = true;
     try {
       // the whole PC: keys and moves in other programs (and inside the Browser's pages) count as use too
       const sys = await window.bdsShell?.idleSeconds?.().catch(() => null);
-      if (typeof sys === 'number') idle = Math.min(idle, sys * 1000);
+      if (typeof sys === 'number') idle = sys * 1000;
+      if (this.saverUp) { if (idle < wait) this.saverUp = false; return; } // up already, until the PC is used again
+      if (idle < wait || this.saverEl || this.appLocked || Date.now() < (this.saverQuiet || 0)) return;
+      if ([...document.querySelectorAll('video')].some((v) => !v.paused && !v.ended)) return;
+      if (shell) {
+        // something else playing: look again in half a minute
+        if (await shell.saverPlaying().catch(() => false)) { this.saverQuiet = Date.now() + 30000; return; }
+        if (this.appLocked || !this.settings.screensaverOn) return;
+        this.saverUp = await shell.saverStart(await this.pickSaver()).catch(() => false);
+      } else this.startScreensaver();
     } finally { this.saverChecking = false; }
-    if (idle < wait || this.saverEl || this.appLocked) return;
-    if ([...document.querySelectorAll('video')].some((v) => !v.paused && !v.ended)) return;
-    this.startScreensaver();
+  }
+
+  /** The screensaver picked in Settings (random by default), as it is now. */
+  async pickSaver() {
+    const m = await saverMod();
+    // another window may have changed them since this one started
+    let st = this.settings;
+    try { st = { ...st, ...(await api.settings()) }; } catch { /* the ones this window has */ }
+    const mine = (Array.isArray(st.screensavers) ? st.screensavers : []).map(m.normalizeSaver);
+    return [...mine, ...m.EXAMPLES].find((x) => x.id === st.screensaverPick)
+      || (mine.length ? mine : m.EXAMPLES.filter((x) => x.id !== 'ex-code'))[Math.floor(Math.random() * (mine.length || m.EXAMPLES.length - 1))];
   }
 
   /** Covers the window with a screensaver: the given one, or the one picked in Settings (random by default). */
   async startScreensaver(saver) {
     if (this.saverEl) return;
     const m = await saverMod();
-    if (!saver) {
-      // another window may have changed them since this one started
-      let st = this.settings;
-      try { st = { ...st, ...(await api.settings()) }; } catch { /* the ones this window has */ }
-      const mine = (Array.isArray(st.screensavers) ? st.screensavers : []).map(m.normalizeSaver);
-      const all = [...mine, ...m.EXAMPLES];
-      saver = all.find((x) => x.id === st.screensaverPick) || (mine.length ? mine : m.EXAMPLES.filter((x) => x.id !== 'ex-code'))[Math.floor(Math.random() * (mine.length || m.EXAMPLES.length - 1))];
-    }
+    saver ||= await this.pickSaver();
     closeMenus();
     const el = h('div', { class: 'saver-overlay', tabindex: '-1' });
     const hint = h('div', { class: 'saver-hint-pill' }, icon('saver', 'sm'), 'Any key or mouse move ends it');
@@ -126,9 +139,13 @@ export class ScreensaverPart {
         h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } },
           h('button', { class: 'btn sm', onclick: () => this.startScreensaver() }, icon('play', 'sm'), 'Preview'),
           h('button', { class: 'btn sm', onclick: () => this.newDocument('saver') }, icon('saver', 'sm'), `Make your own in ${studio}`)),
-        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'It covers this window, not the rest of the screen. Any key or mouse move ends it. It waits while a video is playing.'));
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, window.bdsShell?.saverStart
+          ? 'It covers every screen, over every program, as long as the app is open (minimised is fine). Any key or mouse move ends it. It waits while a video plays, sound comes from the PC or a program is full screen.'
+          : 'It covers this page, not the rest of the screen. Any key or mouse move ends it. It waits while a video is playing.'));
     };
     draw();
+    // BoxSaver can be open beside Settings: its new, renamed and deleted ones show here as they're saved
+    this.redrawSaverSettings = () => { if (box.isConnected) draw(); };
     return box;
   }
 }

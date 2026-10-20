@@ -1626,6 +1626,19 @@ button.sb-item:hover { background: var(--bg-4); color: var(--text); }
 .music-q-now { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px 8px; font-size: 12.5px; color: var(--text); border-bottom: 1px dashed var(--line); margin-bottom: 4px; }
 .music-q-now span:first-child { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; }
 .music-q-head { display: flex; align-items: center; gap: 8px; padding: 2px 8px 4px; font-size: 11px; }
+/* the Stats tab */
+.music-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; padding: 4px 4px 10px; }
+.music-stat { min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); }
+.music-stat-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+.music-stat-value { margin: 2px 0; font-size: 16px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-stat-note { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-stat-row { position: relative; display: flex; align-items: center; gap: 8px; margin: 2px 4px; padding: 4px 8px; border-radius: 6px; font-size: 12px; isolation: isolate; }
+.music-stat-row::before { content: ''; position: absolute; inset: 0 auto 0 0; width: var(--w, 0); border-radius: 6px; background: var(--accent-soft); z-index: -1; }
+.music-stat-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-stat-song { cursor: pointer; }
+.music-stat-song:hover { background: var(--bg-2); }
+.music-stat-song.gone { cursor: default; opacity: 0.55; }
+.music-stats + .music-q-head, .music-stat-row + .music-q-head, .music-empty + .music-q-head { margin-top: 8px; }
 .music-q-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; color: var(--text-2); font-size: 12.5px; cursor: pointer; border-top: 2px solid transparent; border-bottom: 2px solid transparent; }
 .music-q-row:hover { background: var(--bg-2); color: var(--text); }
 .music-q-row .music-track-name { flex: 1; min-width: 0; }

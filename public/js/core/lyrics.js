@@ -10,7 +10,7 @@ const stripExt = (n) => n.replace(/\.[^.\\/]+$/, '');
 const JUNK = /[([](?:official(?: music)?(?: video| audio| visualizer| lyric video)?|music video|lyric video|lyrics?|audio|video|visualizer|hd|hq|4k|explicit|clean|mv|m\/v)[)\]]/gi;
 
 /** "Artist - Title (Official Video).mp3" → { artist, title } (artist '' when the name has no " - "). */
-function fromName(name) {
+export function fromName(name) {
   const s = stripExt(String(name).split('/').pop()).replace(JUNK, ' ').replace(/\s*\(\d+\)\s*$/, '').replace(/\s+/g, ' ').trim();
   const m = s.match(/^(.+?)\s+[-–—]\s+(.+)$/);
   return m ? { artist: m[1].trim(), title: m[2].trim() } : { artist: '', title: s };

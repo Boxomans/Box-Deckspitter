@@ -139,7 +139,7 @@ export class StrikeEditor extends BaseEditor {
     this.terrain = this.world.terrain;
     this.showTerrain = !!this.store().terrain;
     this.wantRegion = REGIONS[this.store().region] ? this.store().region : undefined;
-    this.wantSize = this.store().size === 'large' ? 'large' : 'normal';
+    this.wantSize = ['large', 'small'].includes(this.store().size) ? this.store().size : 'normal';
     if (this.store().points == null) this.save({ points: startPoints(this.store()) });
     if (this.store().hangar == null) this.save({ hangar: startHangar(this.store()), unlocked: undefined });
     this.view.setWorld(this.world);
@@ -263,7 +263,7 @@ export class StrikeEditor extends BaseEditor {
     const badges = this.awardBadges(r);
     // points for the hangar; a mission already destroyed once pays only for flying it
     const m = this.plan.mission, key = `${m.seed}:${m.type || ''}:${m.region || ''}:${m.size}`, wonList = this.store().wonMissions || [];
-    this.earned = strikePoints(r, m.size === 'large', wonList.includes(key), badges);
+    this.earned = strikePoints(r, m.size, wonList.includes(key), badges);
     const total = this.earned.reduce((n, [, p]) => n + p, 0);
     this.save({ points: this.points() + total, ...(r.won && !wonList.includes(key) ? { wonMissions: [...wonList, key].slice(-200) } : {}) });
     toast(`+${total} points · ${this.points().toLocaleString('en-US')} to spend in the hangar and the fleet`, { type: 'ok', timeout: 5000 });
@@ -800,7 +800,8 @@ export class StrikeEditor extends BaseEditor {
     const regionSel = h('select', { class: 'ds-sel' }, h('option', { value: '' }, 'Any region'), ...Object.entries(REGIONS).map(([v, t]) => h('option', { value: v }, t)));
     regionSel.value = this.wantRegion || '';
     regionSel.addEventListener('change', () => { this.wantRegion = regionSel.value || undefined; this.save({ region: this.wantRegion }); });
-    const sizeSel = h('select', { class: 'ds-sel' }, h('option', { value: 'normal' }, 'Normal mission'), h('option', { value: 'large' }, 'Large mission: more sites, 3× the budget'));
+    const sizeSel = h('select', { class: 'ds-sel' }, h('option', { value: 'small' }, 'Small mission: a few sites, 0.4× the budget'),
+      h('option', { value: 'normal' }, 'Normal mission'), h('option', { value: 'large' }, 'Large mission: more sites, 3× the budget'));
     sizeSel.value = this.wantSize;
     sizeSel.addEventListener('change', () => { this.wantSize = sizeSel.value; this.save({ size: this.wantSize }); });
     const story = briefing(m, { place: s.name, where: whereIs(this.world, s, 30000), sam: s.sam ? SAMS[s.sam].long : null, budget: money(m.budget) });
@@ -810,7 +811,7 @@ export class StrikeEditor extends BaseEditor {
       this.section('BRIEFING', ...story.map((p) => h('p', { class: 'ds-story' }, p))),
       this.section(`${TYPE_NAME[m.type].toUpperCase()}`, h('div', { class: 'ds-big' }, s.name), / of /.test(s.name) ? null : h('div', { class: 'faint' }, whereIs(this.world, s, 30000)),
         m.region ? h('div', { class: 'ds-kv' }, h('span', {}, 'Region'), h('b', {}, REGIONS[m.region])) : null,
-        m.size === 'large' ? h('div', { class: 'ds-kv' }, h('span', {}, 'Size'), h('b', {}, 'Large')) : null,
+        m.size === 'large' || m.size === 'small' ? h('div', { class: 'ds-kv' }, h('span', {}, 'Size'), h('b', {}, m.size === 'large' ? 'Large' : 'Small')) : null,
         h('div', { class: 'ds-kv' }, h('span', {}, two ? 'Objectives' : 'Primary target'), this.objectiveLine()),
         h('div', { class: 'ds-kv' }, h('span', {}, 'Budget'), h('b', {}, money(m.budget))),
         h('div', { class: 'ds-kv' }, h('span', {}, 'From the origin'), h('b', {}, `${Math.round(dist(m.origin, s))} km`))),
@@ -1066,8 +1067,27 @@ export class StrikeEditor extends BaseEditor {
       ...a.stations.map((st, k) => this.stationRow(a, st, k)));
   }
 
+  /** What the other stations and the ships already aim at, for the target lists: 'site:idx' (one target), 'site' (a
+   *  site's radars), 'pod:site' (jammed), 'ship:site' (a Tomahawk salvo) → [[weapon, n], …]. Not the station being set (own). */
+  aims(own) {
+    const out = new Map(), add = (key, ...what) => out.set(key, [...(out.get(key) || []), what]);
+    for (const a of this.pkgs.flat()) for (const st of a.stations) {
+      if (st === own || !st.mu || !st.n || !st.target?.site) continue;
+      add(st.mu === 'pod' ? `pod:${st.target.site}` : st.target.idx == null ? st.target.site : `${st.target.site}:${st.target.idx}`,
+        MUNITIONS[st.mu].short, st.n);
+    }
+    for (const d of this.ships) for (const sv of d.salvos) add(`ship:${sv.site}`, 'Tomahawks', 0);
+    return out;
+  }
+
   stationRow(a, st, k) {
     const A = AIRCRAFT[a.type], m = this.mission;
+    // '  ← 30× AGM-130' after a target something else already goes for, added up by weapon
+    const aims = this.aims(st), by = (...keys) => {
+      const sum = new Map();
+      for (const [mu, n] of keys.flatMap((x) => aims.get(x) || [])) sum.set(mu, (sum.get(mu) || 0) + n);
+      return sum.size ? `  ← ${[...sum].map(([mu, n]) => `${n > 1 ? `${n}× ` : ''}${mu}`).join(', ')}` : '';
+    };
     const muSel = h('select', { class: 'ds-sel sm', title: st.mu ? MUNITIONS[st.mu].what : 'What goes on this station' }, h('option', { value: '' }, `${A.bay ? 'Bay' : 'Station'} ${k + 1}: empty`),
       ...A.weapons.map((id) => {
         const mu = MUNITIONS[id], n = loadOf(a, id);
@@ -1089,17 +1109,22 @@ export class StrikeEditor extends BaseEditor {
     });
     if (!st.mu || untargeted(st.mu)) return h('div', { class: 'ds-st' }, muSel, st.mu ? h('span', { class: 'faint sm' }, st.mu === 'mald' ? 'at the decoy point, or when first shot at' : st.mu === 'tank' ? 'burned first, dropped once empty' : 'at enemy fighters, by itself') : null);
     const tSel = h('select', { class: 'ds-sel sm' });
+    // the notes show only while the list is open: closed, the box shows just the target
+    const opt = (value, text, aim) => h('option', { value, dataset: aim ? { text, aim } : {} }, text);
+    const notes = (on) => { for (const o of tSel.options) if (o.dataset.aim) o.textContent = o.dataset.text + (on ? o.dataset.aim : ''); };
+    for (const ev of ['mousedown', 'focus']) tSel.addEventListener(ev, () => notes(true));
+    for (const ev of ['blur', 'change']) tSel.addEventListener(ev, () => notes(false));
     const known = m.sites.filter((s) => m.known[s.id]);
     if (st.mu === 'pod') {
       const objSite = m.objective.site;
       const objSites = new Set(objectivesOf(m).map((o) => o.site));
-      tSel.append(h('option', { value: '' }, 'No site'), ...known.filter((s) => s.targets.some(isRadar)).map((s) => h('option', { value: s.id }, `${s.id === objSite || objSites.has(s.id) ? '★ ' : ''}Blind the ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`)));
+      tSel.append(h('option', { value: '' }, 'No site'), ...known.filter((s) => s.targets.some(isRadar)).map((s) => opt(s.id, `${s.id === objSite || objSites.has(s.id) ? '★ ' : ''}Blind the ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`, by(`pod:${s.id}`))));
       tSel.value = st.target?.site || '';
     } else if (homes(st)) {
       // ★ on the site whose radars include the objective, when the objective is a radar a HARM can go for
       const harmObj = new Set(objectivesOf(m).filter((o) => isRadar(m.sites.find((s) => s.id === o.site)?.targets[o.idx] || {})).map((o) => o.site));
       tSel.append(h('option', { value: 'auto' }, 'Any radar that’s on'), h('option', { value: 'smart' }, `Smart: ${SMART_RIPPLE} at each radar on the air along the route`),
-        ...known.filter((s) => s.targets.some(isRadar)).map((s) => h('option', { value: s.id }, `${harmObj.has(s.id) ? '★ ' : ''}Radars of ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`)));
+        ...known.filter((s) => s.targets.some(isRadar)).map((s) => opt(s.id, `${harmObj.has(s.id) ? '★ ' : ''}Radars of ${s.sam ? SAMS[s.sam].long : s.name} · ${whereIs(this.world, s, 30000)}`, by(s.id, ...s.targets.flatMap((t, i) => (isRadar(t) ? [`${s.id}:${i}`] : [])), `ship:${s.id}`))));
       tSel.value = st.target === 'auto' || st.target === 'smart' ? st.target : !st.target ? 'auto' : st.target.site;
     } else {
       tSel.append(h('option', { value: '' }, 'No target'), h('option', { value: 'smart' }, `Smart: ${SMART_RIPPLE} at each target along the route`));
@@ -1107,7 +1132,7 @@ export class StrikeEditor extends BaseEditor {
         const g = h('optgroup', { label: s.sam ? `${SAMS[s.sam].long} site` : s.name });
         s.targets.forEach((t, i) => {
           const obj = objectiveNo(m, s.id, i);
-          g.append(h('option', { value: `${s.id}:${i}` }, `${obj ? '★ ' : ''}${targetName(t)}`));
+          g.append(opt(`${s.id}:${i}`, `${obj ? '★ ' : ''}${targetName(t)}`, by(`${s.id}:${i}`, ...(isRadar(t) ? [s.id] : []), `ship:${s.id}`)));
         });
         tSel.append(g);
       }

@@ -64,12 +64,12 @@ export const MUNITIONS = {
   jsow: { id: 'jsow', name: 'AGM-154C JSOW', short: 'JSOW', kind: 'glide', per: 1, cost: 0.5, lo: 22, hi: 110, kmh: 750,
     dmg: 2.2, soft: 2, pd: 0.6, what: 'A gliding bomb with a big warhead: drop it far out, at height.' },
   agm130: { id: 'agm130', name: 'AGM-130', short: 'AGM-130', kind: 'missile', per: 1, cost: 0.7, lo: 40, hi: 100, kmh: 1100,
-    dmg: 3, soft: 2, pd: 0.4, what: 'A 2,000 lb bomb with a rocket motor: about 100 km from height, and still 40 km off the deck since the rocket carries it, not the glide. Faster than a JSOW, so point defences get fewer shots at it. Too big for a stealth jet’s bay.' },
+    dmg: 3, soft: 2, pd: 0.4, lr: { km: 45, pk: 0.4, shots: 1 }, what: 'A 2,000 lb bomb with a rocket motor: about 100 km from height, and still 40 km off the deck since the rocket carries it, not the glide. Faster than a JSOW, so point defences get fewer shots at it, but it’s big and not stealthy: once the defences are awake, S-300s and S-400s covering the target shoot at it on the way in. Too big for a stealth jet’s bay.' },
   sdb: { id: 'sdb', name: 'GBU-39 SDB', short: 'SDB', kind: 'glide', per: 4, cost: 0.05, lo: 18, hi: 100, kmh: 750,
     dmg: 0.7, soft: 1.2, pd: 0.55, what: 'Small glide bombs, four to a station. Precise, light: plenty of them for buildings and launchers.' },
   jdam: { id: 'jdam', name: 'GBU-31 JDAM', short: 'JDAM', kind: 'bomb', per: 1, cost: 0.04, lo: 6, hi: 24, kmh: 900,
     dmg: 3, soft: 2, pd: 0.3, what: 'A 2,000 lb guided bomb. Short reach, cuts runways and cracks shelters.' },
-  mako: { id: 'mako', name: 'Mako hypersonic missile', short: 'MAKO', kind: 'missile', arc: true, per: 1, cost: 3, points: 40, lo: 120, hi: 300, kmh: 6200,
+  mako: { id: 'mako', name: 'Mako hypersonic missile', short: 'MAKO', kind: 'missile', arc: true, lr: { km: 90, pk: 0.3, wakes: true }, per: 1, cost: 3, points: 40, lo: 120, hi: 300, kmh: 6200,
     dmg: 1.2, soft: 1.8, pd: 0.08, what: 'Rocket-boosted, Mach 5 and up, manoeuvring high: point defences barely get a shot at it, but its arc lights up S-300 and S-400 radars from far off and they will try to intercept it. A small warhead, so it’s for radars, launchers and command posts more than concrete. One to a station, and it fits a stealth jet’s bay. Very expensive.' },
   jdamer: { id: 'jdamer', name: 'GBU-31 JDAM-ER', short: 'JDAM-ER', kind: 'glide', per: 1, cost: 0.15, lo: 10, hi: 72, kmh: 750,
     dmg: 3, soft: 2, pd: 0.45, what: 'The 2,000 lb JDAM with a wing kit: the same punch, glided in from far out. Needs height to reach; slower, so point defences get more shots at it.' },
@@ -195,9 +195,11 @@ export const TARGETS = {
 export const RUNWAY_HP = { S: 3, M: 4.5, L: 6 };
 export const RUNWAY_LEN = { S: 1800, M: 2500, L: 3200 };
 
-/** The money for one mission ($M). A large mission (a bigger network) gets LARGE_BUDGET times as much. */
+/** The money for one mission ($M). A large mission (a bigger network) gets LARGE_BUDGET times as much, a small one
+ *  (a few sites) SMALL_BUDGET times. */
 export const BUDGET = { airbase: 420, sam: 380, industry: 360 };
 export const LARGE_BUDGET = 3;
+export const SMALL_BUDGET = 0.4;
 
 /** Words for the objective's codename (locations only; no sides are ever named). */
 export const CODEWORDS = ['GRANITE', 'ANVIL', 'KESTREL', 'SALTMARSH', 'IRONWOOD', 'BRASS', 'TALON', 'NORTHGATE', 'FLINT', 'COBALT',

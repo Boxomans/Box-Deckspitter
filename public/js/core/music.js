@@ -5,6 +5,8 @@
 // Playlists are lists of songs in the audio dump (a song can be in several): pick one and the player (next, shuffle,
 // loop) stays inside it.
 // Full screen fills the window with the player, a big cover and a visualizer.
+// The Stats tab: listening time per playlist, the songs played more than 5 times, the favourite band and genre and
+// the average BPM, from what's really been played.
 
 import { api } from './api.js';
 import { h, clear, formatBytes, stripExt, extOf, fileManager } from './dom.js';
@@ -12,7 +14,7 @@ import { icon } from './icons.js';
 import { toast, errorToast, contextMenu, hoverKeys, renameInline, modal, promptDialog, confirmDialog } from './ui.js';
 import { pickOpen } from './files.js';
 import { sharePlaylist, importPlaylist } from './playlist-share.js';
-import { createLyrics } from './lyrics.js';
+import { createLyrics, fromName } from './lyrics.js';
 
 // 10-band graphic EQ (±18 dB) between a low cut (high-pass) and a high cut (low-pass).
 export const BANDS = [
@@ -194,7 +196,7 @@ export function createMusic(app) {
     open: false,
     queue: Array.isArray(s.musicQueue) ? s.musicQueue.filter((x) => typeof x === 'string') : [], // file names, in play order
     libIdx: -1, // where the library is up to (queued songs don't move it)
-    view: s.musicView === 'queue' ? 'queue' : 'library',
+    view: ['queue', 'stats'].includes(s.musicView) ? s.musicView : 'library',
     // null: every song · '': songs not in a playlist · 'name': that playlist · LIKED: liked songs
     playlist: typeof s.musicPlaylist === 'string' ? s.musicPlaylist : null,
     playlists: [], // their names
@@ -319,9 +321,8 @@ export function createMusic(app) {
     if (patch) app.saveSettings(patch);
   }
   addEventListener('pagehide', () => {
-    const patch = posPatch();
+    const patch = { ...posPatch(), musicStats: stats };
     unloading = true;
-    if (!patch) return;
     Object.assign(app.settings, patch);
     // keepalive lets this request finish even though the page is going away
     fetch('/api/settings', { method: 'POST', keepalive: true, headers: { 'X-BDS-Token': api.token, 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => {});
@@ -346,6 +347,42 @@ export function createMusic(app) {
   const wake = () => { if (ctx?.state === 'suspended') ctx.resume().catch(() => {}); };
   addEventListener('pointerdown', wake, true);
   addEventListener('keydown', wake, true);
+
+  // ---------------------------------------------------------------- listening stats (the Stats tab)
+  // Time really played (seeks and jumps don't count), per song and per playlist picked while it played. A song counts
+  // as played once 30 s of it (half of a short one) have played. Kept in the settings by file name, like the likes;
+  // the band, genre and BPM come from each song's tags (the band from its name when it has none).
+  const stats = s.musicStats && typeof s.musicStats === 'object' ? s.musicStats : {};
+  stats.songs ||= {};
+  stats.lists ||= {};
+  let heard = { at: null, t: 0, counted: false }; // this listen of the playing song
+  let lastStatsSave = 0;
+  function saveStats(force = false) {
+    if (unloading || (!force && Date.now() - lastStatsSave < 15000)) return;
+    lastStatsSave = Date.now();
+    app.saveSettings({ musicStats: stats });
+  }
+  function listened() {
+    const t = state.tracks[state.idx], now = audio.currentTime;
+    const d = now - heard.at;
+    heard.at = now;
+    if (!t || !(d > 0 && d < 2)) return;
+    const r = (stats.songs[likeKey(t.name)] ||= { t: 0, n: 0 });
+    r.t += d;
+    heard.t += d;
+    const pl = state.playlist ?? '*';
+    stats.lists[pl] = (stats.lists[pl] || 0) + d;
+    if (!heard.counted && heard.t >= Math.min(30, (audio.duration || 60) / 2)) { heard.counted = true; r.n++; }
+    if (!('a' in r)) statTags(t, r);
+    saveStats();
+  }
+  function statTags(t, r) {
+    const put = (tags) => { r.a = tags?.artist || fromName(t.name).artist || null; r.g = tags?.genre || null; r.b = tags?.bpm || null; };
+    put(null); // asked once
+    if (!/\.mp3$/i.test(t.path)) return;
+    if (songTags.has(t.path)) return put(songTags.get(t.path));
+    api.get(`/api/audio/tags?path=${encodeURIComponent(t.path)}`).then((tags) => { songTags.set(t.path, tags); put(tags); }, () => {});
+  }
 
   // ---------------------------------------------------------------- duplicates
   // Two ways a song can be in twice: the very same file under another name (checked byte for byte), or the same
@@ -453,6 +490,7 @@ export function createMusic(app) {
   }
 
   function setSource(t) {
+    heard = { at: null, t: 0, counted: false };
     audio.src = `/api/stream?token=${encodeURIComponent(api.token)}&path=${encodeURIComponent(t.path)}`;
     if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: songTitle(t.name), artist: plOf(t.name) || 'audio-dump', album: 'Box-Deckspitter' });
   }
@@ -499,12 +537,13 @@ export function createMusic(app) {
   const prev = () => { if (audio.currentTime > 3) { audio.currentTime = 0; return; } step(-1, true); };
 
   audio.addEventListener('ended', () => {
-    if (state.loop === 'one') { audio.currentTime = 0; audio.play(); return; }
+    if (state.loop === 'one') { heard = { at: null, t: 0, counted: false }; audio.currentTime = 0; audio.play(); return; }
     advance(false);
   });
   for (const ev of ['play', 'pause']) audio.addEventListener(ev, () => { render(); app.syncMusicButton?.(!audio.paused); savePos(true); app.presence?.update(); });
   audio.addEventListener('seeked', () => savePos(true));
-  audio.addEventListener('timeupdate', () => { updateTime(); miniTime(); if (!audio.paused) savePos(); });
+  audio.addEventListener('timeupdate', () => { updateTime(); miniTime(); if (!audio.paused) { savePos(); listened(); } });
+  audio.addEventListener('pause', () => saveStats(true));
   audio.addEventListener('loadedmetadata', () => updateTime());
   audio.addEventListener('error', () => { if (audio.src) toast(`Couldn’t play ${state.tracks[state.idx]?.name || 'that file'}`, { type: 'warn' }); });
 
@@ -641,6 +680,7 @@ export function createMusic(app) {
     if (state.playlist === p) { state.playlist = made; app.saveSettings({ musicPlaylist: made }); }
     if (s.tapePlaylist === p) app.saveSettings({ tapePlaylist: made });
     if (recs.has(p)) { recs.set(made, recs.get(p)); recs.delete(p); }
+    if (stats.lists[p]) { stats.lists[made] = (stats.lists[made] || 0) + stats.lists[p]; delete stats.lists[p]; saveStats(true); }
     refresh();
   }
   async function deletePlaylist(p, withSongs) {
@@ -965,7 +1005,8 @@ export function createMusic(app) {
     queueTab.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/bds-song')) { e.preventDefault(); queueTab.classList.add('drop'); } });
     queueTab.addEventListener('dragleave', () => queueTab.classList.remove('drop'));
     queueTab.addEventListener('drop', (e) => { queueTab.classList.remove('drop'); const n = e.dataTransfer.getData('text/bds-song'); if (n) { e.preventDefault(); enqueue(n); } });
-    const tabs = h('div', { class: 'music-tabs' }, libTab, queueTab);
+    const statsTab = h('button', { class: 'music-tab', onclick: () => setView('stats'), 'data-tip': 'What you listen to' }, 'Stats');
+    const tabs = h('div', { class: 'music-tabs' }, libTab, queueTab, statsTab);
     const dupeBtn = h('button', { class: 'music-dupes', hidden: true, 'data-tip': 'Songs that are in the audio dump more than once', onclick: () => showDuplicates() });
     const pls = h('div', { class: 'music-pls' });
     pls.addEventListener('wheel', (e) => { if (e.deltaY && pls.scrollWidth > pls.clientWidth) { e.preventDefault(); pls.scrollLeft += e.deltaY; } }, { passive: false });
@@ -988,7 +1029,7 @@ export function createMusic(app) {
     const parts = [head, nowEl, timeEl, controlsEl, volEl, eqWrap, tabs, pls, list];
     el.append(...parts);
     document.body.append(el);
-    ui = { el, title, titleScroll: marquee(title), tagsEl, sub, seek, cur, dur, playB, shuffleB, loopB, likeB, list, dupeBtn, libTab, queueTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
+    ui = { el, title, titleScroll: marquee(title), tagsEl, sub, seek, cur, dur, playB, shuffleB, loopB, likeB, list, dupeBtn, libTab, queueTab, statsTab, pls, tabs, fullB, nowEl, timeEl, controlsEl, volEl, eqWrap, parts, isSeeking: () => seeking };
     document.addEventListener('pointerdown', (e) => { if (state.open && !state.docked && !wide && performance.now() - state.openedAt > 250 && !el.contains(e.target) && !e.target.closest?.('#btn-music, .music-opener')) setOpen(false); }, true);
     document.addEventListener('keydown', (e) => {
       if (full && e.key === 'Escape' && !document.querySelector('.modal-backdrop, .menu')) { e.preventDefault(); setFull(false); return; }
@@ -1056,6 +1097,7 @@ export function createMusic(app) {
     clear(ui.queueTab).append('Queue ', h('span', { class: 'mono faint' }, String(state.queue.length)));
     ui.libTab.classList.toggle('on', state.view === 'library');
     ui.queueTab.classList.toggle('on', state.view === 'queue');
+    ui.statsTab.classList.toggle('on', state.view === 'stats');
     clear(ui.playB).append(icon(audio.paused ? 'play' : 'pause-bars'));
     ui.shuffleB.classList.toggle('active', state.shuffle);
     const likedNow = !!t && isLiked(t.name);
@@ -1068,6 +1110,7 @@ export function createMusic(app) {
     ui.loopB.dataset.tip = `Loop: ${state.loop === 'one' ? 'this song' : state.loop === 'all' ? 'all songs' : 'off'}`;
     clear(ui.list);
     if (state.view === 'queue') { renderQueue(); updateTime(); return; }
+    if (state.view === 'stats') { renderStats(); updateTime(); return; }
     if (!state.tracks.length) {
       ui.list.append(h('div', { class: 'music-empty' }, 'Drop music files here, use ', h('b', {}, '+'), ', or put files in the ', h('span', { class: 'mono' }, 'audio-dump'), ' folder (', h('a', { href: '#', onclick: (e) => { e.preventDefault(); api.dumpReveal('audio'); } }, 'open it'), ').'));
     }
@@ -1210,6 +1253,62 @@ export function createMusic(app) {
     h('span', { class: 'music-q-grip' }, icon('grip', 'sm')),
     h('span', { class: 'music-track-n mono' }, String(n)),
     h('span', { class: 'music-track-name' }, songTitle(name)), extra);
+
+  /** The Stats tab: totals at the top, then time per playlist and the songs played more than 5 times. */
+  function renderStats() {
+    const L = ui.list, songs = Object.entries(stats.songs);
+    const total = songs.reduce((n, [, r]) => n + r.t, 0);
+    if (total < 1) {
+      L.append(h('div', { class: 'music-empty' }, 'Nothing yet. Play some songs and this shows where your listening goes: time per playlist, the songs you replay, your favourite band and genre and the average BPM.'));
+      return;
+    }
+    const long = (sec) => { const m = Math.round(sec / 60); return sec < 60 ? `${Math.round(sec)} s` : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+    // the most-listened value of a tag (spelling differences don't split it); a band's first name when several are given
+    const fav = (key, first = (v) => v) => {
+      const by = new Map();
+      for (const [, r] of songs) {
+        const v = r[key] && first(String(r[key])).trim();
+        if (!v) continue;
+        const k = v.toLowerCase(), e = by.get(k) || { v, t: 0 };
+        e.t += r.t;
+        by.set(k, e);
+      }
+      return [...by.values()].sort((a, b) => b.t - a.t)[0] || null;
+    };
+    const band = fav('a', (v) => v.split(/\s*(?:[,;/]|\bfeat\.?|\bft\.?|\bfeaturing\b)\s*/i)[0]);
+    const genre = fav('g');
+    const bpmd = songs.filter(([, r]) => r.b > 0);
+    const bpmT = bpmd.reduce((n, [, r]) => n + r.t, 0);
+    const bpm = bpmT ? Math.round(bpmd.reduce((n, [, r]) => n + r.b * r.t, 0) / bpmT) : null;
+    const card = (label, value, note) => h('div', { class: 'music-stat' }, h('div', { class: 'music-stat-label faint' }, label),
+      h('div', { class: 'music-stat-value', title: value || '' }, value || '—'), h('div', { class: 'music-stat-note faint' }, note || ''));
+    L.append(h('div', { class: 'music-stats' },
+      card('Listened', long(total), `${songs.length} song${songs.length === 1 ? '' : 's'}`),
+      card('Favourite band', band?.v, band ? long(band.t) : 'no artist tags or names yet'),
+      card('Favourite genre', genre?.v, genre ? long(genre.t) : 'no genre tags yet'),
+      card('Average BPM', bpm && String(bpm), bpm ? `${bpmd.length} song${bpmd.length === 1 ? '' : 's'} with a BPM tag` : 'no BPM tags yet')));
+
+    const plName = (p) => (p === '*' ? 'All songs' : p === '' ? 'No playlist' : p === LIKED ? 'Liked songs' : p);
+    const lists = Object.entries(stats.lists).filter(([, t]) => t >= 1).sort((a, b) => b[1] - a[1]);
+    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, 'Time per playlist')));
+    for (const [p, t] of lists) {
+      const row = h('div', { class: 'music-stat-row' }, h('span', { class: 'music-stat-name' }, plName(p)), h('span', { class: 'mono faint' }, long(t)));
+      row.style.setProperty('--w', `${(t / lists[0][1]) * 100}%`);
+      L.append(row);
+    }
+
+    const byKey = new Map(state.tracks.map((t) => [likeKey(t.name), t]));
+    const again = songs.filter(([, r]) => r.n > 5).sort((a, b) => b[1].n - a[1].n);
+    L.append(h('div', { class: 'music-q-head' }, h('span', { class: 'faint' }, 'Replays · songs played more than 5 times')));
+    if (!again.length) L.append(h('div', { class: 'music-empty' }, 'No song has been played more than 5 times yet.'));
+    for (const [k, r] of again) {
+      const t = byKey.get(k);
+      const row = h('div', { class: `music-stat-row music-stat-song ${t ? '' : 'gone'}`, title: t ? 'Play it' : 'No longer in the audio dump' },
+        h('span', { class: 'music-stat-name' }, songTitle(t?.name || k)), h('span', { class: 'mono faint' }, `${r.n}×`));
+      if (t) row.addEventListener('click', () => play(state.tracks.indexOf(t)));
+      L.append(row);
+    }
+  }
 
   /** The Queue tab: what's playing, songs you queued, then (with shuffle on) the shuffled library. All draggable. */
   function renderQueue() {
