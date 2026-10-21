@@ -2873,6 +2873,9 @@ select optgroup.opt-hidden { margin-top: 5px; padding-top: 7px; border-top: 1px 
 .convert-wait { font-size: 12px; }
 .convert-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 .convert-where { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.convert-size-n { width: 72px; height: 28px; font-size: 12px; }
+.convert-size-unit { width: 64px; }
+.convert-size { flex: 0 0 auto; font-size: 11px; }
 .convert-where-name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the editors a conversion loads, out of sight (they still lay out, for the PDF and Word exports) */
 .convert-offscreen { position: fixed; left: -12000px; top: 0; width: 1000px; height: 1400px; overflow: hidden; pointer-events: none; }

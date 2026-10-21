@@ -82,7 +82,126 @@ module.exports = function createRender({ tools, readBody, readJSONBody, requireP
     flac: ['-vn', '-map', '0:a:0', '-c:a', 'flac'],
   };
 
+  // ---------------------------------------------------------------- BoxConvert: shrink to a size
+  /** How long a video or sound is, its picture size and whether it has sound (from ffmpeg's own report). */
+  function probe(file) {
+    return new Promise((resolve) => {
+      const p = spawn(tools().ffmpeg, ['-hide_banner', '-i', file], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      let s = '';
+      p.stderr.on('data', (d) => { s += d; });
+      p.on('error', () => resolve(null));
+      p.on('close', () => {
+        const d = /Duration: (\d+):(\d+):([\d.]+)/.exec(s), v = /Stream #[^\n]*Video:[^\n]*?(\d{2,5})x(\d{2,5})/.exec(s);
+        resolve({ duration: d ? +d[1] * 3600 + +d[2] * 60 + +d[3] : 0, width: v ? +v[1] : 0, height: v ? +v[2] : 0, audio: /Stream #[^\n]*Audio:/.test(s) });
+      });
+    });
+  }
+  /** ffmpeg for one step of a job: its progress fills job.progress from `from` to `from + span`. */
+  function ffStep(job, args, duration, from = 0, span = 1) {
+    return new Promise((resolve, reject) => {
+      const p = spawn(tools().ffmpeg, ['-hide_banner', '-y', ...args], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      job.cancel = () => { job.status = 'cancelled'; p.kill(); };
+      let msg = '';
+      p.stderr.on('data', (d) => {
+        const s = String(d);
+        msg = (msg + s).slice(-3000);
+        const tm = /time=(\d+):(\d+):([\d.]+)/.exec(s);
+        if (tm && duration) job.progress = Math.min(0.99, from + span * Math.min(1, (+tm[1] * 3600 + +tm[2] * 60 + +tm[3]) / duration));
+      });
+      p.on('error', reject);
+      p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(job.status === 'cancelled' ? 'Stopped'
+        : msg.split('\n').map((l) => l.trim()).filter(Boolean).slice(-1)[0] || `ffmpeg stopped (${code})`))));
+    });
+  }
+  const mb = (n) => `${(n / 1048576).toFixed(n < 10485760 ? 1 : 0)} MB`;
+  /**
+   * The file at `bytes` or under. Videos: H.264 MP4 in two passes at the bitrate that fills the size (smaller picture
+   * when the bitrate is low); a try that comes out too big goes again a bit lower. Sounds: MP3 at the bitrate that
+   * fits. GIFs: smaller and fewer frames until it fits. Anything else: a .zip, which fits only if the file packs well.
+   */
+  async function shrink(job, file, kind, bytes, outDir, tag) {
+    const stem = safeName(path.parse(file).name), dir = outDir || path.dirname(file), named = `${stem} (${tag || mb(bytes).replace(' ', '')})`;
+    const tooSmall = (what) => err(400, `${mb(bytes)} is too small for ${what}.`);
+    if (kind === 'video' || kind === 'audio') {
+      const info = await probe(file);
+      if (!info?.duration) throw err(400, 'Couldn’t read how long it is.');
+      const kbps = (bytes * 8 * 0.97) / info.duration / 1000; // what fits, less a little for the file's own bookkeeping
+      if (kind === 'audio') {
+        const rate = Math.min(320, Math.floor(kbps));
+        if (rate < 8) throw tooSmall('this much sound');
+        const out = freePath(dir, `${named}.mp3`);
+        job.result = { path: out };
+        await ffStep(job, ['-i', file, '-vn', '-map', '0:a:0', '-c:a', 'libmp3lame', '-b:a', `${rate}k`, ...(rate < 48 ? ['-ar', rate < 24 ? '11025' : '22050'] : []), out], info.duration);
+        return { path: out, note: `MP3 at ${rate} kbit/s` };
+      }
+      const out = freePath(dir, `${named}.mp4`);
+      job.result = { path: out };
+      const log = path.join(os.tmpdir(), `bds-shrink-${job.id}`);
+      let aRate = info.audio ? Math.max(32, Math.min(128, Math.round(kbps * 0.12))) : 0;
+      let vRate = Math.floor(kbps - aRate);
+      if (vRate < 40) { aRate = info.audio ? 24 : 0; vRate = Math.floor(kbps - aRate); }
+      if (vRate < 20) throw tooSmall(`${Math.round(info.duration)} s of video`);
+      try {
+        for (let tryN = 0; tryN < 3; tryN++) {
+          // a smaller picture looks better than a starved big one
+          const h = Math.min(info.height || 1080, vRate < 250 ? 360 : vRate < 600 ? 480 : vRate < 1500 ? 720 : 1080);
+          const vf = ['-vf', `scale=-2:'min(${h},ih)'`];
+          const enc = ['-c:v', 'libx264', '-preset', 'medium', '-b:v', `${vRate}k`, '-pix_fmt', 'yuv420p', '-passlogfile', log];
+          await ffStep(job, ['-i', file, '-map', '0:v:0', ...vf, ...enc, '-pass', '1', '-an', '-f', 'null', '-'], info.duration, 0, 0.5);
+          await ffStep(job, ['-i', file, '-map', '0:v:0', ...(aRate ? ['-map', '0:a:0?', '-c:a', 'aac', '-b:a', `${aRate}k`] : ['-an']), ...vf, ...enc, '-pass', '2', '-movflags', '+faststart', out], info.duration, 0.5, 0.5);
+          const size = (await fsp.stat(out)).size;
+          if (size <= bytes) return { path: out, note: `MP4, ${h}p at ${vRate + aRate} kbit/s` };
+          vRate = Math.floor(vRate * (bytes / size) * 0.95);
+          if (vRate < 20) break;
+        }
+        throw tooSmall(`${Math.round(info.duration)} s of video`);
+      } catch (e) { await fsp.rm(out, { force: true }).catch(() => {}); throw e; } finally {
+        for (const f of await fsp.readdir(os.tmpdir()).catch(() => [])) if (f.startsWith(`bds-shrink-${job.id}`)) fsp.rm(path.join(os.tmpdir(), f), { force: true }).catch(() => {});
+      }
+    }
+    if (kind === 'gif') {
+      const info = await probe(file);
+      const out = freePath(dir, `${named}.gif`);
+      job.result = { path: out };
+      const w = info?.width || 720;
+      const tries = [[1, 15], [0.75, 12], [0.6, 10], [0.45, 10], [0.33, 8], [0.25, 8], [0.18, 6]];
+      for (let i = 0; i < tries.length; i++) {
+        const [k, fps] = tries[i], width = Math.max(32, Math.round((Math.min(w, 720) * k) / 2) * 2);
+        await ffStep(job, ['-i', file, '-vf', `fps=${fps},scale=${width}:-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=${k < 0.5 ? 64 : 128}[p];[b][p]paletteuse`, '-loop', '0', out], 0);
+        job.progress = (i + 1) / tries.length;
+        if ((await fsp.stat(out)).size <= bytes) return { path: out, note: `GIF, ${width} px wide at ${fps} frames/s` };
+      }
+      await fsp.rm(out, { force: true }).catch(() => {});
+      throw tooSmall('this GIF');
+    }
+    // anything else: packed as tightly as a .zip goes
+    const st = await fsp.stat(file);
+    if (st.size > 1024 ** 3) throw err(400, 'Over 1 GB: too big to zip here.');
+    const JSZip = require('jszip');
+    const zip = new JSZip();
+    zip.file(path.basename(file), await fsp.readFile(file));
+    const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 } }, (m) => { job.progress = m.percent / 100; });
+    if (buf.length > bytes) throw err(400, `Zipped it’s still ${mb(buf.length)}: this kind of file doesn’t pack any smaller.`);
+    const out = freePath(dir, `${stem}.zip`);
+    job.result = { path: out };
+    await fsp.writeFile(out, buf);
+    return { path: out, note: `zipped: ${Math.round((1 - buf.length / st.size) * 100)}% smaller` };
+  }
+
   return {
+    // Shrink a file to a size (`bytes`), as a job (/api/job for progress): kind video / audio / gif / other.
+    'POST /api/convert/shrink': async (req) => {
+      const { path: src, kind, bytes, dir, tag } = await readJSONBody(req);
+      const file = requirePath(src);
+      if (!fs.existsSync(file)) throw err(404, 'That file isn’t there any more.');
+      const k = ['video', 'audio', 'gif'].includes(kind) ? kind : 'other';
+      if (k !== 'other') needFfmpeg();
+      const n = Number(bytes);
+      if (!(n >= 1024)) throw err(400, 'Pick a size of at least 1 KB.');
+      const job = newJob(`Shrinking ${path.basename(file)}`);
+      job.result = {};
+      return startJob(job, async () => { const r = await shrink(job, file, k, n, dir ? requirePath(dir) : null, safeName(tag).slice(0, 12)); Object.assign(job.result, r); });
+    },
     // A free file name for a converted file (dir: where it goes); folder: make it a new folder instead (PDF pages).
     'POST /api/convert/name': async (req) => {
       const { dir, name, folder } = await readJSONBody(req);

@@ -2,6 +2,8 @@
 // ICO, or a PDF); videos and sounds go through the PC's ffmpeg; documents go through the document editor's own
 // import and export (Word, PDF, web page, Markdown, RTF, text); spreadsheets through SheetJS; PDFs become page
 // pictures or text. The new file lands next to the old one (or in a folder you pick) and nothing is ever overwritten.
+// "Shrink to a size" takes any file down to a size you set: pictures are redrawn smaller here, PDFs repacked (or their
+// pages redrawn as pictures), videos, sounds and GIFs go through ffmpeg at the rate that fits, anything else is zipped.
 
 import { BaseEditor } from './base.js';
 import { h, clear, uid, basename, dirname, extOf, stripExt, formatBytes, decodeText, vendor } from '../core/dom.js';
@@ -9,7 +11,7 @@ import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
 import { toast, errorToast, contextMenu, draggedPaths } from '../core/ui.js';
 import { pickOpen, pickFolder } from '../core/files.js';
-import { encodeCanvas, defaultOut } from './image-out.js';
+import { encodeCanvas, defaultOut, alphaInfo } from './image-out.js';
 import { EDITORS } from '../core/tools.js';
 
 const post = (url, json) => api.post(url, json);
@@ -23,25 +25,28 @@ const KINDS = {
   doc: { label: 'Document', icon: 'file-doc', exts: ['docx', 'docm', 'dotx', 'odt', 'rtf', 'doc', 'html', 'htm', 'md', 'markdown', 'txt'], to: ['docx', 'pdf', 'html', 'md', 'rtf', 'txt'] },
   sheet: { label: 'Spreadsheet', icon: 'sheet', exts: ['xlsx', 'xlsm', 'xls', 'ods', 'csv', 'tsv'], to: ['xlsx', 'ods', 'csv', 'tsv'] },
   pdf: { label: 'PDF', icon: 'file-pdf', exts: ['pdf'], to: ['png', 'jpg', 'txt'] },
+  other: { label: 'Any file', icon: 'file', exts: [], to: [] }, // only shrinks
 };
 const TO_LABEL = {
   png: 'PNG', jpg: 'JPG', webp: 'WebP', gif: 'GIF', bmp: 'BMP', ico: 'ICO (Windows icon)', pdf: 'PDF',
   mp4: 'MP4', webm: 'WebM', mkv: 'MKV', mov: 'MOV', mp3: 'MP3', wav: 'WAV', m4a: 'M4A', ogg: 'OGG', opus: 'Opus', flac: 'FLAC',
   docx: 'Word (.docx)', html: 'Web page (.html)', md: 'Markdown', rtf: 'RTF', txt: 'Plain text',
   xlsx: 'Excel (.xlsx)', ods: 'OpenDocument (.ods)', csv: 'CSV', tsv: 'TSV',
+  size: 'Shrink to a size',
 };
+const UNITS = { KB: 1024, MB: 1048576, GB: 1073741824 };
+/** "10MB", "9.5MB", "800KB": in the shrunk file's name. */
+const sizeTag = ({ n, unit }) => `${+Number(n).toFixed(2)}${unit}`;
 const MEDIA_TO = new Set(['mp4', 'webm', 'mkv', 'mov', 'mp3', 'wav', 'm4a', 'ogg', 'opus', 'flac']);
 const SAME = { jpeg: 'jpg', jfif: 'jpg', htm: 'html', markdown: 'md', xlsm: 'xlsx', oga: 'ogg', m4v: 'mp4' };
 const ALL_EXTS = Object.values(KINDS).flatMap((k) => k.exts);
 
-const kindOf = (ext) => Object.keys(KINDS).find((k) => KINDS[k].exts.includes(ext)) || null;
-/** What a file can become: its kind's targets, minus what it already is. A GIF can also become a video. */
+const kindOf = (ext) => Object.keys(KINDS).find((k) => KINDS[k].exts.includes(ext)) || 'other';
+/** What a file can become: its kind's targets, minus what it already is, and a smaller one. A GIF can also become a video. */
 function targetsFor(ext) {
-  const k = kindOf(ext);
-  if (!k) return [];
-  let to = KINDS[k].to;
+  let to = KINDS[kindOf(ext)].to;
   if (ext === 'gif') to = [...to, 'mp4', 'webm'];
-  return to.filter((t) => t !== (SAME[ext] || ext));
+  return [...to.filter((t) => t !== (SAME[ext] || ext)), 'size'];
 }
 
 // ---------------------------------------------------------------- pictures
@@ -168,23 +173,20 @@ export class ConvertEditor extends BaseEditor {
   get outDir() { return this.settings.convertDir || null; }
 
   add(paths) {
-    let skipped = 0;
     for (const p of paths) {
       const ext = extOf(p);
-      if (!targetsFor(ext).length) { skipped++; continue; }
       if (this.items.some((x) => x.path === p && x.status !== 'done')) continue;
       const kind = kindOf(ext), to = targetsFor(ext);
       const last = (this.settings.convertTo || {})[kind];
       this.items.push({ id: uid(), path: p, name: basename(p), ext, kind, to: to.includes(last) ? last : to[0], status: 'ready', progress: 0, out: [], error: null, size: null });
     }
-    if (skipped) toast(`${skipped} file${skipped === 1 ? '' : 's'} skipped: BoxConvert doesn’t know ${skipped === 1 ? 'that type' : 'those types'}.`, { type: 'warn' });
     this.renderList();
     this.refreshStatus();
     for (const x of this.items) if (x.size == null) api.stat?.(x.path).then((s) => { x.size = s?.size ?? null; this.renderList(); }).catch(() => {});
   }
 
   async addDialog() {
-    const paths = await pickOpen({ multi: true, title: 'Files to convert', filters: [{ name: 'Files BoxConvert reads', extensions: ALL_EXTS }, { name: 'All files', extensions: ['*'] }] });
+    const paths = await pickOpen({ multi: true, title: 'Files to convert or shrink', filters: [{ name: 'All files (any file can be shrunk)', extensions: ['*'] }, { name: 'Files BoxConvert converts', extensions: ALL_EXTS }] });
     if (paths?.length) this.add(paths);
   }
 
@@ -194,7 +196,7 @@ export class ConvertEditor extends BaseEditor {
       h('div', { class: 'convert-main' },
         h('div', { class: 'convert-head' },
           h('div', {}, h('div', { class: 'todo-title' }, 'Convert files'),
-            h('div', { class: 'faint convert-sub' }, 'Pictures, videos, sounds, documents, spreadsheets and PDFs. The original stays as it is.')),
+            h('div', { class: 'faint convert-sub' }, 'Pictures, videos, sounds, documents, spreadsheets and PDFs, or any file shrunk to a size. The original stays as it is.')),
           h('div', { class: 'grow' }),
           h('button', { class: 'btn sm', onclick: () => this.addDialog() }, icon('plus', 'sm'), 'Add files')),
         this.list = h('div', { class: 'convert-list' }),
@@ -216,7 +218,7 @@ export class ConvertEditor extends BaseEditor {
 
   row(x) {
     const k = KINDS[x.kind];
-    const needsFf = (t) => (MEDIA_TO.has(t) || (t === 'gif' && x.kind === 'video')) && !this.ffmpeg;
+    const needsFf = (t) => (MEDIA_TO.has(t) || (t === 'gif' && x.kind === 'video') || (t === 'size' && (x.kind === 'video' || x.kind === 'audio' || x.ext === 'gif'))) && !this.ffmpeg;
     const sel = h('select', { class: 'convert-to', disabled: x.status === 'working' }, targetsFor(x.ext).map((t) =>
       h('option', { value: t, selected: t === x.to, disabled: needsFf(t) }, TO_LABEL[t] + (needsFf(t) ? ' (needs ffmpeg)' : ''))));
     sel.addEventListener('change', () => {
@@ -227,7 +229,9 @@ export class ConvertEditor extends BaseEditor {
     });
     let state;
     if (x.status === 'working') state = h('div', { class: 'convert-bar' }, h('div', { style: { width: `${Math.round(x.progress * 100)}%` } }));
-    else if (x.status === 'done') state = h('div', { class: 'convert-done' }, icon('check', 'sm'),
+    else if (x.status === 'done' && !x.out.length) state = h('div', { class: 'convert-done', title: x.note || '' }, icon('check', 'sm'), h('span', { class: 'faint' }, x.note || 'Nothing to do'));
+    else if (x.status === 'done') state = h('div', { class: 'convert-done', title: x.note || '' }, icon('check', 'sm'),
+      x.outSize != null ? h('span', { class: 'mono faint convert-size' }, formatBytes(x.outSize)) : null,
       h('button', { class: 'convert-link', title: x.out.join('\n'), onclick: () => (x.out.length === 1 ? this.app.openPath(x.out[0]) : api.reveal(x.out[0])) }, x.out.length === 1 ? basename(x.out[0]) : `${x.out.length} files`),
       h('button', { class: 'icon-btn', 'data-tip': 'Show in folder', onclick: () => api.reveal(x.out[0]) }, icon('folder', 'sm')));
     else if (x.status === 'error') state = h('div', { class: 'convert-err', title: x.error }, icon('alert', 'sm'), h('span', {}, x.error));
@@ -260,7 +264,19 @@ export class ConvertEditor extends BaseEditor {
       this.renderList();
     });
     const where = this.outDir;
+    // the size files shrink to, when any of them is set to
+    let sizeBox = null;
+    if (this.items.some((x) => x.to === 'size' && x.status !== 'done')) {
+      const sz = this.shrinkSize;
+      const num = h('input', { type: 'number', class: 'convert-size-n', min: '1', step: 'any', value: String(sz.n) });
+      const unit = h('select', { class: 'convert-to convert-size-unit' }, Object.keys(UNITS).map((u) => h('option', { value: u, selected: u === sz.unit }, u)));
+      const save = () => { const n = Number(num.value); if (n > 0) this.app.saveSettings({ convertSize: { n, unit: unit.value } }); };
+      num.addEventListener('change', save);
+      unit.addEventListener('change', save);
+      sizeBox = h('label', { class: 'convert-where', title: 'Files set to “Shrink to a size” come out this size or smaller' }, h('span', { class: 'faint' }, 'Shrink to'), num, unit);
+    }
     clear(this.foot).append(
+      sizeBox,
       h('div', { class: 'convert-where' },
         h('span', { class: 'faint' }, 'Save to'),
         h('button', { class: 'btn sm ghost', title: where || 'Each converted file goes in the same folder as its original', onclick: (e) => contextMenu(e, [
@@ -288,7 +304,7 @@ export class ConvertEditor extends BaseEditor {
     let ok = 0, bad = 0;
     for (const x of this.items.filter((i) => i.status === 'ready' || i.status === 'error')) {
       if (this.destroyed) break;
-      x.status = 'working'; x.progress = 0; x.error = null; x.out = []; x.stop = false;
+      x.status = 'working'; x.progress = 0; x.error = null; x.out = []; x.stop = false; x.note = null; x.outSize = null;
       this.renderList();
       try {
         x.out = await this.convert(x);
@@ -313,8 +329,14 @@ export class ConvertEditor extends BaseEditor {
     return [p];
   }
 
+  get shrinkSize() {
+    const s = this.settings.convertSize;
+    return s && Number(s.n) > 0 && UNITS[s.unit] ? s : { n: 10, unit: 'MB' };
+  }
+
   async convert(x) {
     const to = x.to;
+    if (to === 'size') return this.shrink(x);
     if (MEDIA_TO.has(to) || (to === 'gif' && x.kind === 'video')) return this.media(x);
     const { bytes } = await api.read(x.path);
     x.progress = 0.2; this.renderList();
@@ -345,6 +367,98 @@ export class ConvertEditor extends BaseEditor {
       if (j.status === 'error' || j.status === 'cancelled') throw new Error(j.status === 'cancelled' ? 'Stopped' : j.error || 'ffmpeg couldn’t convert it.');
       if (Math.abs((j.progress || 0) - x.progress) > 0.01) { x.progress = j.progress || 0; this.renderList(); }
     }
+  }
+
+  // ---------------------------------------------------------------- shrinking to a size
+  async shrink(x) {
+    const sz = this.shrinkSize, limit = Math.floor(sz.n * UNITS[sz.unit]);
+    const size = x.size ?? (await api.stat?.(x.path).catch(() => null))?.size;
+    if (size != null && size <= limit) { x.note = `Already under ${sz.n} ${sz.unit}`; return []; }
+    const name = (ext) => `${stripExt(x.name)} (${sizeTag(sz)}).${ext}`;
+    const write = async (bytes, ext, note) => {
+      const p = await this.target(x, name(ext));
+      await api.write(p, bytes);
+      x.note = note; x.outSize = bytes.length;
+      return [p];
+    };
+    if (x.kind === 'image' && x.ext !== 'gif') return this.shrinkImage(x, limit, write);
+    if (x.kind === 'pdf') return this.shrinkPdf(x, limit, write);
+    // videos, sounds and GIFs through ffmpeg, anything else zipped: on the server
+    const r = await post('/api/convert/shrink', { path: x.path, kind: x.ext === 'gif' ? 'gif' : x.kind, bytes: limit, tag: sizeTag(sz), dir: this.outDir });
+    x.job = r.id;
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 400));
+      const j = await api.get(`/api/job?id=${encodeURIComponent(r.id)}`);
+      if (j.status === 'done') {
+        x.note = j.result?.note || null;
+        x.outSize = (await api.stat?.(j.result.path).catch(() => null))?.size ?? null;
+        return [j.result.path];
+      }
+      if (j.status === 'error' || j.status === 'cancelled') throw new Error(j.status === 'cancelled' ? 'Stopped' : j.error || 'Couldn’t shrink it.');
+      if (Math.abs((j.progress || 0) - x.progress) > 0.01) { x.progress = j.progress || 0; this.renderList(); }
+    }
+  }
+
+  /** The best quality that fits (JPG, or WebP when it has see-through parts); a smaller picture when even low quality doesn't. */
+  async shrinkImage(x, limit, write) {
+    const { bytes } = await api.read(x.path);
+    let c = await loadImage(bytes, x.ext);
+    const to = alphaInfo(c).transparent ? 'webp' : 'jpg';
+    for (let round = 0; round < 10; round++) {
+      if (x.stop) throw new Error('Stopped');
+      let lo = 35, hi = 92, best = null, low = null;
+      while (lo <= hi) {
+        const q = (lo + hi) >> 1, out = await encodeCanvas(c, to, { quality: q });
+        if (q === 35 || !low) low = out;
+        if (out.length <= limit) { best = { out, q }; lo = q + 1; } else hi = q - 1;
+      }
+      x.progress = Math.min(0.95, (round + 1) / 6); this.renderList();
+      if (best) return write(best.out, to, `${to.toUpperCase()}, ${c.width}×${c.height}, quality ${best.q}`);
+      // too big even at low quality: a smaller picture, about as much smaller as needed
+      const k = Math.max(0.3, Math.min(0.9, Math.sqrt(limit / low.length) * 0.95));
+      const s = document.createElement('canvas');
+      s.width = Math.max(1, Math.round(c.width * k)); s.height = Math.max(1, Math.round(c.height * k));
+      const g = s.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(c, 0, 0, s.width, s.height);
+      c = s;
+    }
+    throw new Error('Couldn’t get it that small.');
+  }
+
+  /** First repacked as it is (nothing lost); if that's still too big, its pages redrawn as pictures, smaller until it fits. */
+  async shrinkPdf(x, limit, write) {
+    const { bytes } = await api.read(x.path);
+    const PDFLib = await vendor.pdfLib();
+    try {
+      const out = await (await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true })).save({ useObjectStreams: true });
+      if (out.length <= limit) return write(out, 'pdf', 'Repacked, nothing lost');
+    } catch { /* drawn as pictures below */ }
+    const pdfjs = await vendor.pdfjs();
+    const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise;
+    const steps = [[150, 75], [120, 60], [96, 50], [80, 40], [64, 32], [50, 25]];
+    try {
+      for (let si = 0; si < steps.length; si++) {
+        const [dpi, q] = steps[si];
+        const out = await PDFLib.PDFDocument.create();
+        for (let i = 1; i <= doc.numPages; i++) {
+          if (x.stop) throw new Error('Stopped');
+          const page = await doc.getPage(i);
+          const pt = page.getViewport({ scale: 1 }), vp = page.getViewport({ scale: dpi / 72 });
+          const c = document.createElement('canvas');
+          c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+          const g = c.getContext('2d');
+          g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+          await page.render({ canvasContext: g, viewport: vp }).promise;
+          const img = await out.embedJpg(await encodeCanvas(c, 'jpg', { quality: q }));
+          out.addPage([pt.width, pt.height]).drawImage(img, { x: 0, y: 0, width: pt.width, height: pt.height });
+          x.progress = Math.min(0.99, (si + i / doc.numPages) / steps.length); this.renderList();
+        }
+        const data = await out.save({ useObjectStreams: true });
+        if (data.length <= limit) return write(data, 'pdf', `Pages as pictures at ${dpi} dpi: the text can’t be selected or searched any more`);
+      }
+    } finally { doc.destroy(); }
+    throw new Error('Couldn’t get it that small, even with the pages as small pictures.');
   }
 
   async sheet(x, bytes) {

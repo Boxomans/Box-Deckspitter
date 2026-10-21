@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.1.8",
+    "date": "2026-10-20",
+    "notes": [
+      "BoxConvert: “Shrink to a size” takes any file down to a size you pick (KB, MB or GB). Pictures get the best quality that fits, then a smaller picture if needed; videos, sounds and GIFs are re-encoded to fit (videos and sounds need ffmpeg); PDFs are repacked first, and only if that isn’t enough are their pages redrawn as pictures (the text then can’t be selected); anything else is zipped, which only helps files that pack well. BoxConvert now takes any file.",
+      "Toolbox: pin any tool, game or extra to the top with the pin on its row (it shows on hover) or by right-clicking it. Click the pin again to unpin.",
+      "Screensaver: playing music no longer stops it from coming on. It now waits only while a video plays (in any program) or a program is full screen."
+    ]
+  },
+  {
     "version": "1.1.7",
     "date": "2026-10-20",
     "notes": [

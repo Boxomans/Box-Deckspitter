@@ -42,12 +42,24 @@ export class PanelsPart {
   /** The Toolbox at the foot of the left rail: every tool in one list. */
   renderToolsPanel() {
     const p = clear(this.sidepanel);
+    // pinned ones (any tool, game or extra) sit in their own group at the top, in the order they were pinned
+    const pinned = Array.isArray(this.settings.toolboxPinned) ? this.settings.toolboxPinned : [];
+    const setPin = (key, on) => {
+      const rest = pinned.filter((k) => k !== key);
+      this.saveSettings({ toolboxPinned: on ? [...rest, key] : rest });
+      this.renderToolsPanel();
+    };
     // the tools (not the games or the extras) rename with F2, the same name their home card shows
-    const row = ([ic, key, sub, open, cls = ''], movable = false) => {
+    const row = ([ic, key, sub, open, cls = ''], movable = false, pinRow = false) => {
+      const isPinned = pinned.includes(key);
       const nameEl = h('span', { class: 'fr-name', dataset: movable ? { toolname: key } : {} }, movable ? this.toolName(key) : key);
-      const b = h('button', { class: `file-row tools-row ${cls}`, title: movable ? `${sub} · F2 to rename · Ctrl+F2 to reset · drag to reorder` : sub, dataset: movable ? { key } : {} }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
-        h('span', { class: 'tools-text' }, nameEl, h('span', { class: 'tools-sub' }, sub)));
+      const pin = h('span', { class: `tools-pin ${isPinned ? 'on' : ''}`, role: 'button', 'data-tip': isPinned ? 'Unpin' : 'Pin to the top' }, icon('pin', 'sm'));
+      pin.addEventListener('click', (e) => { e.stopPropagation(); setPin(key, !isPinned); });
+      const tip = movable ? `${sub} · F2 to rename · Ctrl+F2 to reset${pinRow ? '' : ' · drag to reorder'}` : sub;
+      const b = h('button', { class: `file-row tools-row ${cls} ${pinRow ? 'pinned' : ''} ${isPinned && !pinRow ? 'tools-away' : ''}`, title: tip, dataset: movable ? { key } : {} }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
+        h('span', { class: 'tools-text' }, nameEl, h('span', { class: 'tools-sub' }, sub)), pin);
       b.addEventListener('click', open);
+      b.addEventListener('contextmenu', (e) => contextMenu(e, [{ label: isPinned ? 'Unpin' : 'Pin to the top', icon: 'pin', action: () => setPin(key, !isPinned) }]));
       if (movable) hoverKeys(b, { nameEl, value: () => this.toolName(key), commit: (n) => this.setToolName(key, n), reset: () => this.setToolName(key, '') });
       Object.defineProperty(b, '_find', { get: () => `${nameEl.textContent} ${key} ${sub}`.toLowerCase() }); // follows a rename
       return b;
@@ -71,7 +83,10 @@ export class PanelsPart {
       ]],
     ];
     const list = h('div', { class: 'file-list tools-list' });
-    for (const [title, items] of groups) list.append(h('div', { class: 'tools-group' }, title), ...items.map((it) => row(it, title === 'Tools')));
+    const tops = pinned.map((k) => groups.find(([, items]) => items.some((it) => it[1] === k))).map((g, i) => g && [g[1].find((it) => it[1] === pinned[i]), g[0] === 'Tools']).filter(Boolean);
+    if (tops.length) list.append(h('div', { class: 'tools-group' }, 'Pinned'), ...tops.map(([it, movable]) => row(it, movable, true)));
+    // a pinned one stays in its own group too, out of sight, so dragging the rest keeps its place for when it's unpinned
+    for (const [title, items] of groups) list.append(h('div', { class: 'tools-group', hidden: items.every((it) => pinned.includes(it[1])) }, title), ...items.map((it) => row(it, title === 'Tools')));
     this.sortableTools(list);
     const filter = h('input', { type: 'search', class: 'tools-filter', placeholder: 'Filter tools…', spellcheck: false });
     filter.addEventListener('input', () => {
@@ -79,11 +94,11 @@ export class PanelsPart {
       for (const el of list.children) if (el._find !== undefined) el.hidden = !!q && !el._find.includes(q);
       for (const g of list.querySelectorAll('.tools-group')) {
         let n = g.nextElementSibling, any = false;
-        while (n && !n.classList.contains('tools-group')) { if (!n.hidden) any = true; n = n.nextElementSibling; }
+        while (n && !n.classList.contains('tools-group')) { if (!n.hidden && !n.classList.contains('tools-away')) any = true; n = n.nextElementSibling; }
         g.hidden = !any;
       }
     });
-    filter.addEventListener('keydown', (e) => { if (e.key === 'Enter') [...list.children].find((el) => el._find !== undefined && !el.hidden)?.click(); });
+    filter.addEventListener('keydown', (e) => { if (e.key === 'Enter') [...list.children].find((el) => el._find !== undefined && !el.hidden && !el.classList.contains('tools-away'))?.click(); });
     // the sortie flying right now isn't in the totals until it ends
     if (this.settings.tomcatEnabled && this._flight) this._flight.then((f) => {
       const g = f.game;
@@ -104,7 +119,7 @@ export class PanelsPart {
 
   /** Drag the Toolbox's tools into the order you like; it's saved on its own, apart from the home page's order. */
   sortableTools(list) {
-    const rows = () => [...list.querySelectorAll('.tools-row[data-key]')];
+    const rows = () => [...list.querySelectorAll('.tools-row[data-key]:not(.pinned)')];
     let dragged = null;
     const clearMarks = () => { for (const r of rows()) r.classList.remove('drop-before', 'drop-after'); };
     for (const row of rows()) {

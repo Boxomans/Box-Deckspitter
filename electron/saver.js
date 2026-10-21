@@ -1,44 +1,29 @@
 // The screensaver, the desktop side (the page decides when: public/js/app/screensaver.js). It covers every screen,
 // over every program, with a window of its own on each display showing public/saver.html; any key, click or real
-// mouse move anywhere ends it. And whether something else on the PC is playing: sound coming out of the speakers, or
-// a program full screen (a video, a game, a presentation), so the screensaver waits.
+// mouse move anywhere ends it. And whether a video is playing somewhere on the PC, so the screensaver waits: music
+// doesn't hold it up, only video.
 
 const { BrowserWindow, powerMonitor, screen } = require('electron');
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 
-// Windows: the loudness on the default speakers right now (Core Audio's meter) and whether a program has the screen
-// to itself (SHQueryUserNotificationState: 2 busy full screen, 3 Direct3D full screen, 4 presentation mode).
+// Windows: whether a program is keeping the screen on (players and browsers ask for that while a video plays, not for
+// music: SystemExecutionState's ES_DISPLAY_REQUIRED) and whether a program has the screen to itself
+// (SHQueryUserNotificationState: 2 busy full screen, 3 Direct3D full screen, 4 presentation mode).
 const WIN_PROBE = `
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class BdsProbe {
   [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
-  [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumerator {}
-  [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  interface IMMDeviceEnumerator { int EnumAudioEndpoints(); [PreserveSig] int GetDefaultAudioEndpoint(int flow, int role, out IMMDevice dev); }
-  [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  interface IMMDevice { [PreserveSig] int Activate(ref Guid iid, int ctx, IntPtr p, [MarshalAs(UnmanagedType.IUnknown)] out object o); }
-  [Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  interface IAudioMeterInformation { [PreserveSig] int GetPeakValue(out float peak); }
-  public static float Peak() {
-    try {
-      IMMDevice dev;
-      if (((IMMDeviceEnumerator)new MMDeviceEnumerator()).GetDefaultAudioEndpoint(0, 0, out dev) != 0) return 0;
-      Guid iid = typeof(IAudioMeterInformation).GUID; object o;
-      if (dev.Activate(ref iid, 23, IntPtr.Zero, out o) != 0) return 0;
-      float p; ((IAudioMeterInformation)o).GetPeakValue(out p); return p;
-    } catch { return 0; }
-  }
+  [DllImport("powrprof.dll")] static extern uint CallNtPowerInformation(int level, IntPtr inBuf, uint inLen, out uint outBuf, uint outLen);
+  public static int Display() { uint s; return CallNtPowerInformation(16, IntPtr.Zero, 0, out s, 4) == 0 && (s & 2) != 0 ? 1 : 0; }
   public static int Screen() { int s; return SHQueryUserNotificationState(out s) == 0 ? s : 0; }
 }
 '@
 while ($true) {
   $line = [Console]::In.ReadLine()
   if ($line -eq $null) { break }
-  $peak = 0
-  for ($i = 0; $i -lt 8; $i++) { $v = [BdsProbe]::Peak(); if ($v -gt $peak) { $peak = $v }; Start-Sleep -Milliseconds 150 }
-  [Console]::Out.WriteLine($peak.ToString([Globalization.CultureInfo]::InvariantCulture) + ' ' + [BdsProbe]::Screen())
+  [Console]::Out.WriteLine([string][BdsProbe]::Display() + ' ' + [BdsProbe]::Screen())
   [Console]::Out.Flush()
 }
 `;
@@ -70,19 +55,13 @@ module.exports = function createSaver({ origin, log = () => {} }) {
     });
   }
 
-  /** Is something on the PC playing (sound out of the speakers, or a program full screen)? */
+  /** Is a video playing on the PC (a program keeping the screen on, or one full screen)? Music doesn't count. */
   async function playing() {
-    if (process.platform === 'win32') {
-      const [peak, state] = (await winProbe()).split(' ').map(Number);
-      // the app itself full screen (left that way) doesn't count
-      const ours = BrowserWindow.getFocusedWindow()?.isFullScreen();
-      return peak > 0.001 || (!ours && state >= 2 && state <= 4);
-    }
-    if (process.platform === 'linux') {
-      // PulseAudio / PipeWire: a stream that isn't paused
-      return new Promise((resolve) => execFile('pactl', ['list', 'sink-inputs'], { timeout: 4000 }, (err, out) => resolve(!err && /Corked:\s*no/i.test(out))));
-    }
-    return false;
+    if (process.platform !== 'win32') return false; // Linux: only a video in the app itself holds it up (the page checks that)
+    const [video, state] = (await winProbe()).split(' ').map(Number);
+    // the app itself full screen (left that way) doesn't count
+    const ours = BrowserWindow.getFocusedWindow()?.isFullScreen();
+    return video === 1 || (!ours && state >= 2 && state <= 4);
   }
 
   function stop() {

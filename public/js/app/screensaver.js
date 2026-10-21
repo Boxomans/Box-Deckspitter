@@ -1,9 +1,9 @@
 // Box-Deckspitter app shell, the screensaver (Settings → Screensaver; off unless switched on). After the minutes set
 // there with no key or mouse move on the PC, one of your BoxSaver screensavers comes on. In the desktop app it covers
 // every screen, over every program, while the app is open at all (minimised too: electron/saver.js), and waits while
-// something plays (a video here, sound from the PC, a program full screen). In a plain browser tab it covers this page,
-// counts only this page's keys and moves, and not while the tab is hidden. Any key, click, scroll or mouse move ends
-// it. Not while the app is locked.
+// a video plays (here or in any program; music doesn't count) or a program is full screen. In a plain browser tab it
+// covers this page, counts only this page's keys and moves, and not while the tab is hidden. Any key, click, scroll or
+// mouse move ends it. Not while the app is locked.
 // Methods of App (app.js mixes this class into it).
 
 import { h } from '../core/dom.js';
@@ -140,7 +140,7 @@ export class ScreensaverPart {
           h('button', { class: 'btn sm', onclick: () => this.startScreensaver() }, icon('play', 'sm'), 'Preview'),
           h('button', { class: 'btn sm', onclick: () => this.newDocument('saver') }, icon('saver', 'sm'), `Make your own in ${studio}`)),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, window.bdsShell?.saverStart
-          ? 'It covers every screen, over every program, as long as the app is open (minimised is fine). Any key or mouse move ends it. It waits while a video plays, sound comes from the PC or a program is full screen.'
+          ? 'It covers every screen, over every program, as long as the app is open (minimised is fine). Any key or mouse move ends it. It waits while a video plays (in any program; music doesn’t stop it) or a program is full screen.'
           : 'It covers this page, not the rest of the screen. Any key or mouse move ends it. It waits while a video is playing.'));
     };
     draw();
