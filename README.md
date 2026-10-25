@@ -97,6 +97,8 @@ new. **Download** fetches it and checks every file for errors first; **Restart &
 - Made by **boxbind** (Discord: `@boxbind`).
 - UI sound effects are from [Pixabay](https://pixabay.com), used under the Pixabay Content License. They
   aren't covered by the code's license. See `public/assets/sounds/SOUNDS-LICENSE.txt`.
+- The Michroma font is © The Michroma Project Authors, under the SIL Open Font License 1.1. See
+  `public/fonts/michroma-OFL.txt`.
 - Built on pdf.js, pdf-lib, Monaco, SheetJS, docx, JSZip, marked, ffmpeg.wasm, tesseract.js, Electron,
   nodemailer, ImapFlow, mailparser and the Anthropic SDK (installed by npm under their own licenses). It also
   uses yt-dlp and ffmpeg if you install them.

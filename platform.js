@@ -378,7 +378,33 @@ process.on('exit', () => {
   try { require('child_process').execFileSync('pactl', ['unload-module', systemModule], { timeout: 3000, stdio: 'ignore' }); } catch { /* gone already */ }
 });
 
+// ---------------------------------------------------------------------------------------------------- networks
+
+/** What the system knows about each connected network, for BoxComms's "is this a home network?" check:
+ *  { [adapter name]: { profile, category: 'private' | 'public' | 'domain' | 'unknown', vpn } }. Windows says whether
+ *  you marked a network private or public; NetworkManager only knows its name and whether it's a VPN. */
+async function networkProfiles() {
+  const out = {};
+  try {
+    if (IS_WIN) {
+      const r = await powershell('Get-NetConnectionProfile | Select-Object InterfaceAlias, Name, @{n="Category";e={[string]$_.NetworkCategory}} | ConvertTo-Json -Compress', { timeout: 15000 });
+      const list = JSON.parse(r.stdout.trim() || '[]');
+      for (const n of Array.isArray(list) ? list : [list]) {
+        const cat = String(n.Category || '').toLowerCase();
+        out[n.InterfaceAlias] = { profile: String(n.Name || ''), category: cat.startsWith('domain') ? 'domain' : cat === 'private' || cat === 'public' ? cat : 'unknown', vpn: false };
+      }
+    } else if (which('nmcli')) {
+      const r = await run('nmcli', ['-t', '-f', 'NAME,TYPE,DEVICE', 'connection', 'show', '--active'], { timeout: 10000 });
+      for (const line of r.stdout.split('\n').filter(Boolean)) {
+        const [name, type, dev] = line.split(/(?<!\\):/).map((x) => x.replace(/\\:/g, ':'));
+        if (dev) out[dev] = { profile: name, category: 'unknown', vpn: /vpn|wireguard|tun/.test(type) };
+      }
+    }
+  } catch { /* nothing known: every network counts as unrecognised */ }
+  return out;
+}
+
 module.exports = {
   IS_WIN, IS_MAC, which, psQuote, listDrives, reveal, openExternal, trash, copyFileToClipboard, fileDialog, hasFileDialogs, installHint,
-  defaultSpeakers, systemSoundSource, SYSTEM_LABEL,
+  defaultSpeakers, systemSoundSource, SYSTEM_LABEL, networkProfiles,
 };

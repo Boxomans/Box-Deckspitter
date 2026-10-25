@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.1.10",
+    "date": "2026-10-25",
+    "notes": [
+      "BoxComms, in the Toolbox: chat, file sending and a push-to-talk radio between copies of Box-Deckspitter on the same network. No account, server or internet is needed: copies find each other by themselves. You can pick which network it runs on (a VPN such as Hamachi, or one of several adapters), and add PCs by address for VPNs that don't carry broadcasts. There's one room plus private chats with each person, and you can drop files onto the chat. Files stream straight from disk to disk, so there's no size limit unless the room sets one. The radio has channels, push-to-talk on Space (or locked on), a level meter, volume, an optional radio sound and beeps. Messages, files and the radio are encrypted end to end for each person. Each pair shows a safety code to compare, and if someone's key changes, nothing is sent to or taken from them until you accept the new one. Room settings are shared by everyone in the room: name, topic, auto-delete for messages, whether files are allowed and a size limit, and clearing the chat for everyone. It's off until you switch it on, and it asks first on a network that isn't marked as home or a VPN. It hasn't been security-tested, so use it only on your home network or a VPN you trust. Turn it on in Settings → BoxComms or in BoxComms itself.",
+      "Settings → Audio devices: choose the microphone and the speakers or headphones, with a mic level test and a speaker test. BoxComms uses them.",
+      "BoxCalc, in the Toolbox: a scientific calculator. Type a sum or use the keys, and the answer shows as you type. Enter keeps it on the tape. It has functions and constants, degrees or radians, memory keys, your own variables (x = 5), and hex and binary for whole-number answers.",
+      "BoxOdds, in the Toolbox: dice, coins, picking from your own lists (with weights such as *3), chances and random numbers. Mixes roll several of those in one go. Dice use standard notation (3d6, d20+5, keep or drop the highest or lowest, exploding dice, rerolls, counting hits, fudge dice, d%, advantage and disadvantage) and show the odds of every total. A chance can be written as a percent, 1 in N, a fraction, odds for or against, or decimal or American odds; BoxOdds shows it in every other format, then rolls it. All rolls use the system's secure random source.",
+      "Dropdowns: a long choice stays on one line and fades out under the arrow instead of wrapping, and boxes show an edge when you point at them.",
+      "Music player: the popped-out player now stays inside a short window and scrolls, instead of running off the bottom.",
+      "Settings → Appearance → Interface font: Michroma, a wide geometric typeface, now comes with the app."
+    ]
+  },
+  {
     "version": "1.1.9",
     "date": "2026-10-24",
     "notes": [

@@ -4,10 +4,10 @@
 import { $, h, clear } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { api } from '../core/api.js';
-import { modal, toast, errorToast } from '../core/ui.js';
-import { normalizeCustom, CUSTOM_PRESETS } from '../core/custom-theme.js';
+import { modal, toast, errorToast, hsvPicker } from '../core/ui.js';
+import { normalizeCustom, CUSTOM_PRESETS, normalizeReadout, READOUT_PRESETS } from '../core/custom-theme.js';
 import { pickOpen, pickSave } from '../core/files.js';
-import { DISCORD_INVITE, THEMES, HIDDEN_THEMES } from './shared.js';
+import { DISCORD_INVITE, THEMES, HIDDEN_THEMES, SKIES, skyAt, SKY_HOURS } from './shared.js';
 
 // Appearance → Interface font. 'theme' keeps whatever the theme uses (each hidden theme has its own).
 const UI_FONTS = [
@@ -22,6 +22,7 @@ const UI_FONTS = [
   ['plex', 'IBM Plex Mono', "'IBM Plex Mono', Consolas, monospace"],
   ['consolas', 'Consolas', "Consolas, 'Cascadia Mono', monospace"],
   ['comic', 'Comic Sans MS', "'Comic Sans MS', 'Comic Sans', cursive"],
+  ['michroma', 'Michroma', "'Michroma', 'Segoe UI', system-ui, sans-serif"],
 ];
 
 /** A font family name made safe to put inside quotes in CSS. */
@@ -66,8 +67,8 @@ export class SettingsPart {
     if (ok !== 'ok') return;
     try {
       if (replace.checked) await window.bdsShell?.notes?.({ op: 'lock', hard: true });
-      // close the game first so its progress can't be saved over the imported one
-      for (const t of this.tabs.filter((x) => ['tomcat', 'strike', 'prometheus'].includes(x.mode))) await this.closeTab(t);
+      // close the games and the tools kept in settings first so they can't save over the imported ones
+      for (const t of this.tabs.filter((x) => ['tomcat', 'strike', 'prometheus', 'calc', 'odds'].includes(x.mode))) await this.closeTab(t);
       await this.stopTomcatFlight();
       const r = await api.post('/api/setup/import', { path: file, replaceNotes: replace.checked });
       toast(`Imported${r.notes === 'imported' ? ' (with Secure notes)' : r.notes === 'kept' ? ' — your Secure notes here were kept' : ''}. Restarting the window…`, { type: 'ok', timeout: 2500 });
@@ -92,6 +93,12 @@ export class SettingsPart {
     };
     const customBox = this.customThemeSettings();
     customBox.hidden = s.theme !== 'custom';
+    const readoutBox = this.readoutSettings();
+    readoutBox.hidden = s.theme !== 'readout';
+    const phosBox = this.phosphorSettings();
+    phosBox.hidden = s.theme !== 'f14';
+    const skyBox = this.skySettings();
+    skyBox.hidden = s.theme !== 'bluehour';
     p.append(
       h('div', { class: 'panel-head' }, 'Settings', h('div', { class: 'grow' }), h('button', { class: 'icon-btn', onclick: () => this.hidePanel() }, icon('x', 'sm'))),
       h('div', { class: 'panel-body' }, h('div', { class: 'settings-panel' },
@@ -106,6 +113,9 @@ export class SettingsPart {
             return el;
           })(),
           customBox,
+          readoutBox,
+          phosBox,
+          skyBox,
           h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Interface font'),
           sel('uiFont', this.uiFontList().map(([id, label]) => [id, label]), () => this.applyLook()),
           this.userFontSettings(),
@@ -127,6 +137,8 @@ export class SettingsPart {
             return h('label', { class: 'row', style: { gap: '8px', alignItems: 'center' } }, h('span', { class: 'dim' }, 'Volume'), r);
           })()),
         this.soundSettings(),
+        this.audioDeviceSettings(),
+        this.commsSettings(),
         this.screensaverSettings(),
         h('div', { class: 'settings-group' }, h('h4', {}, 'Documents'),
           h('span', { class: 'dim' }, 'Default font for new documents'),
@@ -356,6 +368,87 @@ export class SettingsPart {
       const a = parseInt(from.slice(1), 16), b = parseInt(to.slice(1), 16);
       const ch = (n, s) => (n >> s) & 255;
       return '#' + [16, 8, 0].map((s) => Math.round(ch(b, s) + (ch(a, s) - ch(b, s)) * 0.12).toString(16).padStart(2, '0')).join('');
+    };
+    draw();
+    return box;
+  }
+
+  /** Settings → Appearance → AWG-9: the scope's phosphor, green or amber. */
+  phosphorSettings() {
+    const box = h('div', { class: 'ct-box phos-box' });
+    const draw = () => {
+      const cur = this.settings.f14Phosphor === 'amber' ? 'amber' : 'green';
+      const opt = (v, label) => h('button', { class: cur === v ? 'on' : '', onclick: () => {
+        this.saveSettings({ f14Phosphor: v });
+        if (this.settings.theme === 'f14') this.applyTheme('f14', false);
+        draw();
+      } }, label);
+      clear(box).append(h('div', { class: 'ct-row' }, h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Phosphor'),
+        h('div', { class: 'seg' }, opt('green', 'Green'), opt('amber', 'Amber'))));
+    };
+    draw();
+    return box;
+  }
+
+  /** Settings → Appearance → Blue hour: the sky, dusk (the theme as it is), midnight, dawn, night drive or overcast, or Auto (by the clock). */
+  skySettings() {
+    const box = h('div', { class: 'ct-box sky-box' });
+    const draw = () => {
+      const cur = this.settings.bluehourSky === 'auto' || SKIES.some(([id]) => id === this.settings.bluehourSky) ? this.settings.bluehourSky : 'dusk';
+      const tile = (id, name, title, bg, sun) => h('button', { class: 'sky-tile' + (cur === id ? ' on' : ''), title, onclick: () => {
+        this.saveSettings({ bluehourSky: id });
+        if (this.settings.theme === 'bluehour') this.applyTheme('bluehour', false);
+        draw();
+      } }, h('span', { class: 'sky-view', style: { background: bg } }, h('span', { class: 'sky-sun', style: { background: sun } })), h('span', { class: 'sky-name' }, name));
+      // Auto's tile shows every sky's background in a row, with the sun of the sky it's on now
+      const now = SKIES.find(([id]) => id === skyAt(new Date().getHours()));
+      clear(box).append(h('span', { class: 'dim', style: { fontSize: '12px' } }, 'Sky'),
+        h('div', { class: 'sky-pick' }, SKIES.map(([id, name, bg, sun]) => tile(id, name, name, bg, sun)),
+          tile('auto', 'Auto', `Auto: goes by the clock (${SKY_HOURS}), now ${now[1]}`, `linear-gradient(90deg, ${SKIES.map(([, , bg]) => bg).join(', ')})`, now[3])));
+    };
+    draw();
+    return box;
+  }
+
+  /** Settings → Appearance → Source Code: a preset display, or your own backlight and character colours (Custom). */
+  readoutSettings() {
+    const box = h('div', { class: 'ct-box ro-box' });
+    let editing = false, which = 'glass';
+    const draw = () => {
+      const c = normalizeReadout(this.settings.readoutTheme);
+      const set = (patch) => {
+        this.saveSettings({ readoutTheme: { ...normalizeReadout(this.settings.readoutTheme), ...patch } });
+        if (this.settings.theme === 'readout') this.applyTheme('readout', false);
+      };
+      const preset = READOUT_PRESETS.find((p) => p.glass === c.glass && p.ink === c.ink);
+      const custom = editing || !preset;
+      const mine = c.mine || { glass: c.glass, ink: c.ink };
+      const tile = (cls, colours, label, tip, onclick) => h('button', { class: `ct-preset ro-preset ${cls}`, 'data-tip': tip, style: { background: colours.glass, color: colours.ink }, onclick }, label);
+      const parts = [h('div', { class: 'ct-presets' },
+        ...READOUT_PRESETS.map((p) => tile(p === preset && !editing ? 'on' : '', p, 'Aa', p.name, () => { editing = false; set({ glass: p.glass, ink: p.ink }); draw(); })),
+        tile('ro-custom' + (custom ? ' on' : ''), mine, h('span', {}, icon('palette', 'sm'), 'Custom'), 'Your own colours', () => {
+          editing = true; set({ glass: mine.glass, ink: mine.ink, mine }); draw();
+        }))];
+      if (custom) {
+        // one picker, for whichever of the two colours is chosen above it
+        const dots = {};
+        const side = (key, label) => h('button', { class: which === key ? 'on' : '', onclick: () => { which = key; draw(); } },
+          dots[key] = h('span', { class: 'ro-dot', style: { background: c[key] } }), label);
+        const picker = hsvPicker(c[which], {
+          onInput: (hex) => {
+            const now = normalizeReadout(this.settings.readoutTheme);
+            const m = { glass: now.glass, ink: now.ink, [which]: hex };
+            set({ ...m, mine: m });
+            dots[which].style.background = hex;
+          },
+          onChange: draw, // the Custom tile picks up the new colours once the drag ends
+        });
+        parts.push(h('div', { class: 'ct-row' }, h('div', { class: 'seg ro-which' }, side('glass', 'Backlight'), side('ink', 'Characters')),
+          h('button', { class: 'btn sm ghost', 'data-tip': 'Swap the two colours', onclick: () => { const m = { glass: c.ink, ink: c.glass }; set({ ...m, mine: m }); draw(); } }, 'Swap')),
+        picker);
+      }
+      parts.push(h('span', { class: 'faint', style: { fontSize: '11px' } }, 'A bright backlight with dark characters looks like a lit LCD; a dark one with bright characters glows like a VFD or LED display.'));
+      clear(box).append(...parts);
     };
     draw();
     return box;

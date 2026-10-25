@@ -3,8 +3,8 @@
 
 import { $, clear } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { applyCustom, normalizeCustom } from '../core/custom-theme.js';
-import { THEMES, HIDDEN_THEMES } from './shared.js';
+import { applyCustom, normalizeCustom, applyReadout, normalizeReadout } from '../core/custom-theme.js';
+import { THEMES, HIDDEN_THEMES, SKIES, skyAt } from './shared.js';
 import { chicken } from '../core/chicken.js';
 
 const THEME_NAME = Object.fromEntries([...THEMES, ...HIDDEN_THEMES].map(([id, name]) => [id, name]));
@@ -49,18 +49,41 @@ export class ThemesPart {
   applyTheme(theme, persist = true) {
     if (!this.themeList().some(([id]) => id === theme)) theme = 'dark';
     this.settings.theme = theme;
-    // a custom theme sits on its base (dark or light): the base's own rules apply, the palette's colours win
-    const shown = theme === 'custom' ? applyCustom(normalizeCustom(this.settings.customTheme)) : (applyCustom(null), theme);
+    // a custom theme or a readout sits on its base (dark or light): the base's own rules apply, the palette's colours win
+    const shown = theme === 'custom' ? applyCustom(normalizeCustom(this.settings.customTheme))
+      : theme === 'readout' ? applyReadout(normalizeReadout(this.settings.readoutTheme)) : (applyCustom(null), theme);
     document.documentElement.dataset.theme = shown;
-    try { localStorage.setItem('bds-theme', shown); } catch { /* ignore */ }
+    // AWG-9's phosphor colour (Settings → Appearance → Phosphor): green, or amber
+    const amber = theme === 'f14' && this.settings.f14Phosphor === 'amber';
+    if (amber) document.documentElement.dataset.phosphor = 'amber'; else delete document.documentElement.dataset.phosphor;
+    // Blue hour's sky (Settings → Appearance → Sky): dusk is the theme as it is, the others recolour it; Auto goes by the clock
+    const auto = theme === 'bluehour' && this.settings.bluehourSky === 'auto';
+    const want = auto ? skyAt(new Date().getHours()) : this.settings.bluehourSky;
+    const sky = theme === 'bluehour' && want !== 'dusk' && SKIES.some(([id]) => id === want) ? want : '';
+    if (sky) document.documentElement.dataset.sky = sky; else delete document.documentElement.dataset.sky;
+    // on Auto, look at the clock each minute and change the sky when its hour comes round
+    clearInterval(this._skyTimer);
+    if (auto) this._skyTimer = setInterval(() => { if (skyAt(new Date().getHours()) !== (document.documentElement.dataset.sky || 'dusk')) this.applyTheme('bluehour', false); }, 60000);
+    try {
+      localStorage.setItem('bds-theme', shown);
+      if (amber) localStorage.setItem('bds-phosphor', 'amber'); else localStorage.removeItem('bds-phosphor');
+      if (sky) localStorage.setItem('bds-sky', sky); else localStorage.removeItem('bds-sky');
+    } catch { /* ignore */ }
     const b = $('#btn-theme');
     const next = this.themeStep(1, theme);
     clear(b).append(icon(THEMES.find(([id]) => id === next)?.[3] || 'moon')); // shows where a click goes
     b.title = `Theme: ${THEME_NAME[theme] || theme} — click for ${THEME_NAME[next]}, right-click for ${THEME_NAME[this.themeStep(-1, theme)]}`;
     if (persist) this.saveSettings({ theme });
-    // Settings open (the top-bar button or View menu changed it): keep its dropdown and the custom palette box in step
+    // Settings open (the top-bar button or View menu changed it): keep its dropdown and the colour boxes in step
     const pick = document.querySelector('select.set-theme');
-    if (pick) { pick.value = theme; const ct = document.querySelector('.ct-box'); if (ct) ct.hidden = theme !== 'custom'; }
+    if (pick) {
+      pick.value = theme;
+      const ct = document.querySelector('.ct-box:not(.ro-box):not(.phos-box):not(.sky-box)'), ro = document.querySelector('.ro-box'), ph = document.querySelector('.phos-box'), sk = document.querySelector('.sky-box');
+      if (ct) ct.hidden = theme !== 'custom';
+      if (ro) ro.hidden = theme !== 'readout';
+      if (ph) ph.hidden = theme !== 'f14';
+      if (sk) sk.hidden = theme !== 'bluehour';
+    }
     this.sunRays(shown === 'bluehour');
     chicken(shown === 'miami');
     for (const t of this.tabs) t.editor?.onThemeChange?.(theme);
@@ -71,18 +94,22 @@ export class ThemesPart {
   }
 
   /** Blue hour's sun rays over the bars round the window: the header, tab strip, both side rails and the status bar. They fan out from the home page's sun when it's on
-   *  screen (from the same spot when it isn't) and are clipped to those bars, so tab contents never get them; on the home
+   *  screen (from a smaller sun setting on the tab strip when it isn't) and are clipped to those bars, so tab contents never get them; on the home
    *  page they also cross the page above the sun's horizon. They fade behind text and icons. */
   sunRays(on) {
     clearInterval(this._rays?.timer);
     window.removeEventListener('resize', this._rays?.place);
     document.removeEventListener('scroll', this._rays?.place, true);
     this._rays?.el.remove();
+    this._rays?.sun.remove();
     this._rays = null;
     if (!on) return;
     const el = document.createElement('div');
     el.className = 'bh-rays';
-    document.body.append(el);
+    // when the home page's sun isn't on screen, a smaller one sets on the tab strip and the rays come from it
+    const sun = document.createElement('div');
+    sun.className = 'bh-sun';
+    document.body.append(el, sun);
     const place = () => {
       const W = innerWidth, H = innerHeight;
       const top = $('#tabbar')?.getBoundingClientRect().bottom || $('#titlebar')?.getBoundingClientRect().bottom || 0;
@@ -90,10 +117,20 @@ export class ThemesPart {
       const hero = $('.home-hero');
       const r = hero?.getClientRects().length ? hero.getBoundingClientRect() : null;
       const sunUp = r && r.bottom > top && r.top < H;
+      const strip = $('#tabbar')?.getBoundingClientRect();
+      sun.hidden = sunUp || !strip?.height;
       if (sunUp) {
         el.style.setProperty('--bh-x', `${r.right - 94}px`);
         el.style.setProperty('--bh-y', `${r.bottom - 1}px`);
-      } else if (!this._rays?.seen) {
+        el.style.removeProperty('--bh-hole');
+      } else if (strip?.height) {
+        // 52 × 26, sitting on the strip's bottom edge 24px in from its right end
+        const h = Math.min(26, strip.height - 2), w = h * 2, x = strip.right - 24 - w;
+        Object.assign(sun.style, { left: `${x}px`, top: `${strip.bottom - h}px`, width: `${w}px`, height: `${h}px` });
+        el.style.setProperty('--bh-x', `${x + w / 2}px`);
+        el.style.setProperty('--bh-y', `${strip.bottom - 1}px`);
+        el.style.setProperty('--bh-hole', `${Math.round(h * 1.4)}px`);
+      } else {
         el.style.setProperty('--bh-x', `${W - 140}px`);
         el.style.setProperty('--bh-y', '150px');
       }
@@ -104,7 +141,6 @@ export class ThemesPart {
       const ws = sunUp ? $('#workspace')?.getBoundingClientRect() : null;
       if (ws) boxes.push({ left: ws.left, top, right: ws.right, bottom: Math.max(top, Math.min(r.bottom - 1, ws.bottom)) });
       el.style.clipPath = `path('${boxes.map((b) => `M${b.left} ${b.top}H${b.right}V${b.bottom}H${b.left}Z`).join('')}')`;
-      if (r && this._rays) this._rays.seen = true;
       // fade them to a quarter behind anything with words or icons on it, so all of it stays easy to read
       // (the text's own line boxes, not the elements', so a wide paragraph only fades where its words are)
       const range = document.createRange();
@@ -119,7 +155,7 @@ export class ThemesPart {
         el.style.setProperty('--bh-quiet', `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
       }
     };
-    this._rays = { el, place, timer: setInterval(place, 400) };
+    this._rays = { el, sun, place, timer: setInterval(place, 400) };
     window.addEventListener('resize', place);
     document.addEventListener('scroll', place, { capture: true, passive: true });
     place();

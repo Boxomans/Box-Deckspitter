@@ -48,6 +48,84 @@ export class SettingsSectionsPart {
       h('div', { class: 'dim', style: { fontSize: '12px' } }, 'Swap any UI sound for your own clip. Short sounds (under a second) feel best.'), list);
   }
 
+  /** Settings → Audio devices: the microphone and speakers BoxComms's radio uses, with a level meter and a test sound. */
+  audioDeviceSettings() {
+    const inSel = h('select', {}), outSel = h('select', {});
+    const meter = h('div', { class: 'comms-meter' }, h('i'));
+    const note = h('div', { class: 'faint', style: { fontSize: '11px' } });
+    let test = null;
+    const fill = async () => {
+      let devs = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+      const ins = () => devs.filter((d) => d.kind === 'audioinput' && d.deviceId !== 'communications');
+      const outs = () => devs.filter((d) => d.kind === 'audiooutput' && d.deviceId !== 'communications');
+      const opts = (list, word) => [h('option', { value: 'default' }, 'System default'), ...list.filter((d) => d.deviceId !== 'default').map((d, i) => h('option', { value: d.deviceId }, d.label || `${word} ${i + 1}`))];
+      clear(inSel).append(...opts(ins(), 'Microphone'));
+      clear(outSel).append(...opts(outs(), 'Speakers'));
+      inSel.value = ins().some((d) => d.deviceId === this.settings.audioIn) ? this.settings.audioIn : 'default';
+      outSel.value = outs().some((d) => d.deviceId === this.settings.audioOut) ? this.settings.audioOut : 'default';
+      note.textContent = ins().some((d) => d.label) ? '' : 'Device names show once Box-Deckspitter may use the microphone: click Test mic.';
+    };
+    inSel.addEventListener('change', () => { this.saveSettings({ audioIn: inSel.value }); this.comms?.reopenMic(); if (test) startTest(); });
+    outSel.addEventListener('change', () => { this.saveSettings({ audioOut: outSel.value }); this.comms?.setOutput(outSel.value); });
+    const stopTest = () => { if (!test) return; clearInterval(test.timer); test.stream.getTracks().forEach((t) => t.stop()); test.ctx.close(); test = null; meter.firstChild.style.width = '0'; micBtn.lastChild.textContent = 'Test mic'; };
+    const startTest = async () => {
+      stopTest();
+      try {
+        const dev = this.settings.audioIn;
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: dev && dev !== 'default' ? { deviceId: { exact: dev } } : true });
+        const ctx = new AudioContext(), an = ctx.createAnalyser(), data = new Float32Array(an.fftSize);
+        ctx.createMediaStreamSource(stream).connect(an);
+        test = { stream, ctx, timer: setInterval(() => {
+          if (!meter.isConnected) return stopTest();
+          an.getFloatTimeDomainData(data);
+          meter.firstChild.style.width = `${Math.min(100, Math.round(Math.sqrt(data.reduce((m, v) => Math.max(m, Math.abs(v)), 0)) * 100))}%`;
+        }, 60) };
+        micBtn.lastChild.textContent = 'Stop';
+        fill();
+      } catch (e) { errorToast(e, 'Couldn’t open the microphone'); }
+    };
+    const micBtn = h('button', { class: 'btn sm', onclick: () => (test ? stopTest() : startTest()) }, icon('mic', 'sm'), h('span', {}, 'Test mic'));
+    const speakerBtn = h('button', { class: 'btn sm', onclick: async () => {
+      const ctx = new AudioContext();
+      try { if (ctx.setSinkId && outSel.value !== 'default') await ctx.setSinkId(outSel.value); } catch { /* the default then */ }
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 660; g.gain.value = 0.15;
+      o.connect(g).connect(ctx.destination);
+      o.start(); o.frequency.setValueAtTime(880, ctx.currentTime + 0.15); o.stop(ctx.currentTime + 0.3);
+      o.onended = () => ctx.close();
+    } }, icon('volume', 'sm'), 'Test speakers');
+    navigator.mediaDevices.addEventListener?.('devicechange', () => { if (inSel.isConnected) fill(); });
+    fill();
+    return h('div', { class: 'settings-group' }, h('h4', {}, 'Audio devices'),
+      h('div', { class: 'dim', style: { fontSize: '12px' } }, 'For BoxComms’s radio.'),
+      h('span', { class: 'dim' }, 'Input (microphone)'), inSel,
+      h('div', { class: 'row', style: { gap: '8px', alignItems: 'center' } }, micBtn, meter),
+      h('span', { class: 'dim' }, 'Output (speakers or headphones)'), outSel,
+      h('div', { class: 'row' }, speakerBtn),
+      note);
+  }
+
+  /** Settings → BoxComms: on or off, your name, where files you accept go. */
+  commsSettings() {
+    const box = h('div', { class: 'settings-group' });
+    const render = () => {
+      const st = this.comms?.state;
+      const c = this.settings.comms || {};
+      const on = h('input', { type: 'checkbox' });
+      on.checked = !!st?.on;
+      on.addEventListener('change', async () => { try { await (on.checked ? this.comms.start() : this.comms.stop()); } catch (e) { errorToast(e); } render(); });
+      const name = h('input', { type: 'text', maxlength: '40', value: c.name || st?.me?.name || '', placeholder: 'Your name on the network' });
+      name.addEventListener('change', () => { this.saveSettings({ comms: { ...(this.settings.comms || {}), name: name.value.trim() } }); if (this.comms?.state.on) this.comms.start().catch(errorToast); });
+      clear(box).append(h('h4', {}, 'BoxComms'),
+        h('label', { class: 'check' }, on, 'On the local network while the app is open'),
+        h('span', { class: 'dim' }, 'Your name'), name,
+        h('div', { class: 'faint', style: { fontSize: '11px' } }, `Files you accept go to ${st?.me?.folder || 'Downloads' + BDS.sep + 'BoxComms'} (change it in BoxComms).`),
+        h('button', { class: 'btn sm', onclick: () => this.newDocument('comms') }, icon('radio', 'sm'), 'Open BoxComms'));
+    };
+    render();
+    return box;
+  }
+
   updateSettings() {
     const H = { 'X-BDS-Token': api.token };
     const call = (method, url, body) => fetch(url, { method, headers: { ...H, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })

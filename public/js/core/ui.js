@@ -371,6 +371,55 @@ export function colorPopover(anchor, { onPick, allowNone = true, noneLabel = 'No
   return popover(anchor, h('div', {}, grid, row));
 }
 
+/** An inline colour picker: a saturation / brightness square, a hue strip and a hex box. onInput(hex) fires as it
+ *  moves, onChange(hex) when a drag or an edit ends. The returned element has .set(hex) to move it from outside. */
+export function hsvPicker(value, { onInput, onChange } = {}) {
+  const toHsv = (hex) => {
+    const n = parseInt(hex.slice(1), 16), r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+    const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+    const hue = !d ? 0 : max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [hue * 60, max ? d / max : 0, max];
+  };
+  const toHex = (hh, s, v) => {
+    const f = (k) => { const x = (k + hh / 60) % 6; return v - v * s * Math.max(0, Math.min(x, 4 - x, 1)); };
+    return '#' + [f(5), f(3), f(1)].map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('');
+  };
+  let [hh, s, v] = toHsv(value);
+  const dot = h('div', { class: 'hsv-dot' }), knob = h('div', { class: 'hsv-knob' });
+  const sv = h('div', { class: 'hsv-sv' }, dot), hue = h('div', { class: 'hsv-hue' }, knob);
+  const swatch = h('span', { class: 'hsv-swatch' });
+  const hex = h('input', { type: 'text', class: 'hsv-hex mono', maxlength: '7', spellcheck: 'false' });
+  const cur = () => toHex(hh, s, v);
+  const paint = () => {
+    sv.style.setProperty('--hsv-hue', `hsl(${hh}, 100%, 50%)`);
+    dot.style.left = `${s * 100}%`; dot.style.top = `${(1 - v) * 100}%`; dot.style.background = cur();
+    knob.style.left = `${(hh / 360) * 100}%`;
+    swatch.style.background = cur();
+    if (document.activeElement !== hex) hex.value = cur();
+  };
+  const drag = (el, fn) => el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    const at = (ev) => { const r = el.getBoundingClientRect(); fn(Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height))); paint(); onInput?.(cur()); };
+    at(e);
+    const up = () => { el.removeEventListener('pointermove', at); onChange?.(cur()); };
+    el.addEventListener('pointermove', at);
+    el.addEventListener('pointerup', up, { once: true });
+  });
+  drag(sv, (x, y) => { s = x; v = 1 - y; });
+  drag(hue, (x) => { hh = Math.min(359.9, x * 360); });
+  hex.addEventListener('input', () => {
+    const t = hex.value.trim().replace(/^#?/, '#');
+    if (!/^#[0-9a-f]{6}$/i.test(t)) return;
+    [hh, s, v] = toHsv(t.toLowerCase()); paint(); onInput?.(cur());
+  });
+  hex.addEventListener('change', () => { paint(); hex.value = cur(); onChange?.(cur()); });
+  const el = h('div', { class: 'hsv-picker' }, sv, hue, h('div', { class: 'hsv-row' }, swatch, hex));
+  el.set = (x) => { if (/^#[0-9a-f]{6}$/i.test(x || '')) { [hh, s, v] = toHsv(x.toLowerCase()); paint(); } };
+  paint();
+  return el;
+}
+
 // ===================================================================== tooltips
 
 let tipEl = null;

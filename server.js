@@ -494,6 +494,7 @@ setInterval(() => {
 
 function shutdown(reason) {
   console.log(`[${APP_NAME}] shutting down (${reason})`);
+  try { comms.stop(); } catch { /* ignore */ }
   try { fs.unlinkSync(path.join(DATA, 'session.json')); } catch { /* ignore */ }
   process.exit(0);
 }
@@ -970,6 +971,10 @@ Object.assign(routes, require('./mail-server')({
   log: (msg) => console.log(`[${APP_NAME}] ${msg}`),
 }));
 
+// BoxComms (chat, files and radio between copies on the same network) lives in its own module.
+const comms = require('./comms-server')({ DATA, readJSON, writeJSON, readJSONBody, platform, log: (msg) => console.log(`[${APP_NAME}] ${msg}`) });
+Object.assign(routes, comms.routes);
+
 async function handleApi(req, res, urlObj) {
   const q = urlObj.searchParams;
   const key = `${req.method} ${urlObj.pathname}`;
@@ -1027,6 +1032,8 @@ async function handleApi(req, res, urlObj) {
   }
 
   if (key === 'POST /api/ai/chat') return aiChat(req, res);
+  if (key === 'GET /api/comms/stream') return comms.stream(req, res);
+  if (key === 'POST /api/comms/voice') return comms.voiceIn(req, res, q);
 
   const handler = routes[key];
   if (!handler) return fail(res, 404, 'Unknown endpoint');

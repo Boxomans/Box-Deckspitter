@@ -77,17 +77,76 @@ export function deriveCustom(palette) {
 /** A gloss button on a pale accent needs dark text. */
 export const accentText = (accent) => (lum(accent) > 0.6 ? '#111111' : '#ffffff');
 
+// Source Code (theme id readout): a backlit display, all in two colours. A bright backlight with dark characters is a lit LCD (the
+// characters cast a faint shadow on the glass); a dark one with bright characters is a glowing VFD or LED readout.
+export const READOUT_DEFAULT = { glass: '#a9c46c', ink: '#1c2a12' };
+export const READOUT_PRESETS = [
+  { name: 'Green LCD', glass: '#a9c46c', ink: '#1c2a12' },
+  { name: 'Amber LCD', glass: '#f0a640', ink: '#2a1504' },
+  { name: 'Ice blue LCD', glass: '#86c9ee', ink: '#0b2034' },
+  { name: 'Teal night light', glass: '#3fcfc4', ink: '#05292a' },
+  { name: 'Grey LCD', glass: '#c3c6b8', ink: '#22241e' },
+  { name: 'Cyan VFD', glass: '#050d0f', ink: '#4ff2df' },
+  { name: 'Red LED', glass: '#120505', ink: '#ff3d33' },
+  { name: 'Amber plasma', glass: '#110a03', ink: '#ffa233' },
+  { name: 'Blue VFD', glass: '#040817', ink: '#80b6ff' },
+];
+
+export function normalizeReadout(p) {
+  const ok = (v) => /^#[0-9a-f]{6}$/i.test(v || '');
+  const glass = ok(p?.glass) ? p.glass : READOUT_DEFAULT.glass, ink = ok(p?.ink) ? p.ink : READOUT_DEFAULT.ink;
+  // mine: your own two colours, kept while you try the presets
+  const mine = ok(p?.mine?.glass) && ok(p?.mine?.ink) ? { glass: p.mine.glass, ink: p.mine.ink } : null;
+  return { glass, ink, mine };
+}
+
+/** The full set of colours for a readout. */
+export function deriveReadout(palette) {
+  const { glass, ink } = normalizeReadout(palette);
+  const lit = lum(glass) >= lum(ink); // a lit backlight with dark characters, or the other way round
+  const base = lit ? 'light' : 'dark';
+  const step = (t) => mix(glass, ink, t);
+  const v = {
+    '--bg-0': lit ? mix(glass, '#000000', 0.07) : mix(glass, '#000000', 0.35), '--bg-1': glass,
+    '--bg-2': lit ? mix(glass, '#ffffff', 0.14) : step(0.035), '--bg-3': lit ? mix(glass, '#ffffff', 0.26) : step(0.06),
+    '--bg-4': step(lit ? 0.08 : 0.1), '--bg-5': step(lit ? 0.14 : 0.15), '--line': step(lit ? 0.18 : 0.12), '--line-2': step(lit ? 0.32 : 0.24),
+    '--text': ink, '--text-2': step(lit ? 0.78 : 0.72), '--text-3': step(lit ? 0.56 : 0.48),
+    '--accent': ink, '--accent-strong': lit ? mix(ink, '#000000', 0.25) : mix(ink, '#ffffff', 0.3), '--accent-2': step(lit ? 0.7 : 0.65), '--accent-3': step(lit ? 0.85 : 0.8),
+    '--accent-soft': rgba(ink, lit ? 0.1 : 0.12), '--accent-soft-2': rgba(ink, lit ? 0.18 : 0.22), '--accent-line': rgba(ink, 0.45),
+    '--gloss': `linear-gradient(180deg, ${ink} 0%, ${step(0.85)} 100%)`,
+    '--focus': `0 0 0 1px ${rgba(ink, 0.6)}, 0 0 12px ${rgba(ink, lit ? 0.12 : 0.25)}`,
+    '--desk': step(lit ? 0.12 : 0.03), '--desk-grid': rgba(ink, 0.05),
+    '--scroll': step(lit ? 0.22 : 0.16), '--scroll-hover': step(lit ? 0.34 : 0.26),
+    // for the structural rules in app.css: the characters' shadow on lit glass, or their glow on dark
+    '--ro-ink': ink, '--ro-glass': glass,
+    '--ro-glow': lit ? `1px 1px 0 ${rgba(ink, 0.16)}` : `0 0 6px ${rgba(ink, 0.45)}`,
+    '--ro-grid': rgba(lit ? ink : '#000000', lit ? 0.045 : 0.25),
+    '--accent-text': glass,
+  };
+  return { base, vars: v };
+}
+
+const ALL_VARS = [...VARS, '--accent-text', '--accent-3', '--ro-ink', '--ro-glass', '--ro-glow', '--ro-grid'];
+/** Put derived colours on the page (or take them off with null); cls marks which kind they are for app.css. */
+function putVars(derived, cls, extra = []) {
+  const root = document.documentElement;
+  for (const k of ALL_VARS) root.style.removeProperty(k);
+  root.classList.remove('custom-grad', 'readout-theme');
+  root.classList.toggle('custom-theme', !!derived);
+  if (!derived) { try { localStorage.removeItem('bds-custom-theme'); } catch { /* ignore */ } return null; }
+  for (const c of [cls, ...extra]) if (c) root.classList.add(c);
+  for (const [k, val] of Object.entries(derived.vars)) root.style.setProperty(k, val);
+  try { localStorage.setItem('bds-custom-theme', JSON.stringify({ base: derived.base, vars: derived.vars, cls })); } catch { /* ignore */ }
+  return derived.base;
+}
+
 /** Put a palette on the page (or take it off with null). Returns the base theme (dark / light) to show under it. */
 export function applyCustom(palette) {
-  const root = document.documentElement;
-  for (const k of VARS) root.style.removeProperty(k);
-  root.style.removeProperty('--accent-text');
-  root.classList.toggle('custom-theme', !!palette);
-  root.classList.toggle('custom-grad', !!palette?.gradient);
-  if (!palette) { try { localStorage.removeItem('bds-custom-theme'); } catch { /* ignore */ } return null; }
-  const { base, vars } = deriveCustom(palette);
-  vars['--accent-text'] = accentText(vars['--accent']);
-  for (const [k, val] of Object.entries(vars)) root.style.setProperty(k, val);
-  try { localStorage.setItem('bds-custom-theme', JSON.stringify({ base, vars })); } catch { /* ignore */ }
-  return base;
+  if (!palette) return putVars(null);
+  const d = deriveCustom(palette);
+  d.vars['--accent-text'] = accentText(d.vars['--accent']);
+  return putVars(d, null, palette.gradient ? ['custom-grad'] : []);
 }
+
+/** Put a readout on the page. Returns the base theme (dark / light) to show under it. */
+export const applyReadout = (palette) => putVars(deriveReadout(palette), 'readout-theme');

@@ -18,8 +18,10 @@
     window.BDS = { token: '%%TOKEN%%', version: '%%VERSION%%', sep: /Windows/.test(navigator.userAgent) ? '\\' : '/' };
     try {
       var t = localStorage.getItem('bds-theme'); if (t) document.documentElement.dataset.theme = t;
+      if (localStorage.getItem('bds-phosphor')) document.documentElement.dataset.phosphor = localStorage.getItem('bds-phosphor'); // AWG-9 in amber
+      if (localStorage.getItem('bds-sky')) document.documentElement.dataset.sky = localStorage.getItem('bds-sky'); // Blue hour's sky
       var c = JSON.parse(localStorage.getItem('bds-custom-theme') || 'null'); // a custom palette, put on before the app loads
-      if (c && c.vars) { document.documentElement.classList.add('custom-theme'); if (c.vars['--custom-grad']) document.documentElement.classList.add('custom-grad'); for (var k in c.vars) document.documentElement.style.setProperty(k, c.vars[k]); }
+      if (c && c.vars) { document.documentElement.classList.add('custom-theme'); if (c.cls) document.documentElement.classList.add(c.cls); if (c.vars['--custom-grad']) document.documentElement.classList.add('custom-grad'); for (var k in c.vars) document.documentElement.style.setProperty(k, c.vars[k]); }
       var f = localStorage.getItem('bds-ui-font'); if (f) document.documentElement.style.setProperty('--font-ui', f); // Appearance → Interface font
       if (localStorage.getItem('bds-no-anim')) document.documentElement.classList.add('no-anim');
     } catch (e) {}

@@ -14,6 +14,7 @@ import { createWeather } from './core/weather.js';
 import { createTranslate } from './core/translate.js';
 import { createCalendar } from './core/calendar.js';
 import { createMailAlerts } from './core/mail-alerts.js';
+import { createComms } from './core/comms.js';
 import { LockPart } from './app/lock.js';
 import { ScreensaverPart } from './app/screensaver.js';
 import { EasterEggsPart } from './app/easter-eggs.js';
@@ -94,6 +95,7 @@ class App {
       : toast(`Screenshot saved to the media dump: ${s.name}`, { type: 'ok', timeout: 5000, action: { label: 'Open', fn: () => this.openPath(s.path) } })));
     this.calendar = createCalendar(this);
     this.mailAlerts = createMailAlerts(this);
+    this.comms = createComms(this);
 
     this.decorateChrome();
     this.renderMenubar();

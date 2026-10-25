@@ -10,7 +10,7 @@ import { api } from '../core/api.js';
 let monacoPromise = null;
 
 /** The Monaco colour theme that goes with the app theme (its right-click menu and lists in the app theme's colours). */
-export const monacoTheme = (t) => withMenus(t === 'custom' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'dusk' ? 'bds-dusk' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? 'bds-f14' : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : t === 'kabuto' ? 'bds-kabuto' : t === 'temple' ? 'bds-temple' : t === 'lubyanka' ? 'bds-lubyanka' : t === 'miami' ? 'bds-miami' : t === 'bluehour' ? 'bds-bluehour' : 'bds-dark');
+export const monacoTheme = (t) => withMenus(t === 'custom' || t === 'readout' ? customMonaco() : t === 'light' ? 'bds-light' : t === 'dusk' ? 'bds-dusk' : t === 'pbj' ? 'bds-pbj' : t === 'f14' ? (document.documentElement.dataset.phosphor === 'amber' ? 'bds-f14-amber' : 'bds-f14') : t === 'blood' ? 'bds-blood' : t === 'blurple' ? 'bds-blurple' : t === 'kabuto' ? 'bds-kabuto' : t === 'temple' ? 'bds-temple' : t === 'lubyanka' ? 'bds-lubyanka' : t === 'miami' ? 'bds-miami' : t === 'bluehour' ? (document.documentElement.dataset.sky ? 'bds-bluehour-' + document.documentElement.dataset.sky : 'bds-bluehour') : 'bds-dark');
 
 const allDefs = {}; // every Monaco theme as first defined, so the menu colours can be laid over it again
 /** Any CSS colour → #rrggbb (Monaco wants hex; theme variables may be rgb() or a name). */
@@ -250,6 +250,20 @@ function defineThemes(monaco) {
     },
   };
   monaco.editor.defineTheme('bds-bluehour', blueHourDef);
+  // Blue hour's other skies: the same theme with each colour moved to the sky's counterpart
+  const SKY_COLOURS = {
+    midnight: { '5f6883': '525a78', ff9e6b: '9fe6ff', f2c47e: 'd6d2f2', ffb184: 'c4f1ff', '4fd8eb': 'b7a3ff', '8fb4ff': '7f9fff', a7aec4: '9fa7c2', '8c93a8': '7f87a2', eceef5: 'e6e9f5',
+      e36bd0: 'f0b0ff', '0c0f17': '080a12', '343b52': '283048', ff9663: '9fe6ff', '181d2c': '111522', '2b3248': '222a3e', '121622': '0c0f1a', '262d42': '1e2538', '353e5a': '2c3550' },
+    dawn: { '5f6883': '7d7b99', ff9e6b: 'ffb08a', f2c47e: 'ffe0a0', ffb184: 'ffd2ae', '4fd8eb': 'a8d8ff', '8fb4ff': 'b8b0ff', a7aec4: 'c3bfd2', '8c93a8': 'a39fba', eceef5: 'f6f0ee',
+      e36bd0: 'ff9ec4', '0c0f17': '1c1f31', '343b52': '454a6b', ff9663: 'ffc58a', '181d2c': '2e334f', '2b3248': '3e4466', '121622': '272b44', '262d42': '3c4262', '353e5a': '4d5478' },
+    drive: { '5f6883': '6a5a8c', ff9e6b: 'ff3ea5', f2c47e: 'ffd25c', ffb184: 'ff6fbd', '4fd8eb': '2de2ff', '8fb4ff': 'b46bff', a7aec4: 'b9a8d8', '8c93a8': '8f80b0', eceef5: 'f3ecff',
+      e36bd0: 'ff8a3d', '0c0f17': '0e071c', '343b52': '3a2860', ff9663: 'ff3ea5', '181d2c': '1f1238', '2b3248': '36225a', '121622': '180e2c', '262d42': '2e1c4c', '353e5a': '402a66' },
+    overcast: { '5f6883': '5f6876', ff9e6b: 'd9a3a0', f2c47e: 'd8c8a6', ffb184: 'e8bcb9', '4fd8eb': 'a9c9c4', '8fb4ff': '9fb4cc', a7aec4: 'a2abb8', '8c93a8': '858e9c', eceef5: 'e3e7ec',
+      e36bd0: 'c4a3c4', '0c0f17': '12161b', '343b52': '333c49', ff9663: 'd9a3a0', '181d2c': '212831', '2b3248': '2e3742', '121622': '1a2028', '262d42': '29313c', '353e5a': '3a4452' },
+  };
+  for (const [sky, map] of Object.entries(SKY_COLOURS)) {
+    monaco.editor.defineTheme('bds-bluehour-' + sky, JSON.parse(JSON.stringify(blueHourDef).replace(/[0-9a-f]{6}/gi, (c) => map[c.toLowerCase()] || c)));
+  }
   themeDefs = { dark: darkDef };
   // PB&J: the dark syntax colours on a plum background
   monaco.editor.defineTheme('bds-pbj', {
@@ -262,7 +276,7 @@ function defineThemes(monaco) {
     },
   });
   // AWG-9: phosphor green, amber strings, blue numbers, on the scope's black
-  monaco.editor.defineTheme('bds-f14', {
+  const f14Def = {
     base: 'vs-dark', inherit: true,
     rules: [
       { token: '', foreground: 'b9ffc0' },
@@ -285,7 +299,12 @@ function defineThemes(monaco) {
       'editorSuggestWidget.selectedBackground': '#54ff6b2a', 'editorHoverWidget.background': '#141a14', 'input.background': '#0f130f',
       'input.border': '#2c4a2c', 'focusBorder': '#54ff6b88', 'scrollbarSlider.background': '#1e2e1e88', 'scrollbarSlider.hoverBackground': '#2c4a2caa',
     },
-  });
+  };
+  monaco.editor.defineTheme('bds-f14', f14Def);
+  // AWG-9 in amber phosphor: the same theme with every colour moved to its amber counterpart
+  const AMBER = { b9ffc0: 'ffd9a0', '4f7a50': '7a5a30', '54ff6b': 'ffb000', ffb36b: 'ff7a1a', '8afc96': 'ffc94d', '8fd8ff': 'ffe6a8', ffd36b: 'ffd77a',
+    '6f9f70': '9f7a45', cfe8cf: 'f2dcb8', '080b08': '0b0805', '2f4a30': '4a3518', '141a14': '1a150d', '2c4a2c': '4a3518', '0f130f': '13100a', '1e2e1e': '2e2414' };
+  monaco.editor.defineTheme('bds-f14-amber', JSON.parse(JSON.stringify(f14Def).replace(/[0-9a-f]{6}/gi, (c) => AMBER[c.toLowerCase()] || c)));
   // Bloodflame Talons: blood-red keywords, ember numbers, gold types, ash everything else, on charcoal
   monaco.editor.defineTheme('bds-blood', {
     base: 'vs-dark', inherit: true,
