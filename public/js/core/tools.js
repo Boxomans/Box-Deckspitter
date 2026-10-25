@@ -84,6 +84,8 @@ export const TOOLS = [
     editor: () => import('../editors/tomcat.js').then((m) => m.TomcatEditor) },
   { mode: 'strike', name: 'Deep Strike', icon: 'reticle', tab: true, single: true,
     editor: () => import('../editors/strike.js').then((m) => m.StrikeEditor) },
+  { mode: 'prometheus', name: 'Prometheus', icon: 'planet', tab: true, single: true,
+    editor: () => import('../editors/prometheus.js').then((m) => m.PrometheusEditor) },
 ];
 
 const tabTools = TOOLS.filter((t) => t.tab);

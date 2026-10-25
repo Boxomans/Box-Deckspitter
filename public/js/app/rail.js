@@ -102,9 +102,9 @@ function flingable(el, zone, onMove, { home, onHome, marker, onFloat } = {}) {
   });
 }
 
-const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-weather', 'btn-tomcat', 'btn-strike', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
+const TOP_TOOLS = ['btn-music', 'btn-clock', 'btn-weather', 'btn-tomcat', 'btn-strike', 'btn-prometheus', 'btn-sound', 'btn-theme', 'btn-fullscreen', 'btn-shortcuts'];
 
-const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-weather': 'weather', 'btn-tomcat': 'F-14', 'btn-strike': 'strike', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
+const TOOL_LABEL = { 'btn-clock': 'clock', 'btn-weather': 'weather', 'btn-tomcat': 'F-14', 'btn-strike': 'strike', 'btn-prometheus': 'space', 'btn-sound': 'sound', 'btn-theme': 'theme', 'btn-fullscreen': 'full', 'btn-shortcuts': 'keys' };
 
 export class RailPart {
   decorateChrome() {
@@ -126,6 +126,8 @@ export class RailPart {
     $('#btn-tomcat').addEventListener('click', () => this.newDocument('tomcat'));
     $('#btn-strike').append(icon('reticle'));
     $('#btn-strike').addEventListener('click', () => this.newDocument('strike'));
+    $('#btn-prometheus').append(icon('planet'));
+    $('#btn-prometheus').addEventListener('click', () => this.newDocument('prometheus'));
     this.syncTomcat();
     $('#btn-fullscreen').addEventListener('click', () => this.toggleFullScreen());
     // leaving full screen some other way (the window manager, focus mode) keeps the button right

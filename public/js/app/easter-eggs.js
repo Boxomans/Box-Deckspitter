@@ -20,19 +20,22 @@ export class EasterEggsPart {
     this.syncStrike();
   }
 
-  /** Deep Strike's own switch (Settings → Games): its top-bar button. The Toolbox always opens it. */
+  /** Deep Strike's and Prometheus' own switches (Settings → Games): their top-bar buttons. The Toolbox always opens them. */
   syncStrike() {
     const on = !!this.settings.strikeEnabled && this.mainWindow !== false;
     $('#btn-strike').hidden = !on;
     $('#btn-strike').title = 'Deep Strike · drag or flick it to the right sidebar to dock it there';
+    const pm = !!this.settings.prometheusEnabled && this.mainWindow !== false;
+    $('#btn-prometheus').hidden = !pm;
+    $('#btn-prometheus').title = 'Prometheus · drag or flick it to the right sidebar to dock it there';
     this.syncRail();
   }
 
   /** A game from the Toolbox. The first time, it turns on: the F-14's sortie starts flying and its top-bar button shows
-   *  (Deep Strike's too). */
+   *  (Deep Strike's and Prometheus' too). */
   async openGame(mode) {
-    const key = mode === 'tomcat' ? 'tomcatEnabled' : 'strikeEnabled';
-    if (!this.settings[key]) { await this.saveSettings({ [key]: true }); this.syncTomcat(); }
+    const key = { tomcat: 'tomcatEnabled', strike: 'strikeEnabled', prometheus: 'prometheusEnabled' }[mode];
+    if (key && !this.settings[key]) { await this.saveSettings({ [key]: true }); this.syncTomcat(); }
     this.newDocument(mode);
   }
 
@@ -47,7 +50,7 @@ export class EasterEggsPart {
     await (await f)?.stop();
   }
 
-  /** Settings → Games: the F-14's sortie and top-bar button, Deep Strike's button, and wiping the F-14's progress. */
+  /** Settings → Games: the F-14's sortie and top-bar button, Deep Strike's and Prometheus' buttons, and wiping the F-14's progress. */
   gameSettings() {
     const box = h('div', { class: 'settings-group' });
     const draw = () => {
@@ -69,8 +72,16 @@ export class EasterEggsPart {
         if (sb.checked) toast('Deep Strike is in the top bar.', { type: 'ok', timeout: 3000 });
         draw();
       });
+      const pm = this.settings.prometheus;
+      const pb = h('input', { type: 'checkbox', checked: !!this.settings.prometheusEnabled });
+      pb.addEventListener('change', async () => {
+        await this.saveSettings({ prometheusEnabled: pb.checked });
+        this.syncStrike();
+        if (pb.checked) toast('Prometheus is in the top bar.', { type: 'ok', timeout: 3000 });
+        draw();
+      });
       clear(box).append(h('h4', {}, 'Games'),
-        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'Both games open from the Toolbox, under Games.'),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, 'All three games open from the Toolbox, under Games.'),
         h('label', { class: 'check' }, cb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('f14', 'sm'), 'F-14F Super Tomcat: keep flying in the background and show a quick access button')),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, played
           ? `High score ${(s.bestScore || 0).toLocaleString()} · $${(s.cash || 0).toLocaleString()} · ${(s.games || 0) + (s.auto?.games || 0)} sorties · ${(s.splashes || 0) + (s.auto?.splashes || 0)} splashes`
@@ -79,7 +90,11 @@ export class EasterEggsPart {
         h('label', { class: 'check' }, sb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('reticle', 'sm'), 'Deep Strike: show a quick access button')),
         h('span', { class: 'faint', style: { fontSize: '11px' } }, ds.flown
           ? `${ds.flown} flown · ${ds.won || 0} objectives destroyed · ${ds.jetsLost || 0} jets lost · ${Object.keys(this.settings.tomcatStrike?.badges || {}).length} badges`
-          : 'A strike-planning game: find the defences, plan the package, fly it.'));
+          : 'A strike-planning game: find the defences, plan the package, fly it.'),
+        h('label', { class: 'check' }, pb, h('span', { class: 'row', style: { gap: '6px', alignItems: 'center' } }, icon('planet', 'sm'), 'Prometheus: show a quick access button')),
+        h('span', { class: 'faint', style: { fontSize: '11px' } }, pm?.nextId > 1
+          ? `${pm.nextId - 1} launched · ${Object.keys(pm.miles || {}).length} milestones · ${(pm.tech?.length || 1) - 1} researched`
+          : 'A space program: launch, transfer and land around the Prometheus A system.'));
     };
     draw();
     return box;

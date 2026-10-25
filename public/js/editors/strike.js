@@ -353,7 +353,7 @@ export class StrikeEditor extends BaseEditor {
         h('button', { class: 'ds-btn sm', disabled: pts < A.points, title: 'Shift+click buys without asking', onclick: (e) => this.buyJet(id, e.shiftKey) }, `BUY · ${A.points.toLocaleString('en-US')} pts`));
     });
     return this.section(`HANGAR · ${pts.toLocaleString('en-US')} POINTS`,
-      h('div', { class: 'faint sm' }, 'Strikes earn points: more for destroying the objective and bringing everyone home, more again for every other target the jets destroy and fighter shot down along the way, double on large missions, and for each new badge. A jet or NGJ pod bought here is kept from mission to mission until it’s lost, a Mako until it’s fired; each mission’s budget still pays for them. Shift+click BUY to skip the question.'),
+      h('div', { class: 'faint sm' }, 'Strikes earn points: more for destroying the objective and bringing everyone home, more again for every other target the jets destroy and fighter shot down along the way, double on large missions, and for each new badge. Budget left unspent adds to them: +25% with half of it left, +50% with all of it. A jet or NGJ pod bought here is kept from mission to mission until it’s lost, a Mako until it’s fired; each mission’s budget still pays for them. Shift+click BUY to skip the question.'),
       ...rows);
   }
 
@@ -868,13 +868,14 @@ export class StrikeEditor extends BaseEditor {
   /** The debrief's whole log, first event first, folded away until it's opened (and kept open across redraws). */
   fullLog() {
     const log = this.sim?.log || [];
-    const { ours, theirs } = this.expended();
+    const { ours, theirs } = this.expended(), down = this.sim?.downed || { air: {}, mu: {} };
     const list = (o) => Object.entries(o).filter(([, n]) => n > 0).map(([k, n]) => `${k} ×${n}`).join(' · ') || 'nothing';
     const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
     const d = h('details', { class: 'ds-sec ds-fulllog' }, h('summary', { class: 'ds-h' }, `FULL LOG (${log.length} event${log.length === 1 ? '' : 's'})`),
       h('div', { class: 'ds-tally' },
         h('div', { class: 'ds-kv' }, h('span', {}, `${!this.sim?.flights?.length ? 'The fleet' : `${this.sim.flights.length > 1 ? 'The packages' : 'The package'}${this.sim.ships?.length ? ' and the fleet' : ''}`} fired (${sum(ours)})`), h('b', {}, list(ours))),
-        h('div', { class: 'ds-kv' }, h('span', {}, `The defences fired (${sum(theirs)})`), h('b', {}, list(theirs)))),
+        h('div', { class: 'ds-kv' }, h('span', {}, `The defences fired (${sum(theirs)})`), h('b', {}, list(theirs))),
+        h('div', { class: 'ds-kv' }, h('span', {}, `Shot down (${sum(down.air) + sum(down.mu)})`), h('b', {}, [list(down.air), list(down.mu)].filter((x) => x !== 'nothing').join(' · ') || 'nothing'))),
       ...log.map((e) => h('div', { class: `ds-log ${e.kind}` }, h('span', { class: 'faint' }, clock(e.t)), ' ', e.text)));
     d.open = !!this.logOpen;
     d.addEventListener('toggle', () => { this.logOpen = d.open; });

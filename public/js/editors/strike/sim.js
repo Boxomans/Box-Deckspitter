@@ -209,6 +209,7 @@ export class StrikeSim extends Base {
     this.alert = false;
     this.used = 0; // $M of munitions let go
     this.lost = [];
+    this.downed = { air: {}, mu: {} }; // shot down, by type (both sides' aircraft; our weapons the defences stopped)
     this.aams = []; // air-to-air missiles in the air, both sides'
     this.rwrHeard = new Set(); // patrols whose radars our jets have already reported
     // enemy fighters: two to a patrol, orbiting until the alarm goes or their own radar finds someone
@@ -576,6 +577,7 @@ export class StrikeSim extends Base {
       if (Math.random() < pk) {
         tg.alive = false;
         this.lost.push({ jet: tg, why: a.from.F.name });
+        this.down('air', tg.A.name);
         this.burst(tg.x, tg.y, 'kill');
         this.event(`${tg.nm} shot down by an ${a.name} from an ${a.from.F.name}.`, 'loss', tg);
       } else { this.burst(tg.x, tg.y, 'miss'); this.event(`An ${a.name} missed the ${tg.nm}.`, 'good', tg); }
@@ -585,6 +587,7 @@ export class StrikeSim extends Base {
     if (Math.random() < pk) {
       tg.alive = false;
       this.airKills = (this.airKills || 0) + 1;
+      this.down('air', F.name);
       this.burst(tg.x, tg.y, 'hit');
       this.event(`Splash: ${F.name} shot down by an ${a.name} from the ${a.from.nm}.`, 'kill', tg);
     } else { this.burst(tg.x, tg.y, 'miss'); this.event(`Our ${a.name} missed the ${F.name}.`, 'info', tg); }
@@ -607,10 +610,13 @@ export class StrikeSim extends Base {
     if (Math.random() < pk) {
       tg.alive = false;
       this.lost.push({ jet: tg, why: S.long });
+      this.down('air', tg.A.name);
       this.burst(tg.x, tg.y, 'kill');
       this.event(`${tg.nm} shot down by a ${S.long}.`, 'loss', tg);
     } else { this.burst(tg.x, tg.y, 'miss'); this.event(`A ${S.name} missile missed (${tg.nm} defended).`, 'good', tg); }
   }
+  /** Counts one shot down for the debrief (aircraft by their short name: F-16C, Su-35S). */
+  down(kind, name) { const k = kind === 'air' ? name.split(' ')[0] : name; this.downed[kind][k] = (this.downed[kind][k] || 0) + 1; }
   missed(ms, why) { this.event(`A ${SAMS[this.site[ms.site].sam].name} missile ${why}.`, 'good'); }
 
   /** Is this radar on the air now (for HARMs)? */
@@ -733,6 +739,7 @@ export class StrikeSim extends Base {
           w.dead = true;
           this.burst(w.x, w.y, 'pd');
           this.event(`${down.long} intercepted a ${mu.short}.`, 'warn', w);
+          this.down('mu', mu.short);
           continue;
         }
       }
@@ -757,6 +764,7 @@ export class StrikeSim extends Base {
           w.dead = true;
           this.burst(w.x, w.y, 'pd');
           this.event(`${down.long} shot down a ${mu.short}.`, 'warn', w);
+          this.down('mu', mu.short);
           continue;
         }
       }

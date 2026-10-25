@@ -130,6 +130,7 @@ const P = {
   form: '<rect x="3" y="5" width="18" height="5" rx="1"/><rect x="3" y="14" width="18" height="5" rx="1"/><path d="M6 7.5h4M6 16.5h4"/>',
   binary: '<path d="M6 4h2v7M5 11h4M16 13h2v7M15 20h4"/><rect x="14" y="4" width="6" height="7" rx="2"/><rect x="4" y="13" width="6" height="7" rx="2"/>',
   markdown: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15V9l3 3 3-3v6M17 9v6M15 13l2 2 2-2"/>',
+  planet: '<circle cx="12" cy="12" r="5"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-20 12 12)"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   wand: '<path d="m3 21 12-12M14 4l.8 1.7L16.5 6.5l-1.7.8L14 9l-.8-1.7L11.5 6.5l1.7-.8zM19 10l.5 1 1 .5-1 .5-.5 1-.5-1-1-.5 1-.5z"/>',
   sort: '<path d="M3 6h8M3 12h6M3 18h4M17 4v16M13 16l4 4 4-4"/>',

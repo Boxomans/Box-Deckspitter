@@ -41,7 +41,8 @@ export const FEATS = [
  *  for a mission, so flying it again doesn't farm them), 25 more with every jet home, 10 just for flying; twice that
  *  on a large mission, half on a small one; with the objective, 5 for each other target destroyed and 10 for each fighter shot down (twice
  *  that on a large mission, and again only the first time; the ships' Tomahawk kills don't count); 12 for each new
- *  badge. Returns [[what, points]]. */
+ *  badge. Leaving budget unspent adds to all but the badges: +25% with half of it left, +50% with all of it (in step
+ *  with what's left). Returns [[what, points]]. */
 export function strikePoints(r, size, repeat, badges) {
   const x = size === 'large' ? 2 : size === 'small' ? 0.5 : 1, out = [['Flown', Math.round(10 * x)]];
   const objs = r.objectives || 1;
@@ -49,6 +50,8 @@ export function strikePoints(r, size, repeat, badges) {
   if (r.won && !repeat && !r.lost) out.push(['Every jet home', Math.round(25 * x)]);
   if (r.won && !repeat && r.groundKills) out.push([`Other targets destroyed (${r.groundKills})`, Math.round(5 * r.groundKills * x)]);
   if (r.won && !repeat && r.airKills) out.push([`Fighters shot down (${r.airKills})`, Math.round(10 * r.airKills * x)]);
+  const left = r.budget > 0 ? Math.min(1, Math.max(0, 1 - r.cost / r.budget)) : 0, bonus = Math.round(out.reduce((n, [, p]) => n + p, 0) * left * 0.5);
+  if (bonus) out.push([`Under budget (${Math.round(left * 100)}% left, +${Math.round(left * 50)}%)`, bonus]);
   if (badges) out.push([`New badge${badges === 1 ? '' : 's'} (${badges})`, 12 * badges]);
   return out;
 }

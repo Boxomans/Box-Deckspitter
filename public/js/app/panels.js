@@ -74,6 +74,7 @@ export class PanelsPart {
       ['Games', [
         ['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.openGame('tomcat'), 'tools-tomcat'],
         ['reticle', 'Deep Strike', 'find the defences · plan the package · fly it', () => this.openGame('strike')],
+        ['planet', 'Prometheus', 'a space program · launch · transfer · land', () => this.openGame('prometheus')],
       ]],
       ['More', [
         ['play', 'Video player', 'just watch something', () => this.openVideoPlayer()],
