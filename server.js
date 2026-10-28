@@ -526,7 +526,7 @@ const { routes: marketRoutes } = require('./market-server')({ BROWSER_UA });
 const { routes: weatherRoutes } = require('./weather-server')({ BROWSER_UA });
 const { routes: lyricsRoutes } = require('./lyrics-server')();
 const { routes: translateRoutes } = require('./translate-server')({ BROWSER_UA, readJSONBody });
-const { routes: dumpsRoutes, dumpRel, dumpName, dumpAbs, dumpRelOf, playlists } = require('./dumps-server')({
+const { routes: dumpsRoutes, dumpRel, dumpName, dumpAbs, dumpRelOf, dumpRev, playlists } = require('./dumps-server')({
   DUMP_AUDIO_EXT, DUMP_EXT, DUMP_VIDEO_EXT, dumpOf, ok, platform, readBody, readJSONBody, requirePath, revealInExplorer,
 });
 const { routes: presenceRoutes, presence } = require('./presence-server')({ IS_WIN, readJSONBody });
@@ -535,6 +535,7 @@ const { routes: mediaRoutes, findExe, tools, streamFile, runCapture, newJob, run
   AUDIO_DUMP, BROWSER_UA, DATA, IS_WIN, MEDIA_MIME, MIME, checkUrl, dumpAbs, dumpRel, dumpRelOf, klepFolder, ok,
   platform, playlists, readJSONBody, readSongTags, requirePath, spotify: { findOnYouTube: (it) => spotify.findOnYouTube(it) },
 });
+const { routes: watchRoutes } = require('./watch-server')({ dumpRev, readJSONBody, requirePath });
 const { routes: spacesRoutes } = require('./spaces-server')({ findExe, ok, platform, readJSONBody, requirePath, runCapture });
 const { routes: storageRoutes, drives, buildLauncher } = require('./storage-server')({
   APP_NAME, DATA, IS_WIN, PUBLIC, ROOT, listDrives, newJob, readJSONBody, requirePath, runCapture, startJob,
@@ -904,7 +905,7 @@ const routes = {
 };
 
 // their routes
-Object.assign(routes, marketRoutes, weatherRoutes, lyricsRoutes, translateRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, storageRoutes, aiRoutes);
+Object.assign(routes, marketRoutes, weatherRoutes, lyricsRoutes, translateRoutes, dumpsRoutes, presenceRoutes, appearanceRoutes, mediaRoutes, spacesRoutes, watchRoutes, storageRoutes, aiRoutes);
 
 // Windows file associations ("open .pdf with Box-Deckspitter").
 Object.assign(routes, require('./file-assoc')({ root: ROOT, data: DATA, isWin: IS_WIN, readJSONBody }));
@@ -937,6 +938,9 @@ Object.assign(routes, require('./terminal-server')({ requirePath, readJSONBody, 
 
 // Video editor export (frames from the page → ffmpeg).
 Object.assign(routes, require('./render-server')({ tools, readBody, readJSONBody, requirePath, newJob, startJob, runFfmpegJob, cacheDir: path.join(DATA, 'cache', 'video'), log: (msg) => console.log(`[${APP_NAME}] ${msg}`) }));
+
+// BoxMend: broken videos repaired into the app's mend-dump folder.
+Object.assign(routes, require('./mend-server')({ tools, newJob, startJob, readJSONBody, requirePath, reveal: revealInExplorer, dir: path.join(ROOT, 'mend-dump') }));
 
 // Spotify links in BoxTape: read the track list, match each song on YouTube.
 const spotify = require('./spotify-server')({

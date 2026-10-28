@@ -158,6 +158,7 @@ const P = {
   sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
   play: '<path d="M7 4.5v15l12.5-7.5z" fill="currentColor" stroke-linejoin="round"/>',
   'pause-bars': '<path d="M8 5v14M16 5v14" stroke-width="3"/>',
+  mend: '<g transform="rotate(-45 12 12)"><rect x="1.5" y="7.5" width="21" height="9" rx="4.5"/><path d="M8 7.5v9M16 7.5v9M11 10.5h0M13 10.5h0M11 13.5h0M13 13.5h0"/></g>',
   video: '<rect x="2" y="5" width="14" height="14" rx="2"/><path d="m22 8-6 4 6 4z"/>',
   magnet: '<path d="m6 15-4-4 6.75-6.77a7.79 7.79 0 0 1 11 11L13 22l-4-4 6.39-6.36a2.14 2.14 0 0 0-3-3L6 15"/><path d="m5 8 4 4M12 15l4 4"/>',
   'form-fill': '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M14 3v5h5v3"/><path d="M8 10h5M8 14h3"/><path d="m14.5 20 1.5-4 4.5-4.5a1.4 1.4 0 0 1 2 2L18 18z"/>',

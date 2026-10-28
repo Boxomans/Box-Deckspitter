@@ -7,6 +7,7 @@ import { api } from '../core/api.js';
 import { contextMenu, confirmDialog, promptDialog, toast, errorToast, hoverKeys, rubberSelect } from '../core/ui.js';
 import { MODE_ICON, MODE_LABEL, iconForName, detectMode, PAINT_EXT } from '../core/filetypes.js';
 import { TOOL_OF_MODE } from '../core/tools.js';
+import { watchFolders, redrawKeepingPlace } from '../core/watch.js';
 
 // files the video editor can use
 const MEDIA_FILE_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv|mp3|wav|m4a|aac|ogg|oga|opus|flac|weba|png|jpe?g|jfif|webp|gif|bmp|svg)$/i;
@@ -65,6 +66,8 @@ export class ExplorerPart {
       }
     };
     filter.addEventListener('input', () => { ex.filter = filter.value; renderList(); });
+    // files added, removed or renamed in this folder (by anything) show up by themselves
+    watchFolders('explorer', [ex.dir], () => redrawKeepingPlace(this.sidepanel, () => this.renderExplorer(null, { history: false })), () => this.panel === 'explorer');
     p.append(
       h('div', { class: 'panel-head' }, 'Files', h('div', { class: 'grow' }),
         h('button', { class: 'icon-btn', 'data-tip': 'New folder', onclick: () => this.explorerNewFolder() }, icon('folder-plus', 'sm')),

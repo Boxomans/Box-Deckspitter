@@ -29,7 +29,7 @@ function launcherChanged(text, root) {
   return a !== b && !(SAME_LAUNCHER.has(a) && SAME_LAUNCHER.has(b));
 }
 const MAX_ZIP = 300 * 1024 * 1024;
-const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-deckspitter\.exe$/i];
+const PROTECTED = [/^data(\/|$)/i, /^(image|media|doc|audio|mend)-dump(\/|$)/i, /^node_modules(\/|$)/i, /^\.git(\/|$)/i, /^\.claude(\/|$)/i, /^electron\/main\.js$/i, /\.lnk$/i, /^box-deckspitter\.exe$/i];
 // Files that must be in any real release.
 const REQUIRED = ['package.json', 'server.js', 'update-server.js', 'electron/shell.js', 'electron/preload.js', 'public/index.html', 'public/js/app.js'];
 

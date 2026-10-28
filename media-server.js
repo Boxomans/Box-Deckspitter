@@ -553,6 +553,10 @@ module.exports = function createMedia({
             tr.note = `from: ${match.title}`;
             const firstArtist = String(it.artist || '').split(',')[0].trim();
             it = { ...it, type: 'ytdlp', url: match.url, outName: safeFileName(firstArtist ? `${firstArtist} - ${it.title}` : it.title, 'song'), tags: { title: it.title, artist: it.artist } };
+          } else if (it.song?.title) {
+            // an upload picked in BoxTape to stand in for a song that failed: named and tagged as that song, not the upload
+            const firstArtist = String(it.song.artist || '').split(',')[0].trim();
+            it = { ...it, outName: safeFileName(firstArtist ? `${firstArtist} - ${it.song.title}` : it.song.title, 'song'), tags: { title: String(it.song.title), artist: String(it.song.artist || '') } };
           }
           checkUrl(it.url);
           if (it.type === 'ytdlp' || !it.type) {

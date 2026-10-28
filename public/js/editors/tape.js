@@ -57,9 +57,7 @@ export class TapeEditor extends BaseEditor {
         h('div', { class: 'klep-title' }, h('span', { class: 'g tape-g' }, this.app.toolLabel('BoxTape')), h('span', { class: 'klep-cursor' })),
         h('div', { class: 'klep-sub mono' }, '> playlist in, mp3s out — straight into the audio dump'),
         h('div', { class: 'klep-bar' }, this.input, this.goBtn),
-        need.length
-          ? this.needNote(need)
-          : h('div', { class: 'faint', style: { fontSize: '11.5px' } }, `Saves to Box-Deckspitter${BDS.sep}audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.`)),
+        need.length ? this.needNote(need) : this.savesNote()),
       this.progress,
       this.results)));
     setTimeout(() => this.input.focus(), 50);
@@ -142,14 +140,21 @@ export class TapeEditor extends BaseEditor {
       box, h('button', { class: 'btn sm', onclick: apply }, 'Set artist')));
   }
 
+  /** The line under the search bar once yt-dlp and ffmpeg are there. */
+  savesNote() {
+    return h('div', { class: 'faint', style: { fontSize: '11.5px' } }, `Saves to Box-Deckspitter${BDS.sep}audio-dump with the song title, artist and cover art. Spotify links are matched to the same song on YouTube. Only download music you have the right to keep.`);
+  }
+
   /** The "BoxTape needs yt-dlp and ffmpeg" note, with a button that installs them (winget on Windows, downloads on Linux). */
   needNote(need) {
     const msg = h('span', {}, `BoxTape needs ${need.join(' and ')}.`);
-    const btn = this.tools.canInstall ? h('button', { class: 'btn sm primary', onclick: () => this.installTools(btn, msg) }, icon('download', 'sm'), 'Install them for me') : null;
-    return h('div', { class: 'klep-note error tape-need' }, icon('info', 'sm'), msg, btn);
+    const note = h('div', { class: 'klep-note error tape-need' }, icon('info', 'sm'), msg);
+    const btn = this.tools.canInstall ? h('button', { class: 'btn sm primary', onclick: () => this.installTools(btn, msg, note) }, icon('download', 'sm'), 'Install them for me') : null;
+    if (btn) note.append(btn);
+    return note;
   }
 
-  async installTools(btn, msg) {
+  async installTools(btn, msg, note) {
     btn.disabled = true;
     const spin = h('div', { class: 'spinner' });
     btn.replaceWith(spin);
@@ -163,8 +168,9 @@ export class TapeEditor extends BaseEditor {
         await new Promise((r) => setTimeout(r, 1000));
       }
       toast('yt-dlp and ffmpeg are installed — BoxTape is ready.', { type: 'ok' });
-      clear(this.pane);
-      await this.load(); // draws BoxTape again, now without the note
+      // only the note changes: the list, the queue and anything downloading stay as they are
+      this.tools = await get('/api/tools').catch(() => this.tools);
+      note.replaceWith(this.savesNote());
     } catch (e) {
       const hint = this.tools.hints || { ytdlp: 'winget install yt-dlp', ffmpeg: 'winget install Gyan.FFmpeg' };
       msg.textContent = /by hand/.test(e.message) ? e.message : `${e.message} (or install by hand: ${hint.ytdlp} and ${hint.ffmpeg})`;
@@ -368,7 +374,13 @@ export class TapeEditor extends BaseEditor {
       } catch (e) { errorToast(e, 'Couldn’t add the songs you already have to the playlist'); }
     }
     if (!picked.length) return;
-    const name = this.title ? `“${this.title}”` : `${picked.length} track${picked.length > 1 ? 's' : ''}`;
+    this.queueBatch(picked, folder, this.title ? `“${this.title}”` : `${picked.length} track${picked.length > 1 ? 's' : ''}`);
+    // untick what was just queued, so the next playlist (or the rest of this one) can be picked straight away
+    for (const b of this.boxes) if (b.checked) { b.checked = false; b.dispatchEvent(new Event('change')); }
+  }
+
+  /** Puts a batch of tracks in the queue, with its own progress card. */
+  queueBatch(picked, folder, name) {
     const batch = { picked, name, folder, state: 'queued', jobId: null };
     batch.titleEl = h('b', {});
     batch.counter = h('span', { class: 'mono faint', style: { fontSize: '11px' } });
@@ -382,9 +394,57 @@ export class TapeEditor extends BaseEditor {
     this.paintQueued(batch);
     batch.card.scrollIntoView({ block: 'nearest' });
     if (this.running) toast(`Queued ${name} — it starts when the current download finishes`, { timeout: 2600 });
-    // untick what was just queued, so the next playlist (or the rest of this one) can be picked straight away
-    for (const b of this.boxes) if (b.checked) { b.checked = false; b.dispatchEvent(new Event('change')); }
     this.pump();
+  }
+
+  /** The songs of a batch that failed → for each, a few other YouTube uploads to pick from (or skip it); the ones picked
+   *  download as a new batch into the same playlist, named and tagged as the song they stand in for. */
+  async substitutes(batch, failed) {
+    const picks = new Map();
+    const count = h('span', {});
+    const sections = failed.map(({ it, error }) => {
+      const song = it.type === 'spotify' || it.artist ? { title: it.title, artist: it.artist || '' } : null;
+      const label = it.label || it.title || it.url;
+      const q = h('input', { type: 'text', class: 'tape-sub-q', value: label, spellcheck: 'false' });
+      const opts = h('div', { class: 'tape-sub-opts' });
+      const group = 'sub' + Math.random().toString(36).slice(2);
+      const recount = () => { count.textContent = picks.size ? `${picks.size} of ${failed.length} picked` : 'Pick an upload for the songs you want'; };
+      const search = async () => {
+        picks.delete(it);
+        recount();
+        clear(opts).append(h('div', { class: 'klep-loading' }, h('div', { class: 'spinner' }), h('span', { class: 'faint' }, 'searching YouTube…')));
+        try {
+          // the upload that just failed isn't offered again
+          const res = (await post('/api/tape/search', { q: q.value.trim() || label })).items.filter((x) => x.url !== it.url).slice(0, 6);
+          const skip = h('input', { type: 'radio', name: group, checked: true, onchange: () => { picks.delete(it); recount(); } });
+          clear(opts).append(h('label', { class: 'tape-sub-opt' }, skip, h('span', { class: 'tape-title faint' }, 'Skip this song')),
+            ...res.map((r) => h('label', { class: 'tape-sub-opt' },
+              h('input', { type: 'radio', name: group, onchange: () => { picks.set(it, { url: r.url, type: 'ytdlp', title: r.title, label, song }); recount(); } }),
+              h('span', { class: 'tape-title' }, r.title),
+              h('span', { class: 'tape-meta mono faint' }, [r.uploader, r.duration ? fmtTime(r.duration, false) : null].filter(Boolean).join(' · ')))));
+          if (!res.length) opts.append(h('div', { class: 'faint', style: { fontSize: '12px' } }, 'Nothing else found. Try other words.'));
+        } catch (e) { clear(opts).append(h('div', { class: 'klep-note error' }, e.message)); }
+      };
+      q.addEventListener('keydown', (e) => { if (e.key === 'Enter') search(); });
+      return { search, el: h('div', { class: 'tape-sub' },
+        h('div', { class: 'tape-sub-head' }, h('b', { class: 'tape-title' }, label), h('span', { class: 'mono faint tape-sub-err', title: error || '' }, (error || 'failed').slice(0, 70))),
+        h('div', { class: 'tape-sub-bar' }, q, h('button', { class: 'btn sm', onclick: search }, icon('search', 'sm'), 'Search')),
+        opts) };
+    });
+    count.textContent = 'Pick an upload for the songs you want';
+    // three searches at a time
+    const queue = [...sections];
+    const run = async () => { while (queue.length) await queue.shift().search(); };
+    const opened = modal({
+      title: `Substitutes for ${failed.length} failed song${failed.length === 1 ? '' : 's'}`, wide: true,
+      body: h('div', { class: 'tape-subs' }, h('div', { class: 'faint', style: { fontSize: '12px' } }, 'Pick another upload of each song, or skip it. The ones you pick download as a new batch' + (batch.folder ? ` into “${batch.folder}”` : '') + ', named after the song.'),
+        ...sections.map((s) => s.el)),
+      footLeft: count,
+      buttons: [{ label: 'Cancel', value: null, ghost: true }, { label: 'Download picked', value: 'go', primary: true }],
+    });
+    run(); run(); run();
+    if (await opened !== 'go' || !picks.size) return;
+    this.queueBatch([...picks.values()], batch.folder, `substitutes for ${batch.name}`);
   }
 
   paintQueued(batch) {
@@ -426,7 +486,7 @@ export class TapeEditor extends BaseEditor {
       const { id } = await post('/api/audio/grab', {
         items: picked.map((it) => (it.type === 'spotify'
           ? { url: it.url, type: 'spotify', title: it.title, artist: it.artist, duration: it.duration, label: it.label }
-          : { url: it.url, type: 'ytdlp', title: it.title })),
+          : { url: it.url, type: 'ytdlp', title: it.title, label: it.label, song: it.song || null })),
         parallel,
         retries: Number(this.retries?.value ?? this.app.settings.tapeRetries ?? 3),
         playlist: batch.folder || '',
@@ -450,7 +510,10 @@ export class TapeEditor extends BaseEditor {
           const first = (j.tracks || []).find((t) => t.status === 'done');
           batch.titleEl.textContent = j.status === 'done' ? `Done: ${batch.name} — ${j.done} saved${j.failed ? `, ${j.failed} failed` : ''}`
             : j.status === 'cancelled' ? `Stopped: ${batch.name} — ${j.done || 0} saved` : `Failed: ${batch.name} — ${j.error || ''}`;
+          // the songs that failed (tracks are in the order they were sent)
+          const failed = (j.tracks || []).map((t, i) => (t.status === 'failed' && picked[i] ? { it: picked[i], error: t.error } : null)).filter(Boolean);
           clear(batch.actions).append(
+            failed.length ? h('button', { class: 'btn sm', 'data-tip': 'Pick another upload for each song that failed', onclick: () => this.substitutes(batch, failed) }, icon('search', 'sm'), `Find substitutes (${failed.length})`) : null,
             first ? h('button', { class: 'btn sm primary', onclick: () => this.app.music?.playByName(first.name) }, icon('play', 'sm'), 'Play') : null,
             first ? h('button', { class: 'btn sm', onclick: () => this.app.music?.open() }, icon('music', 'sm'), 'Open player') : null,
             h('button', { class: 'icon-btn', 'data-tip': 'Clear this from the list', onclick: () => batch.card.remove() }, icon('x', 'sm')));

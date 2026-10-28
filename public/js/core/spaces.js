@@ -5,6 +5,7 @@ import { icon } from './icons.js';
 import { api } from './api.js';
 import { contextMenu, promptDialog, confirmDialog, toast, errorToast, hoverKeys, rubberSelect, modal } from './ui.js';
 import { iconForName, MODE_ICON } from './filetypes.js';
+import { watchFolders } from './watch.js';
 
 const GIT_CLASS = { M: 'mod', ' M': 'mod', MM: 'mod', AM: 'add', A: 'add', '??': 'new', D: 'del', R: 'mod', U: 'conflict', UU: 'conflict' };
 
@@ -54,32 +55,43 @@ export class Spaces {
 
   async render(host) {
     this.host = host;
-    clear(host);
-    if (!this.root) return this.renderEmpty(host);
+    // the tree is drawn again on every change (a folder opened or closed, a refresh, a rename): keep its scroll position
+    const keep = this.view === 'tree' && this.shownRoot === this.root && host.querySelector('.spaces-tree') ? host.querySelector('.panel-body')?.scrollTop || 0 : 0;
+    this.shownRoot = this.root;
+    if (!this.root) { clear(host); return this.renderEmpty(host); }
     const name = basename(this.root);
-    const head = h('div', { class: 'panel-head' }, h('span', { class: 'spaces-name', title: this.root }, this.app.toolName('BoxSpaces') + ' · ' + name), h('div', { class: 'grow' }),
+    const head = h('div', { class: 'panel-head' }, this.app.toolName('BoxSpaces'), h('div', { class: 'grow' }),
       h('button', { class: 'icon-btn', 'data-tip': 'New BoxSpace — make a new folder and open it', onclick: () => this.createSpace() }, icon('plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'New file', onclick: () => this.newFile(this.root) }, icon('file-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'New folder', onclick: () => this.newFolder(this.root) }, icon('folder-plus', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => this.refresh() }, icon('refresh', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Collapse all', onclick: () => { this.expanded = new Set([this.root]); this.saveExpanded(); this.render(host); } }, icon('chevron-up', 'sm')),
       h('button', { class: 'icon-btn', 'data-tip': 'Close space', onclick: () => this.close() }, icon('x', 'sm')));
+    // the open folder gets its own line under the buttons, so a long name isn't cut short
+    const top = h('div', { class: 'spaces-root', title: this.root }, icon('folder-open', 'sm'), h('span', {}, name));
+    top.addEventListener('contextmenu', (e) => contextMenu(e, this.dirMenu(this.root)));
     const tabs = h('div', { class: 'spaces-tabs' },
       h('button', { class: this.view === 'tree' ? 'on' : '', onclick: () => { this.view = 'tree'; this.render(host); } }, icon('folder', 'sm'), 'Files'),
       h('button', { class: this.view === 'search' ? 'on' : '', onclick: () => { this.view = 'search'; this.render(host); } }, icon('search', 'sm'), 'Search'),
       this.git.branch ? h('span', { class: 'spaces-branch mono', title: 'git branch' }, icon('git', 'sm'), this.git.branch) : null);
-    host.append(head, tabs);
-    if (this.view === 'search') return this.renderSearch(host);
+    if (this.view === 'search') { clear(host).append(head, top, tabs); return this.renderSearch(host); }
     const tree = h('div', { class: 'spaces-tree', tabindex: '0' });
     const body = h('div', { class: 'panel-body' }, tree);
-    host.append(body);
+    // built before it goes on screen, so the old tree stays put until the new one is ready (no flash, no jump)
+    const token = (this.drawing = {});
+    await this.renderDir(this.root, tree, 0);
+    // a newer render started meanwhile, or the side panel moved on to something else
+    if (this.drawing !== token || (host === this.app.sidepanel && this.app.panel !== 'spaces')) return;
+    clear(host).append(head, top, tabs, body);
+    body.scrollTop = keep;
+    // files added, removed or renamed in the space or an open folder (by anything) show up by themselves
+    watchFolders(this, [...this.expanded], () => this.refresh(), () => this.root && this.view === 'tree' && this.host === host && host.isConnected && host.querySelector('.spaces-tree'));
     this.picker = rubberSelect(tree, {
       rows: '.tree-row', scroller: body,
       menu: (items) => this.app.fileManyMenu(items, () => this.refresh()),
       onDelete: (items) => this.app.trashMany(items, () => this.refresh()),
       onOpen: (items) => this.app.openMany(items),
     });
-    await this.renderDir(this.root, tree, 0);
     tree.addEventListener('contextmenu', (e) => { if (e.target === tree) contextMenu(e, this.dirMenu(this.root)); });
   }
 

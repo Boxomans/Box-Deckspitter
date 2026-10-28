@@ -11,6 +11,7 @@ import { icon } from '../core/icons.js';
 import { tbButton, tbSep, toast, errorToast, contextMenu, modal, promptDialog, hoverKeys, PATHS_MIME, draggedPaths, setDraggedPaths, popover } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { pickOpen, pickSave } from '../core/files.js';
+import { watchFolders } from '../core/watch.js';
 import { fmtTime } from './video.js';
 
 const VIDEO_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|avi|wmv|3gp|mts|m2ts|flv)$/i;
@@ -360,6 +361,8 @@ export class CutEditor extends BaseEditor {
     this.projActions.hidden = dump;
     this.dumpActions.hidden = !dump;
     if (dump) this.refreshDump();
+    // files added, removed or renamed in the media dump (by anything) show up by themselves while its tab is open
+    if (dump) watchFolders(this, ['dump:media'], () => this.refreshDump(), () => this.pane.isConnected && !this.dumpActions.hidden);
   }
 
   /** The media dump tab: the folder that's open (dumpDir, '' = the top), its folders, then its files. */

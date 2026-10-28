@@ -405,5 +405,5 @@ module.exports = function createDumps({
     },
   };
 
-  return { routes, dumpRel, dumpName, dumpAbs, dumpRelOf, playlists };
+  return { routes, dumpRel, dumpName, dumpAbs, dumpRelOf, dumpRev, playlists };
 };

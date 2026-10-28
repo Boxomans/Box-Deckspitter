@@ -1,5 +1,19 @@
 [
   {
+    "version": "1.1.11",
+    "date": "2026-10-27",
+    "notes": [
+      "New logo: a fanned deck of pages, recoloured to match each theme.",
+      "BoxMend, in the Toolbox: repairs broken videos. Drop one in and it says what’s wrong in plain words (no length so it can’t be seeked, cut short, damaged frames, broken timing, damaged sound). Repair reads every frame, then tries the lightest fix first: rewrapping the same picture and sound into a fresh file (nothing lost), then re-making it frame by frame with damaged frames patched from the ones around them and the sound kept in step, then saving the sound on its own. A recording cut off before it finished saving (one that won’t open at all) can be rebuilt: pick a working video from the same camera or program and the picture and sound are found in the broken file and put back together, nothing re-made. Each try is read back to check it, and you can see what was tried and how much was saved. The original is never changed; repaired videos go in a mend-dump folder in the app’s folder. Needs ffmpeg.",
+      "Home page: right-click a card to remove it, or a Toolbox row (any tool, game or extra) to add it to the home page or remove it. Right-click a card or an empty part of the home page to put back cards you removed.",
+      "BoxSpaces, the Files panel, the media and doc dumps and the video editor’s media tab update by themselves when files are added, removed or renamed outside the app (Explorer, downloads, other programs), keeping your scroll position and what you were typing.",
+      "BoxLog: start the log search with @ to find logs by application (@steam); the list is then sorted by application. * matches anything (crash*.log). A time menu beside the search shows only logs written to in the last 5 minutes up to the last 7 days. The AI assistant can read the logs you have open (merged in time order, with your filters applied) and the selected line, with log actions: explain errors, find the cause, summarize, spot patterns.",
+      "BoxTape: installing yt-dlp and ffmpeg with the button no longer clears the songs you’ve picked or the download queue.",
+      "BoxTape: when songs fail to download, a Find substitutes button on the finished batch lets you pick another upload of each one (or skip it); the ones you pick download into the same playlist, named and tagged as the original song.",
+      "BoxSpaces: the open folder’s name has its own line at the top of the panel, so long names aren’t cut short; opening or closing a folder or file no longer jumps the file list back to the top."
+    ]
+  },
+  {
     "version": "1.1.10",
     "date": "2026-10-25",
     "notes": [

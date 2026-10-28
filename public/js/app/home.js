@@ -13,10 +13,29 @@ const HOME_TITLE = 'BOX//DECKSPITTER';
 
 const HOME_TAGLINE = 'local docs, pdfs, video, storage, text & code — nothing leaves this machine unless you want it to';
 
+/** The "start something" cards: [new tab kind, icon, title, what it makes]. */
+const START_CARDS = [
+  ['doc', 'file-doc', 'Document', '.docx · rich text'],
+  ['pdf-images', 'file-pdf', 'PDF from images', '.pdf · combine'],
+  ['text', 'file-text', 'Text file', '.txt · notepad'],
+  ['code', 'file-code', 'Code / config', 'json · ini · yaml…'],
+  ['html', 'globe', 'HTML page', 'live preview'],
+  ['md', 'markdown', 'Markdown', 'live preview'],
+  ['sheet', 'sheet', 'Spreadsheet', '.xlsx · .csv'],
+  ['paint', 'brush', 'Image', 'paint · layers · .png'],
+];
+const START_TITLES = START_CARDS.map((c) => c[2]);
+
 export class HomePart {
   buildHome() {
     this.homeEl = h('div', { class: 'home' });
     this.workspace.append(this.homeEl);
+    // right-click the page itself (not a card or a file): put back cards you took off, even from an emptied section
+    this.homeEl.addEventListener('contextmenu', (e) => {
+      if (e.defaultPrevented || e.target.closest('.new-card, .recent-row, input, textarea, button, a')) return;
+      const back = this.putBackItems();
+      if (back.length) contextMenu(e, back);
+    });
   }
 
   /** Home cards in the order you dragged them into (new cards you haven't placed go at the end). */
@@ -168,16 +187,8 @@ export class HomePart {
 
   async refreshHome() {
     const el = clear(this.homeEl);
-    const cards = [
-      ['doc', 'file-doc', 'Document', '.docx · rich text'],
-      ['pdf-images', 'file-pdf', 'PDF from images', '.pdf · combine'],
-      ['text', 'file-text', 'Text file', '.txt · notepad'],
-      ['code', 'file-code', 'Code / config', 'json · ini · yaml…'],
-      ['html', 'globe', 'HTML page', 'live preview'],
-      ['md', 'markdown', 'Markdown', 'live preview'],
-      ['sheet', 'sheet', 'Spreadsheet', '.xlsx · .csv'],
-      ['paint', 'brush', 'Image', 'paint · layers · .png'],
-    ];
+    const off = new Set(this.settings.homeRemoved || []);
+    const cards = START_CARDS.filter((c) => !off.has(c[2]));
     const inner = h('div', { class: 'home-inner' });
     // the big title and the line under it can be renamed with F2 (the user@127.0.0.1 part always stays)
     const editable = (el, key, def) => hoverKeys(el, {
@@ -204,10 +215,12 @@ export class HomePart {
     const draftsHost = h('div');
     inner.append(draftsHost);
 
-    inner.append(h('div', { class: 'home-section-title' }, 'start something'));
+    // a section you've emptied (right-click › Remove from the home page) goes, heading and all
+    if (cards.length) inner.append(h('div', { class: 'home-section-title' }, 'start something'));
     const grid = h('div', { class: 'new-cards' });
     for (const [kind, ic, title, sub] of this.ordered('start', cards, (c) => c[2])) {
       const card = this.homeCard(ic, title, sub);
+      card.addEventListener('contextmenu', (e) => this.homeCardMenu(e, title));
       card.addEventListener('click', (e) => {
         if (kind === 'code') showMenu(LANGUAGES.map(([id, name]) => ({ label: name, action: () => this.newDocument('code', { lang: id }) })), { x: e.clientX, y: e.clientY });
         else this.newDocument(kind);
@@ -216,10 +229,12 @@ export class HomePart {
     }
     this.sortableCards(grid, 'start');
     inner.append(grid);
-    inner.append(h('div', { class: 'home-section-title' }, 'tools'));
+    const shown = this.homeShown();
+    if (shown.length) inner.append(h('div', { class: 'home-section-title' }, 'tools'));
     const toolGrid = h('div', { class: 'new-cards tool-cards' });
-    for (const [ic, title, sub, fn] of this.ordered('tools', this.homeTools(), (c) => c[1])) {
+    for (const [ic, title, sub, fn] of this.ordered('tools', shown, (c) => c[1])) {
       const card = this.homeCard(ic, title, sub);
+      card.addEventListener('contextmenu', (e) => this.homeCardMenu(e, title));
       card.addEventListener('click', fn);
       toolGrid.append(card);
     }
@@ -273,7 +288,37 @@ export class HomePart {
     } catch { /* ignore */ }
   }
 
-  /** The home page's tool cards: [icon, name, what it does, open]. The Tools folder lists them too. */
+  /** What the home page's tools section shows: the usual cards minus the ones you removed, then any Toolbox item you
+   *  added (right-click a card or a Toolbox row), in the order you added them. */
+  homeShown() {
+    const off = new Set(this.settings.homeRemoved || []), base = this.homeTools();
+    const all = this.toolboxGroups().flatMap(([, items]) => items);
+    const added = (this.settings.homeAdded || []).filter((k) => !base.some((c) => c[1] === k)).map((k) => all.find((it) => it[1] === k)).filter(Boolean);
+    return [...base.filter((c) => !off.has(c[1])), ...added];
+  }
+  /** Whether a card (a tool, game or extra by its own name, or a "start something" card by its title) is on the home page. */
+  onHome(key) {
+    if ((this.settings.homeRemoved || []).includes(key)) return false;
+    return this.homeTools().some((c) => c[1] === key) || START_TITLES.includes(key) || (this.settings.homeAdded || []).includes(key);
+  }
+  /** Put a card on the home page or take it off: the usual ones are remembered as removed, the others as added. */
+  setOnHome(key, on) {
+    const usual = this.homeTools().some((c) => c[1] === key) || START_TITLES.includes(key);
+    const removed = (this.settings.homeRemoved || []).filter((k) => k !== key), added = (this.settings.homeAdded || []).filter((k) => k !== key);
+    this.saveSettings({ homeRemoved: !on && usual ? [...removed, key] : removed, homeAdded: on && !usual ? [...added, key] : added });
+    if (!this.active) this.refreshHome();
+    if (this.panel === 'tools') this.renderToolsPanel();
+  }
+  putBackItems() {
+    return (this.settings.homeRemoved || []).map((k) => ({ label: `Put back “${this.toolName(k)}”`, icon: 'undo', action: () => this.setOnHome(k, true) }));
+  }
+  /** Right-click on a home card: take it off, or put back any that were taken off. */
+  homeCardMenu(e, key) {
+    const back = this.putBackItems();
+    contextMenu(e, [{ label: 'Remove from the home page', icon: 'x', action: () => this.setOnHome(key, false) }, ...(back.length ? [{ sep: true }, ...back] : [])]);
+  }
+
+  /** The usual tool cards on the home page: [icon, name, what it does, open]. The Toolbox lists them first. */
   homeTools() {
     return TOOLS.filter((t) => t.home && offered(t))
       .map((t) => [t.home.icon, t.name, t.home.sub, () => (t.home.open ? t.home.open(this) : this.newDocument(t.mode))]);

@@ -39,6 +39,28 @@ export class PanelsPart {
     this.active?.editor?.onShow?.();
   }
 
+  /** The Toolbox's groups: [title, [icon, name, what it does, open, class?]]. Its rows can go on the home page too. */
+  toolboxGroups() {
+    // Every tool in one list with its own order, dragged into place here and kept apart from the home page's. Until you move
+    // one it starts out like the home page (its tools in your order there, then the Toolbox-only ones); new tools go last.
+    const all = [...this.ordered('tools', this.homeTools(), (c) => c[1]),
+      ...TOOLS.filter((t) => t.toolbox && offered(t)).map((t) => [t.icon, t.name, t.toolbox, () => this.newDocument(t.mode)])];
+    return [
+      ['Tools', this.ordered('toolbox', all, (c) => c[1])],
+      ['Games', [
+        ['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.openGame('tomcat'), 'tools-tomcat'],
+        ['reticle', 'Deep Strike', 'find the defences · plan the package · fly it', () => this.openGame('strike')],
+        ['planet', 'Prometheus', 'a space program · launch · transfer · land', () => this.openGame('prometheus')],
+      ]],
+      ['More', [
+        ['play', 'Video player', 'just watch something', () => this.openVideoPlayer()],
+        ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
+        ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
+        ...(this.weather ? [['cloud-sun', 'Weather widget', 'a small floating forecast · click again to close', () => this.weather.toggleMini()]] : []),
+      ]],
+    ];
+  }
+
   /** The Toolbox at the foot of the left rail: every tool in one list. */
   renderToolsPanel() {
     const p = clear(this.sidepanel);
@@ -59,30 +81,16 @@ export class PanelsPart {
       const b = h('button', { class: `file-row tools-row ${cls} ${pinRow ? 'pinned' : ''} ${isPinned && !pinRow ? 'tools-away' : ''}`, title: tip, dataset: movable ? { key } : {} }, h('span', { class: 'fr-icon' }, icon(ic, 'sm')),
         h('span', { class: 'tools-text' }, nameEl, h('span', { class: 'tools-sub' }, sub)), pin);
       b.addEventListener('click', open);
-      b.addEventListener('contextmenu', (e) => contextMenu(e, [{ label: isPinned ? 'Unpin' : 'Pin to the top', icon: 'pin', action: () => setPin(key, !isPinned) }]));
+      b.addEventListener('contextmenu', (e) => contextMenu(e, [
+        { label: isPinned ? 'Unpin' : 'Pin to the top', icon: 'pin', action: () => setPin(key, !isPinned) },
+        this.onHome(key) ? { label: 'Remove from the home page', icon: 'home', action: () => this.setOnHome(key, false) } : { label: 'Add to the home page', icon: 'home', action: () => this.setOnHome(key, true) },
+      ]));
       if (movable) hoverKeys(b, { nameEl, value: () => this.toolName(key), commit: (n) => this.setToolName(key, n), reset: () => this.setToolName(key, '') });
       Object.defineProperty(b, '_find', { get: () => `${nameEl.textContent} ${key} ${sub}`.toLowerCase() }); // follows a rename
       return b;
     };
-    // Every tool in one list with its own order, dragged into place here and kept apart from the home page's. Until you move
-    // one it starts out like the home page (its tools in your order there, then the Toolbox-only ones); new tools go last.
-    const all = [...this.ordered('tools', this.homeTools(), (c) => c[1]),
-      ...TOOLS.filter((t) => t.toolbox && offered(t)).map((t) => [t.icon, t.name, t.toolbox, () => this.newDocument(t.mode)])];
     const mine = !!(this.settings.cardOrder || {}).toolbox;
-    const groups = [
-      ['Tools', this.ordered('toolbox', all, (c) => c[1])],
-      ['Games', [
-        ['f14', 'F-14F Super Tomcat', this.splashLine(), () => this.openGame('tomcat'), 'tools-tomcat'],
-        ['reticle', 'Deep Strike', 'find the defences · plan the package · fly it', () => this.openGame('strike')],
-        ['planet', 'Prometheus', 'a space program · launch · transfer · land', () => this.openGame('prometheus')],
-      ]],
-      ['More', [
-        ['play', 'Video player', 'just watch something', () => this.openVideoPlayer()],
-        ['scissors', 'Quick trim', 'cut a video down, fast', () => this.openVideoTrimmer()],
-        ['music', 'Music player', 'the small pop-out player · click again to close', () => this.music.toggleOpen(), 'music-opener'],
-        ...(this.weather ? [['cloud-sun', 'Weather widget', 'a small floating forecast · click again to close', () => this.weather.toggleMini()]] : []),
-      ]],
-    ];
+    const groups = this.toolboxGroups();
     const list = h('div', { class: 'file-list tools-list' });
     const tops = pinned.map((k) => groups.find(([, items]) => items.some((it) => it[1] === k))).map((g, i) => g && [g[1].find((it) => it[1] === pinned[i]), g[0] === 'Tools']).filter(Boolean);
     if (tops.length) list.append(h('div', { class: 'tools-group' }, 'Pinned'), ...tops.map(([it, movable]) => row(it, movable, true)));

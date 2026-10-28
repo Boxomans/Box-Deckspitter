@@ -401,10 +401,14 @@ export class LogEditor extends BaseEditor {
     this.list = h('div', { class: 'lg-list', tabindex: '0' }, this.sizer = h('div', { class: 'lg-sizer' }), this.body = h('div', { class: 'lg-body' }));
     this.empty = h('div', { class: 'lg-empty' });
     this.detail = h('div', { class: 'lg-detail', hidden: true });
-    this.srcSearch = h('input', { class: 'lg-ssearch', type: 'search', placeholder: 'Find a log…', spellcheck: 'false', oninput: () => this.renderSources() });
+    this.srcSearch = h('input', { class: 'lg-ssearch', type: 'search', placeholder: 'Find an @log…', 'data-tip': 'Words find a log by name, application or group. @ finds it by application (@steam) and sorts the list by application. * matches anything (crash*.log).', spellcheck: 'false', oninput: () => this.renderSources() });
+    // the log list by when each log was last written to (the same periods as the line filter's time range)
+    this.srcAge = h('select', { class: 'lg-sel lg-sage', 'data-tip': 'Only logs written to in this period', onchange: () => { store.set('srcAge', this.srcAge.value); this.renderSources(); } },
+      ...RANGES.map(([k, l]) => h('option', { value: k }, l)));
+    this.srcAge.value = RANGES.some(([k]) => k === store.get('srcAge', 'all')) ? store.get('srcAge', 'all') : 'all';
     this.srcStatus = h('div', { class: 'lg-sstatus' });
     this.srcList = h('div', { class: 'lg-slist' });
-    this.side = h('div', { class: 'lg-side' }, h('div', { class: 'lg-shead' }, this.srcSearch), this.srcList, this.srcStatus);
+    this.side = h('div', { class: 'lg-side' }, h('div', { class: 'lg-shead' }, this.srcSearch, this.srcAge), this.srcList, this.srcStatus);
     this.main = h('div', { class: 'lg-main' }, filters, this.hist, h('div', { class: 'lg-listwrap' }, this.list, this.empty), this.detail);
     this.root = h('div', { class: 'lg-root' }, this.side, this.main);
     this.pane.append(this.root);
@@ -475,17 +479,25 @@ export class LogEditor extends BaseEditor {
 
   renderSources() {
     if (!this.srcList) return;
-    const q = this.srcSearch.value.trim().toLowerCase();
+    // words find a log by its name, application or group; "@" finds it by application alone and sorts the list by
+    // application; * matches anything
+    const raw = this.srcSearch.value.trim().toLowerCase();
+    const byApp = raw.startsWith('@');
+    const q = byApp ? raw.slice(1).trim() : raw;
+    const re = q ? new RegExp(q.split('*').map(escRe).join('.*')) : null;
+    const hit = (s) => !re || re.test(String(s || '').toLowerCase());
     const now = Date.now();
+    const maxAge = RANGES.find(([k]) => k === this.srcAge.value)?.[2] || 0;
     const groups = new Map(GROUPS.map((g) => [g, []]));
     for (const f of this.catalog.files) {
-      const label = `${f.name} ${f.sub || ''} ${f.group}`.toLowerCase();
-      if (q && !label.includes(q)) continue;
+      if (!hit(byApp ? f.sub : `${f.name} ${f.sub || ''} ${f.group}`)) continue;
+      if (maxAge && now - f.mtime > maxAge) continue;
       if (now - f.mtime < ACTIVE_MS) groups.get('Active now').push(f);
       groups.get(f.group)?.push(f);
     }
-    for (const s of this.sources.values()) if (s.kind === 'file' && !this.catalog.files.some((f) => f.path === s.path) && (!q || s.label.toLowerCase().includes(q))) groups.get(s.group === 'Added' ? 'Added' : 'Apps').unshift({ path: s.path, name: s.label, sub: s.sub, group: s.group, size: s.size || 0, mtime: s.mtime || 0 });
-    const events = this.catalog.logs.filter((l) => !q || l.name.toLowerCase().includes(q) || 'event windows'.includes(q));
+    for (const s of this.sources.values()) if (s.kind === 'file' && !this.catalog.files.some((f) => f.path === s.path) && hit(byApp ? s.sub : s.label)) groups.get(s.group === 'Added' ? 'Added' : 'Apps').unshift({ path: s.path, name: s.label, sub: s.sub, group: s.group, size: s.size || 0, mtime: s.mtime || 0 });
+    if (byApp) for (const items of groups.values()) items.sort((a, b) => String(a.sub || '').localeCompare(String(b.sub || ''), undefined, { sensitivity: 'base' }) || a.name.localeCompare(b.name));
+    const events = this.catalog.logs.filter((l) => hit(l.name) || (!byApp && q && 'event windows'.includes(q)));
     const frag = document.createDocumentFragment();
     const collapsed = (this.collapsed ||= new Set(store.get('collapsed', ['Apps', 'Temp', 'Event logs'])));
     for (const g of GROUPS) {
@@ -493,7 +505,7 @@ export class LogEditor extends BaseEditor {
       if (!items.length && g !== 'Added') continue;
       const defs = g === 'Event logs' ? items.map((l) => this.eventDef(l.name)) : items.map((f) => this.fileDef(f));
       const chosen = defs.filter((d) => this.sources.has(d.key)).length;
-      const open = !collapsed.has(g) || !!q;
+      const open = !collapsed.has(g) || !!raw;
       const head = h('div', { class: 'lg-ghead' },
         h('button', { class: 'lg-caret', onclick: () => { collapsed.has(g) ? collapsed.delete(g) : collapsed.add(g); store.set('collapsed', [...collapsed]); this.renderSources(); } }, icon(open ? 'chevron-down' : 'chevron-right', 'sm')),
         h('span', { class: 'lg-gname' }, g), h('span', { class: 'lg-gcount' }, chosen ? `${chosen}/${defs.length}` : String(defs.length)),
@@ -780,6 +792,21 @@ export class LogEditor extends BaseEditor {
   }
 
   viewText() { return this.rows.map((r) => `${r.e.ft ? '' : fmtTime(r.e.t, true)}  [${r.e.s.label}]  ${r.e.text}${r.dup > 1 ? `  (×${r.dup})` : ''}`).join('\n'); }
+  // the AI assistant reads what's shown: every open log merged in time order with the filters applied, newest lines
+  // kept when it's too long; the selected line (and any stack trace under it) is its selection
+  getContextText() {
+    const MAX = 400_000;
+    let t = this.viewText();
+    const cut = t.length > MAX;
+    if (cut) t = t.slice(t.indexOf('\n', t.length - MAX) + 1);
+    const logs = [...this.sources.values()].map((s) => s.label).join(', ');
+    const head = `Logs open in BoxLog: ${logs || 'none'}\n${(this.rows.length).toLocaleString()} lines shown (${(this.hitCount ?? 0).toLocaleString()} matching the filters of ${(this.total ?? 0).toLocaleString()})${cut ? `; only the newest ${t.split('\n').length.toLocaleString()} are included` : ''}\nEach line: time  [log]  text\n\n`;
+    return this.rows.length ? head + t : '';
+  }
+  getSelectionText() {
+    if (window.getSelection().toString()) return window.getSelection().toString();
+    return this.sel >= 0 && this.rows[this.sel] ? this.neighbors(this.sel) : '';
+  }
   async copyView() {
     const t = this.viewText();
     if (!t) { toast('Nothing to copy'); return; }

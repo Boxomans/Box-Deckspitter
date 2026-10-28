@@ -683,6 +683,16 @@ audio.vid-media { display: none; }
 .tape-prog-row.working .tape-state { color: var(--accent-2); }
 .tape-prog-row.done .tape-state { color: var(--accent-3); }
 .tape-prog-row.failed .tape-state, .tape-prog-row.failed .mono { color: var(--danger); }
+/* Find substitutes: each failed song with its search and a few other uploads to pick from */
+.tape-subs { display: flex; flex-direction: column; gap: 12px; max-height: 62vh; overflow-y: auto; }
+.tape-sub { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.tape-sub-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.tape-sub-err { margin-left: auto; flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--danger); }
+.tape-sub-bar { display: flex; gap: 6px; }
+.tape-sub-q { flex: 1; min-width: 0; }
+.tape-sub-opts { display: flex; flex-direction: column; }
+.tape-sub-opt { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.tape-sub-opt:hover { background: var(--bg-2); }
 .tape-progress:empty { display: none; }
 .klep-plseg { flex: none; }
 .klep-plseg button { padding: 4px 10px; font-size: 11.5px; white-space: nowrap; }
@@ -1363,7 +1373,9 @@ textarea.sn-input { resize: none; min-height: 140px; height: 100%; line-height: 
 /* ---------------------------------------------------------------- BoxLog */
 .lg-root { position: absolute; inset: 0; display: flex; background: var(--bg-0); }
 .lg-side { width: 290px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--bg-1); min-height: 0; }
-.lg-shead { padding: 8px; }
+.lg-shead { display: flex; gap: 6px; padding: 8px; }
+.lg-shead .lg-ssearch { flex: 1; min-width: 0; }
+.lg-sage { flex: none; max-width: 112px; }
 .lg-ssearch { width: 100%; box-sizing: border-box; }
 .lg-slist { flex: 1; overflow: auto; padding: 0 4px 6px; }
 .lg-sstatus { padding: 5px 10px; font-size: 11px; color: var(--text-3); border-top: 1px solid var(--line); }

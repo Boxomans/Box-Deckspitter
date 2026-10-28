@@ -20,6 +20,13 @@ const WRITE_ACTIONS = [
   ['Brainstorm', 'Brainstorm 8 fresh ideas building on this.'],
   ['Outline', 'Turn this into a clear outline with headings and bullet points.'],
 ];
+// BoxLog: the open logs merged into one timeline
+const LOG_ACTIONS = [
+  ['Explain errors', 'Explain the errors and warnings in these logs in plain language: what each one means and whether it matters.'],
+  ['Find the cause', 'Work out what went wrong in these logs and the most likely root cause. Point to the lines that show it and suggest a fix.'],
+  ['Summarize', 'Summarize what happened in these logs as a short timeline of the important events.'],
+  ['Spot patterns', 'Find repeated messages, spikes and anything unusual in these logs, and say what they suggest.'],
+];
 const CODE_ACTIONS = [
   ['Explain', 'Explain what this code does, step by step, in plain language.'],
   ['Find bugs', 'Review this code for bugs and risky spots. List concrete problems with line references and fixes.'],
@@ -77,7 +84,7 @@ export class AiPanel {
       h('label', { class: 'check' }, cbSel, h('span', {}, 'selection', h('span', { class: 'faint' }, sel ? ` · ${sel.length.toLocaleString()} chars` : ' · none'))),
       h('label', { class: 'check' }, cbDoc, h('span', {}, this.app.active ? 'this ' + (MODE_LABEL[this.app.active.mode] || 'file').toLowerCase() : 'no file open')));
     const isCode = ['code', 'text'].includes(this.app.active?.mode) && this.app.active?.mode === 'code';
-    const actions = h('div', { class: 'ai-actions' }, (isCode ? CODE_ACTIONS : WRITE_ACTIONS).map(([label, prompt]) =>
+    const actions = h('div', { class: 'ai-actions' }, (this.app.active?.mode === 'log' ? LOG_ACTIONS : isCode ? CODE_ACTIONS : WRITE_ACTIONS).map(([label, prompt]) =>
       h('button', { class: 'chip', onclick: () => this.ask(prompt, { label }) }, label)),
       h('button', { class: 'chip', onclick: async () => { const lang = await promptDialog('Translate', 'Into which language?', 'Spanish'); if (lang) this.ask(`Translate this into ${lang}. Return only the translation.`, { label: 'Translate → ' + lang }); } }, 'Translate…'));
     this.log = h('div', { class: 'ai-log' });

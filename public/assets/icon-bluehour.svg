@@ -7,9 +7,23 @@
   </defs>
   <path d="M12 3h40l9 9v40l-9 9H12l-9-9V12z" fill="#0f1320"/>
   <path d="M12.3 3.75h39.4l8.55 8.55v39.4l-8.55 8.55H12.3l-8.55-8.55V12.3z" fill="none" stroke="url(#g)" stroke-opacity=".6" stroke-width="1.5" stroke-linejoin="miter"/>
-  <path d="M19 14h17l9 9v28H19z" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="miter"/>
-  <path d="M36 14v9h9" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="miter"/>
-  <path d="M23.5 29.5l4.5 3.5-4.5 3.5" fill="none" stroke="#eceef5" stroke-width="2.6" stroke-linecap="square" stroke-linejoin="miter"/>
-  <path d="M31.5 36.5h6.5M24.5 43h8.5" stroke="#eceef5" stroke-width="2.6" stroke-linecap="square"/>
-  <rect x="36.5" y="40" width="4.5" height="6" fill="#4fd8eb"/>
+  <g transform="translate(32 32) scale(0.8409) translate(-32.000 -34.267)">
+    <g transform="rotate(-27 32 56) translate(22 18)">
+      <path d="M0 0h14l6 6v22H0z" fill="#6f5839" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+      <path d="M14 0v6h6" fill="none" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+    </g>
+    <g transform="rotate(-9 32 56) translate(22 18)">
+      <path d="M0 0h14l6 6v22H0z" fill="#ab8348" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+      <path d="M14 0v6h6" fill="none" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+    </g>
+    <g transform="rotate(9 32 56) translate(22 18)">
+      <path d="M0 0h14l6 6v22H0z" fill="#e36bd0" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+      <path d="M14 0v6h6" fill="none" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+    </g>
+    <g transform="rotate(27 32 56) translate(22 18)">
+      <path d="M0 0h14l6 6v22H0z" fill="#eceef5" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+      <path d="M14 0v6h6" fill="none" stroke="#0f1320" stroke-width="2.2" stroke-linejoin="miter"/>
+      <rect x="11" y="18" width="4" height="5" fill="#ae55a4"/>
+    </g>
+  </g>
 </svg>

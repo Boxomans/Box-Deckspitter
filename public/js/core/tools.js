@@ -39,6 +39,8 @@ export const TOOLS = [
     editor: () => import('../editors/klep.js').then((m) => m.KlepEditor), home: { icon: 'magnet', sub: 'grab videos from a link' } },
   { mode: 'convert', name: 'BoxConvert', icon: 'repeat', rename: true, tab: true, kind: true, single: true,
     editor: () => import('../editors/convert.js').then((m) => m.ConvertEditor), home: { icon: 'repeat', sub: 'any file → another format' } },
+  { mode: 'mend', name: 'BoxMend', icon: 'mend', rename: true, tab: true, kind: true, single: true,
+    editor: () => import('../editors/mend.js').then((m) => m.MendEditor), toolbox: 'repair broken videos · see what’s wrong' },
   { name: 'BoxSpaces', home: { icon: 'spaces', sub: 'open a folder, IDE-style', open: (app) => app.openSpace() } },
   { mode: 'storage', name: 'StoragePeek', icon: 'layers', rename: true, tab: true, kind: true, single: true,
     editor: () => import('../editors/storage.js').then((m) => m.StorageEditor), home: { icon: 'layers', sub: 'what’s eating your drives' } },

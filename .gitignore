@@ -10,6 +10,7 @@ image-dump/
 media-dump/
 doc-dump/
 audio-dump/
+mend-dump/
 
 # Machine-specific shortcuts and tools
 *.lnk

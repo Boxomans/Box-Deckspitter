@@ -9,6 +9,7 @@ import {
 } from '../core/ui.js';
 import { iconForName } from '../core/filetypes.js';
 import { pickOpen } from '../core/files.js';
+import { watchFolders, redrawKeepingPlace } from '../core/watch.js';
 
 export class DumpsPart {
   /**
@@ -33,6 +34,8 @@ export class DumpsPart {
       return;
     }
     if (this.panel !== panel) return;
+    // files added, removed or renamed anywhere in the dump (by anything) show up by themselves
+    watchFolders('dumppanel', [`dump:${kind}`], () => redrawKeepingPlace(this.sidepanel, () => this.renderDumpPanel(kind)), () => this.panel === panel);
     const p = clear(this.sidepanel);
     const list = h('div', { class: 'file-list dump-list' });
     const body = h('div', { class: 'panel-body' }, list);
