@@ -150,7 +150,8 @@ also copy the image to the clipboard or send it to the media dump.
 `doc-dump/` folders. Click a picture to insert it, or click a document (PDF, Word, spreadsheet, text…) to open it in a new tab. Right-click copies:
 a picture goes to the clipboard as an image, and a document as a file you can paste into Explorer or Discord.
 Shift+right-click shows every option. Drag items into the page, or out of the app as real files. Drop or paste
-files in to keep them, and use "Save this doc here" to put the open document in the doc dump as a PDF.
+files in to keep them, and use "To dump" at the end of the toolbar to put the open document in the doc dump as a PDF
+(it asks what to call it first).
 
 **PDF** View, highlight, draw, add text, edit existing text, add shapes, arrows, whiteout, images and
 signatures. Fill form fields. Rotate, reorder (drag thumbnails), insert, duplicate, delete and extract

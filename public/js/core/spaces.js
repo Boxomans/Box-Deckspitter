@@ -108,7 +108,8 @@ export class Spaces {
           h('button', { class: 'btn', onclick: () => this.createSpace() }, icon('folder-plus', 'sm'), 'New folder…')),
         recent.length ? h('div', { class: 'menu-heading' }, 'recent spaces') : null,
         ...recent.map((r) => {
-          const row = h('button', { class: 'file-row', title: r, onclick: async () => { await this.open(r); this.render(host); } }, h('span', { class: 'fr-icon' }, icon('folder', 'sm')), h('span', { class: 'fr-name' }, basename(r)), h('span', { class: 'fr-meta' }, dirname(r).slice(-24)),
+          // the folder name always shows in full; the parent path gives way, trimmed from the left so its nearest folders stay visible
+          const row = h('button', { class: 'file-row space-recent', title: r, onclick: async () => { await this.open(r); this.render(host); } }, h('span', { class: 'fr-icon' }, icon('folder', 'sm')), h('span', { class: 'fr-name' }, basename(r)), h('span', { class: 'fr-meta' }, '‎' + dirname(r) + '‎'),
             h('span', { class: 'fr-x', role: 'button', 'data-tip': 'Remove from recent (the folder itself stays)', onclick: (e) => { e.stopPropagation(); this.forgetRecent(r, host); } }, icon('x', 'sm')));
           row.addEventListener('contextmenu', (e) => contextMenu(e, [
             { label: 'Open', icon: 'folder-open', action: async () => { await this.open(r); this.render(host); } },

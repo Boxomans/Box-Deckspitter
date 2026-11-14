@@ -277,6 +277,17 @@ export async function promptDialog(title, label, value = '', { placeholder = '',
   return res == null ? null : String(res);
 }
 
+/**
+ * Ask what to call a file before it's saved into a dump. Starts with the suggested name (name part selected);
+ * returns the chosen name with the extension added back if it was left off, or null when cancelled.
+ */
+export async function dumpNameDialog(suggested, where) {
+  const ext = (suggested.match(/\.[^.]+$/) || [''])[0];
+  const name = ((await promptDialog(`Save to the ${where}`, 'File name', suggested, { selectBase: true })) || '').trim();
+  if (!name) return null;
+  return ext && !name.toLowerCase().endsWith(ext.toLowerCase()) ? name + ext : name;
+}
+
 /** choices: [{label, value, primary, danger}] */
 export function choiceDialog(title, message, choices) {
   return modal({ title, body: message, buttons: choices.map((c) => ({ ...c, ghost: !c.primary && !c.danger })) });

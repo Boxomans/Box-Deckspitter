@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.1.12",
+    "notes": [
+      "PDF editor: click any text on the page to edit it in place, the way you'd edit a normal document, with the cursor where you clicked. Dragging still selects text to copy, and double-click still selects a word. This replaces the separate Edit existing text tool.",
+      "PDF editor: clicking the page with the Text tool now opens a text box you can type in, instead of dropping straight back to Select.",
+      "To dump asks what to call the file before saving it, in the image, paint, PDF and document editors. The PDF and document editors now have a To dump button at the end of the toolbar, like the image editors, in place of Save this doc here in the doc dump.",
+      "BoxSpaces: recent spaces always show the whole folder name; the path beside it shortens instead."
+    ]
+  },
+  {
     "version": "1.1.11",
     "date": "2026-10-27",
     "notes": [

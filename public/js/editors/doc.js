@@ -106,7 +106,7 @@ export class DocEditor extends BaseEditor {
     this.dumps = new DumpDock({
       app: this.app,
       onInsert: (url) => this.insertImage(url),
-      onSaveDoc: async () => ({ name: (stripExt(this.tab.title) || 'document') + '.pdf', bytes: await toBytes(await api.printPdf(this.standaloneHtml({ forPrint: true }))) }),
+      onSaveDoc: () => ({ name: (stripExt(this.tab.title) || 'document') + '.pdf', bytes: async () => toBytes(await api.printPdf(this.standaloneHtml({ forPrint: true }))) }),
     });
     this.dump = this.dumps.image;
     this.root = h('div', { class: 'doc-root' }, this.main, this.dumps.el);
@@ -667,6 +667,8 @@ export class DocEditor extends BaseEditor {
       btn('clear-format', 'Clear formatting', () => this.clearFormatting(), 'Ctrl+\\'),
       btn('search', 'Find and replace', () => this.find(true), 'Ctrl+H'),
       btn('sidebar', 'Document outline', () => this.toggleOutline()),
+      h('div', { class: 'grow' }),
+      tbButton('file-pdf', 'Save to the doc dump as a PDF', () => this.dumps.doc.saveDoc(), { text: 'To dump' }),
     );
     return tb;
   }

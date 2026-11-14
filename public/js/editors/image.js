@@ -4,7 +4,7 @@ import { BaseEditor } from './base.js';
 import { h, clear, clamp, vendor, stripExt, extOf, blobToDataURL } from '../core/dom.js';
 import { PAINT_EXT } from '../core/filetypes.js';
 import { icon } from '../core/icons.js';
-import { tbButton, tbSep, tbSelect, showMenu, modal, toast, errorToast } from '../core/ui.js';
+import { tbButton, tbSep, tbSelect, showMenu, modal, toast, errorToast, dumpNameDialog } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { OUT_FORMATS, outKind, defaultOut, formatSelect, warnFormat, imageSettings, encodeCanvas, copyCanvas, readMeta, stripMeta } from './image-out.js';
 
@@ -263,10 +263,12 @@ export class ImageEditor extends BaseEditor {
   }
 
   async toDump() {
+    const name = await dumpNameDialog((stripExt(this.tab.title) || 'image') + '.png', 'media dump');
+    if (!name) return;
     const blob = await new Promise((r) => this.canvas.toBlob(r, 'image/png'));
     try {
-      await api.dumpAdd(stripExt(this.tab.title) + '.png', new Uint8Array(await blob.arrayBuffer()));
-      toast('Saved to the media dump', { type: 'ok' });
+      const r = await api.dumpAdd(name, new Uint8Array(await blob.arrayBuffer()));
+      toast(`Saved ${r.name} to the media dump`, { type: 'ok' });
     } catch (e) { errorToast(e); }
   }
 

@@ -6,7 +6,7 @@
 import { BaseEditor } from './base.js';
 import { h, clear, uid, clamp, stripExt, blobToDataURL, basename } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { tbButton, tbSep, toast, errorToast, modal, promptDialog, showMenu, colorPopover, hoverKeys, renameInline, contextMenu } from '../core/ui.js';
+import { tbButton, tbSep, toast, errorToast, modal, promptDialog, dumpNameDialog, showMenu, colorPopover, hoverKeys, renameInline, contextMenu } from '../core/ui.js';
 import { encodeGif, decodeGif } from '../core/gif.js';
 import { OUT_FORMATS, outKind, defaultOut, formatSelect, formatNote, warnFormat, imageSettings, encodeCanvas, copyCanvas, readMeta } from './image-out.js';
 import { api } from '../core/api.js';
@@ -1858,10 +1858,11 @@ export class PaintEditor extends BaseEditor {
   }
 
   async exportToDump() {
+    const ext = outKind(this.out.ext) || 'png';
+    const name = await dumpNameDialog(`${stripExt(this.tab.title) || 'image'}.${ext}`, 'media dump');
+    if (!name) return;
     try {
-      const ext = outKind(this.out.ext) || 'png';
       const bytes = await this.serialize(ext);
-      const name = `${stripExt(this.tab.title) || 'image'}.${ext}`;
       const r = await api.dumpAdd(name, bytes, 'image');
       toast(`Saved ${r.name} to the media dump`, { type: 'ok' });
     } catch (e) { errorToast(e, 'Export failed'); }

@@ -1159,6 +1159,8 @@ body.rail-grabbing, body.rail-grabbing * { cursor: grabbing !important; user-sel
 .file-row .fr-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-row .fr-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); }
 .file-row.muted { opacity: 0.55; }
+.file-row.space-recent .fr-name { flex: 0 0 auto; max-width: 75%; }
+.file-row.space-recent .fr-meta { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .file-row .fr-x { display: inline-flex; padding: 2px; border-radius: 4px; color: var(--text-3); opacity: 0; }
 .file-row:hover .fr-x { opacity: 1; }
 .file-row .fr-x:hover { color: var(--text); background: var(--bg-4, var(--bg-2)); }

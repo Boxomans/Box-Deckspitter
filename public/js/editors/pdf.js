@@ -20,7 +20,6 @@ const ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5
 const TOOLS = [
   ['select', 'pointer', 'Select, move & resize', 'V'],
   ['text', 'type', 'Add text', 'T'],
-  ['edittext', 'edit-text', 'Edit existing text', 'E'],
   ['draw', 'pen', 'Draw', 'D'],
   ['highlight', 'highlighter', 'Highlight', 'H'],
   ['rect', 'square', 'Rectangle', 'R'],
@@ -220,7 +219,7 @@ export class PdfEditor extends BaseEditor {
     this.dumps = new DumpDock({
       app: this.app,
       onInsert: (url) => { if (!this.canEditMarks) this.setPdfMode('edit'); this.placeImage(url); },
-      onSaveDoc: async () => ({ name: (stripExt(this.tab.title) || 'document') + '.pdf', bytes: await toBytes(await this.serialize('pdf')) }),
+      onSaveDoc: () => ({ name: (stripExt(this.tab.title) || 'document') + '.pdf', bytes: async () => toBytes(await this.serialize('pdf')) }),
     });
     this.dump = this.dumps.image;
     this.root = h('div', { class: `pdf-root pdf-mode-${this.pdfMode}`, tabindex: '-1' }, this.main, this.dumps.el);
@@ -824,6 +823,17 @@ export class PdfEditor extends BaseEditor {
         e.preventDefault();
         this.selectAnnot(id);
         this.startMove(el, e, id);
+        // a line of the PDF's text that was already edited: clicking it (without dragging) goes straight back to typing
+        const f = this.findAnnot(id);
+        if (f?.a.type === 'text' && f.a.cover) {
+          const sx = e.clientX; const sy = e.clientY;
+          const up = (ev) => {
+            window.removeEventListener('pointerup', up, true);
+            if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 4) return;
+            setTimeout(() => { this.editText(id); this.placeCaret(id, { x: ev.clientX, y: ev.clientY }); }, 0);
+          };
+          window.addEventListener('pointerup', up, true);
+        }
         return;
       }
       if (e.target.closest('.pdf-field')) return;
@@ -833,8 +843,17 @@ export class PdfEditor extends BaseEditor {
     el.addEventListener('dblclick', (e) => {
       const hit = e.target.closest('[data-aid]');
       if (!hit || !this.canEditMarks) return;
+      if (this.editingId === hit.dataset.aid) return; // already typing in it: let the double-click select a word
       const f = this.findAnnot(hit.dataset.aid);
       if (f?.a.type === 'text') this.editText(f.a.id);
+    });
+    // click a line of the PDF's own text to edit it in place, cursor where you clicked (a drag selects text to copy instead)
+    el.addEventListener('pointerdown', (e) => { this.downAt = { x: e.clientX, y: e.clientY }; }, true);
+    el.addEventListener('click', (e) => {
+      if (this.tool !== 'select' || !this.canEditMarks || e.button !== 0) return;
+      if (this.downAt && Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y) > 4) return;
+      if (e.target.closest('[data-aid], [data-handle], .pdf-field')) return;
+      this.replaceTextAt(el, this.pointOn(el, e), { quiet: true, caretAt: { x: e.clientX, y: e.clientY } });
     });
     el.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes(DUMP_MIME) || e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.stopPropagation(); } });
     el.addEventListener('drop', async (e) => {
@@ -851,6 +870,10 @@ export class PdfEditor extends BaseEditor {
 
   onCaptureDown(el, e) {
     if (e.button !== 0) return;
+    this.pressing = true;
+    const release = () => { this.pressing = false; window.removeEventListener('pointerup', release, true); window.removeEventListener('pointercancel', release, true); };
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
     const pm = el._pm;
     const pt = this.pointOn(el, e);
     const t = this.tool;
@@ -1066,7 +1089,18 @@ export class PdfEditor extends BaseEditor {
     const frame = { x: pt.u, y: pt.v - size * 0.7, w: size * 4, h: size * 1.2 + 4 };
     const raw = boxDispToRaw(frame, pm.w, pm.h, r);
     const a = this.addAnnot(pm, { type: 'text', ...raw, rot: r, text: '', font: this.props.font, size, color: this.props.color, bold: this.props.bold, italic: this.props.italic });
-    this.editText(a.id, true);
+    this.afterRelease(() => this.editText(a.id, true));
+  }
+
+  /**
+   * Run fn once the mouse button that started this click is let go. Focusing a text box during the press doesn't stick:
+   * the rest of the click moves focus away again, and an empty new box that loses focus is thrown away.
+   */
+  afterRelease(fn) {
+    if (!this.pressing) { setTimeout(fn, 0); return; }
+    const go = () => { window.removeEventListener('pointerup', go, true); window.removeEventListener('pointercancel', go, true); setTimeout(fn, 0); };
+    window.addEventListener('pointerup', go, true);
+    window.addEventListener('pointercancel', go, true);
   }
 
   editText(id, isNew = false, selectAll = false) {
@@ -1176,12 +1210,12 @@ export class PdfEditor extends BaseEditor {
     el._hoverItem = it;
   }
 
-  async replaceTextAt(el, pt) {
+  async replaceTextAt(el, pt, { quiet = false, caretAt = null } = {}) {
     const pm = el._pm;
     const items = await this.textItems(pm);
     const [x, y] = pt.raw;
     const it = items.find((i) => x >= i.x - 1 && x <= i.x + i.w + 1 && y >= i.y - 1 && y <= i.y + i.h + 1);
-    if (!it) { toast('Click directly on a line of text to edit it.', { timeout: 2000 }); return; }
+    if (!it) { if (!quiet) toast('Click directly on a line of text to edit it.', { timeout: 2000 }); return; }
     el._hover.hidden = true;
     const name = it.fontName.replace(/^[A-Z]{6}\+/, '');
     const sys = PDF_FONTS.find((f) => !f.std && name.toLowerCase().replace(/[^a-z]/g, '').startsWith(f.id.toLowerCase().replace(/[^a-z]/g, '')));
@@ -1198,7 +1232,21 @@ export class PdfEditor extends BaseEditor {
       cover: { x: it.x - 1, y: it.y - 1, w: it.w + 2, h: it.h + 2 }, bg: this.props.whiteout,
     }, { keepTool: true });
     this.selectAnnot(a.id);
-    this.editText(a.id, true, true);
+    this.afterRelease(() => {
+      this.editText(a.id, true, !caretAt);
+      if (caretAt) this.placeCaret(a.id, caretAt);
+    });
+  }
+
+  /** Put the text cursor where the page was clicked, inside a text box being edited. */
+  placeCaret(id, { x, y }) {
+    const f = this.findAnnot(id);
+    const t = f && this.pageEls.get(f.pm.id)?._annots.querySelector(`[data-aid="${id}"]`)?._text;
+    const r = t && document.caretRangeFromPoint?.(x, y);
+    if (!r || !t.contains(r.startContainer)) return;
+    r.collapse(true);
+    getSelection().removeAllRanges();
+    getSelection().addRange(r);
   }
 
   // =================================================================== images & signatures
@@ -1427,6 +1475,8 @@ export class PdfEditor extends BaseEditor {
       tbSep(),
       tbButton('search', 'Find text', () => this.find(), { key: 'Ctrl+F' }),
       tbButton('sidebar', 'Page thumbnails', () => this.toggleSide()),
+      tbSep(),
+      tbButton('file-pdf', 'Save to the doc dump as a PDF', () => this.dumps.doc.saveDoc(), { text: 'To dump' }),
     );
     this.renderProps();
     return tb;
@@ -1484,7 +1534,7 @@ export class PdfEditor extends BaseEditor {
     } else if (kind === 'image' || kind === 'signature-place') {
       this.propsEl.append(h('span', { class: 'tb-label' }, kind === 'image' && f ? 'drag the corner to resize · Del to remove' : 'click the page to place'));
     } else if (kind === 'select') {
-      this.propsEl.append(h('span', { class: 'tb-label' }, this.fields.length ? 'select text to copy · click fields to fill' : 'select text to copy · click marks to edit'));
+      this.propsEl.append(h('span', { class: 'tb-label' }, this.fields.length ? 'click text to edit · click fields to fill' : 'click text to edit · drag to select and copy'));
     }
     if (f) this.propsEl.append(tbButton('trash', 'Delete (Del)', () => this.deleteSelected()));
   }

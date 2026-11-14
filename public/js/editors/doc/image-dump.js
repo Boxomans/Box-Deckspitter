@@ -6,7 +6,7 @@
 import { h, clear, formatBytes, timeAgo, blobToDataURL, basename, extOf, vendor, fileManager } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
 import { api } from '../../core/api.js';
-import { contextMenu, toast, errorToast, promptDialog, hoverKeys, renameInline, PATHS_MIME, draggedPaths } from '../../core/ui.js';
+import { contextMenu, toast, errorToast, promptDialog, dumpNameDialog, hoverKeys, renameInline, PATHS_MIME, draggedPaths } from '../../core/ui.js';
 import { pickOpen } from '../../core/files.js';
 
 export const DUMP_MIME = 'text/bds-dump';
@@ -24,7 +24,7 @@ const KINDS = {
     accept: /\.(pdf|docx?|odt|rtf|txt|md|xlsx?|ods|csv|pptx?|odp|html?|eml)$/i,
     filters: [{ name: 'Documents', extensions: ['pdf', 'docx', 'doc', 'odt', 'rtf', 'txt', 'md', 'xlsx', 'xls', 'ods', 'csv', 'pptx', 'ppt', 'odp', 'html', 'htm', 'eml'] }],
     hint: 'click to open in a new tab · right-click to copy the file · shift+right-click for more · drag out of the app',
-    emptyHint: 'drop PDFs, Word docs, spreadsheets and other documents here, use “Add documents”, or save this document into the dump.',
+    emptyHint: 'drop PDFs, Word docs, spreadsheets and other documents here, use “Add documents”, or “To dump” in the toolbar to save this document here as a PDF.',
   },
 };
 
@@ -61,7 +61,7 @@ export class ImageDump {
    * @param {object} o
    * @param {'image'|'doc'} [o.kind]
    * @param {(url: string, name: string) => void} [o.onInsert]  media dump: insert into the page
-   * @param {() => Promise<{name: string, bytes: Uint8Array}>} [o.onSaveDoc]  doc dump: current document as a PDF
+   * @param {() => {name: string, bytes: () => Promise<Uint8Array>}} [o.onSaveDoc]  doc dump: current document as a PDF (suggested name; bytes made only once a name is chosen)
    */
   constructor({ app, kind = 'image', onInsert, onSaveDoc, dock }) {
     this.app = app;
@@ -98,7 +98,6 @@ export class ImageDump {
         h('div', { class: 'grow' }),
         h('button', { class: 'icon-btn', 'data-tip': 'New folder', onclick: () => this.newFolder() }, icon('folder-plus', 'sm')),
         slider,
-        kind === 'doc' && onSaveDoc ? h('button', { class: 'btn sm', 'data-tip': 'Save the open document into the doc dump as a PDF', onclick: () => this.saveDoc() }, icon('file-pdf', 'sm'), 'Save this doc here') : null,
         h('button', { class: 'btn sm', onclick: () => this.addFromDisk() }, icon('plus', 'sm'), kind === 'doc' ? 'Add documents' : 'Add images'),
         h('button', { class: 'icon-btn', 'data-tip': 'Refresh', onclick: () => this.refresh(true) }, icon('refresh', 'sm')),
         h('button', { class: 'icon-btn', 'data-tip': `Open the folder in ${fileManager()}`, onclick: () => api.dumpReveal(kind, null, this.sub || null) }, icon('external', 'sm')),
@@ -418,10 +417,12 @@ export class ImageDump {
   }
 
   async saveDoc() {
+    const { name: suggested, bytes } = this.onSaveDoc();
+    const name = await dumpNameDialog(suggested, 'doc dump');
+    if (!name) return;
     const t = toast('Making PDF…', { timeout: 0 });
     try {
-      const { name, bytes } = await this.onSaveDoc();
-      const r = await api.dumpAdd(name, bytes, 'doc');
+      const r = await api.dumpAdd(name, await bytes(), 'doc');
       toast(`Saved ${r.name} to the doc dump`, { type: 'ok' });
       this.refresh(true);
     } catch (e) { errorToast(e, 'Could not save PDF'); } finally { t(); }
