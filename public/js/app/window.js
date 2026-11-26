@@ -109,8 +109,12 @@ export class WindowPart {
       if (depth <= 0) { overlay?.remove(); overlay = null; depth = 0; }
     });
     window.addEventListener('dragover', (e) => { if (isFiles(e)) e.preventDefault(); });
+    // the overlay goes the moment anything is dropped (or the drag is called off), before any editor handles the drop:
+    // an editor that claims a drop and stops it spreading must not leave the overlay stuck on screen
+    const hideOverlay = () => { overlay?.remove(); overlay = null; depth = 0; };
+    window.addEventListener('drop', hideOverlay, true);
+    window.addEventListener('dragend', hideOverlay, true);
     window.addEventListener('drop', async (e) => {
-      overlay?.remove(); overlay = null; depth = 0;
       if (!isFiles(e)) return;
       // editors can claim drops (e.g. images into a document)
       if (e.defaultPrevented) return;
