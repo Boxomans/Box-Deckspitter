@@ -1,5 +1,11 @@
 [
   {
+    "version": "1.1.13",
+    "notes": [
+      "PDF editor: drag pictures and PDFs in from the Files panel, the media and doc dumps, or outside the app. In a PDF made with PDF from images, dropping them on a page adds them as new pages after it. On the page thumbnails, in any PDF, they go in before or after the page you drop on, or at the end below the last one. Several files keep the order you dragged them in. A picture dropped on a page of any other PDF is still placed on that page."
+    ]
+  },
+  {
     "version": "1.1.12",
     "notes": [
       "PDF editor: click any text on the page to edit it in place, the way you'd edit a normal document, with the cursor where you clicked. Dragging still selects text to copy, and double-click still selects a word. This replaces the separate Edit existing text tool.",

@@ -3,7 +3,7 @@
 import { BaseEditor } from './base.js';
 import { h, $$, clear, uid, clamp, debounce, vendor, blobToDataURL, stripExt, basename, extOf, toBytes } from '../core/dom.js';
 import { icon } from '../core/icons.js';
-import { tbButton, tbSep, tbSelect, showMenu, contextMenu, modal, promptDialog, toast, errorToast, colorPopover, FindBar, buildRegex, confirmDialog, choiceDialog } from '../core/ui.js';
+import { tbButton, tbSep, tbSelect, showMenu, contextMenu, modal, promptDialog, toast, errorToast, colorPopover, FindBar, buildRegex, confirmDialog, choiceDialog, PATHS_MIME, draggedPaths } from '../core/ui.js';
 import { api } from '../core/api.js';
 import { pickOpen } from '../core/files.js';
 import {
@@ -30,7 +30,10 @@ const TOOLS = [
   ['image', 'image-plus', 'Image', 'I'],
   ['signature', 'signature', 'Signature', 'S'],
 ];
-const TOOL_KEYS = Object.fromEntries(TOOLS.map(([id, , , k]) => [k.toLowerCase(), id]));
+// files that can be dropped in as pages, and whether a drag carries files at all
+const PAGE_FILE = /\.(pdf|png|jpe?g|webp|gif|bmp)$/i;
+const carriesFiles = (dt) => dt.types.includes(PATHS_MIME) || dt.types.includes('Files') || dt.types.includes(DUMP_MIME);
+const TOOL_KEYS =Object.fromEntries(TOOLS.map(([id, , , k]) => [k.toLowerCase(), id]));
 const BOX_TYPES = new Set(['rect', 'ellipse', 'highlight', 'whiteout', 'image', 'text']);
 
 export class PdfEditor extends BaseEditor {
@@ -58,6 +61,7 @@ export class PdfEditor extends BaseEditor {
     this.findHits = [];
     this.findIndex = -1;
 
+    this.fromImages = !!opts.images?.length; // made with "PDF from images": dropped pictures become pages
     this.buildDom();
     if (opts.images?.length) bytes = await this.pdfFromImagePaths(opts.images);
     else if (!bytes || !bytes.length) bytes = await this.blankPdf();
@@ -211,6 +215,14 @@ export class PdfEditor extends BaseEditor {
 
   buildDom() {
     this.thumbs = h('div', { class: 'pdf-thumbs' });
+    // files dropped below the last page thumbnail go on the end
+    this.thumbs.addEventListener('dragover', (e) => { if (carriesFiles(e.dataTransfer)) e.preventDefault(); });
+    this.thumbs.addEventListener('drop', (e) => {
+      const files = this.droppedFiles(e);
+      if (!files.length) return;
+      e.preventDefault();
+      this.insertPages(files, this.pages.length);
+    });
     this.side = h('div', { class: 'pdf-side', hidden: this.app.settings.pdfThumbs === false }, h('div', { class: 'panel-head' }, 'Pages', h('div', { class: 'grow' }),
       h('button', { class: 'icon-btn', 'data-tip': 'Insert pages from file', onclick: () => this.insertFromFiles() }, icon('plus', 'sm'))), this.thumbs);
     this.pagesEl = h('div', { class: 'pdf-pages' });
@@ -382,15 +394,32 @@ export class PdfEditor extends BaseEditor {
         contextMenu(e, this.pageMenu());
       });
       el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/bds-page', pm.id); e.dataTransfer.effectAllowed = 'move'; });
-      el.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/bds-page')) { e.preventDefault(); const r = el.getBoundingClientRect(); el.classList.toggle('drop-before', e.clientY < r.top + r.height / 2); el.classList.toggle('drop-after', e.clientY >= r.top + r.height / 2); } });
+      el.addEventListener('dragover', (e) => {
+        if (!e.dataTransfer.types.includes('text/bds-page') && !carriesFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const r = el.getBoundingClientRect();
+        el.classList.toggle('drop-before', e.clientY < r.top + r.height / 2);
+        el.classList.toggle('drop-after', e.clientY >= r.top + r.height / 2);
+      });
       el.addEventListener('dragleave', () => el.classList.remove('drop-before', 'drop-after'));
       el.addEventListener('drop', (e) => {
         const id = e.dataTransfer.getData('text/bds-page');
         const after = el.classList.contains('drop-after');
         el.classList.remove('drop-before', 'drop-after');
-        if (!id || id === pm.id) return;
+        if (id) {
+          if (id === pm.id) return;
+          e.preventDefault();
+          e.stopPropagation();
+          this.movePage(id, pm.id, after);
+          return;
+        }
+        // files from the Files panel, a dump or outside the app: new pages before or after this one
+        const files = this.droppedFiles(e);
+        if (!files.length) return;
         e.preventDefault();
-        this.movePage(id, pm.id, after);
+        e.stopPropagation();
+        this.insertPages(files, this.pages.indexOf(pm) + (after ? 1 : 0));
       });
       this.thumbs.append(el);
       this.thumbIo.observe(el);
@@ -515,18 +544,40 @@ export class PdfEditor extends BaseEditor {
     const paths = await pickOpen({ multi: true, title: 'Insert pages from…', filters: [{ name: 'PDFs & images', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }] });
     if (!paths) return;
     const at = (this.targetPages().pop() ? this.pages.indexOf(this.targetPages().pop()) : this.pages.length - 1) + 1;
+    this.insertPages(paths.map((p) => ({ name: basename(p), path: p })), at);
+  }
+
+  /**
+   * Files dropped on the editor that can become pages: from the app's own panels (Files, the dumps — by path)
+   * or from outside the app. Read while the drop event is still live.
+   */
+  droppedFiles(e) {
+    const paths = draggedPaths(e).filter((p) => PAGE_FILE.test(p));
+    if (paths.length) return paths.map((p) => ({ name: basename(p), path: p }));
+    return [...e.dataTransfer.files].filter((f) => PAGE_FILE.test(f.name)).map((f) => ({ name: f.name, file: f }));
+  }
+
+  /** Insert PDFs (all their pages) and pictures (a page each) at page index `at`, in the order given. */
+  async insertPages(items, at) {
     const newPages = [];
+    const images = [];
+    const flushImages = async () => {
+      if (!images.length) return;
+      const src = await this.addSource(await this.pdfFromImageBytes(images.splice(0)), 'images');
+      newPages.push(...src.pageModels);
+    };
     try {
-      const images = [];
-      for (const p of paths) {
-        const { bytes } = await api.read(p);
-        if (extOf(p) === 'pdf') { const src = await this.addSource(bytes, basename(p)); newPages.push(...src.pageModels); }
-        else images.push({ bytes, name: basename(p) });
+      for (const it of items) {
+        const bytes = it.path ? (await api.read(it.path)).bytes : new Uint8Array(await it.file.arrayBuffer());
+        if (/\.pdf$/i.test(it.name)) { await flushImages(); const src = await this.addSource(bytes, it.name); newPages.push(...src.pageModels); }
+        else images.push({ bytes, name: it.name });
       }
-      if (images.length) { const src = await this.addSource(await this.pdfFromImageBytes(images), 'images'); newPages.push(...src.pageModels); }
+      await flushImages();
     } catch (e) { return errorToast(e, 'Could not insert'); }
+    if (!newPages.length) return;
     this.change(() => { this.pages.splice(at, 0, ...newPages); }, { relayout: true });
     toast(`Inserted ${newPages.length} page${newPages.length > 1 ? 's' : ''}`, { type: 'ok' });
+    setTimeout(() => this.scrollToPage(at), 50);
   }
 
   movePage(id, targetId, after) {
@@ -855,16 +906,29 @@ export class PdfEditor extends BaseEditor {
       if (e.target.closest('[data-aid], [data-handle], .pdf-field')) return;
       this.replaceTextAt(el, this.pointOn(el, e), { quiet: true, caretAt: { x: e.clientX, y: e.clientY } });
     });
-    el.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes(DUMP_MIME) || e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.stopPropagation(); } });
+    el.addEventListener('dragover', (e) => { if (carriesFiles(e.dataTransfer)) { e.preventDefault(); e.stopPropagation(); } });
     el.addEventListener('drop', async (e) => {
+      const dropped = this.droppedFiles(e);
+      const after = this.pages.indexOf(el._pm) + 1;
+      // "PDF from images" (or PDFs dropped anywhere): they become new pages after this one
+      if (dropped.length && (this.fromImages || dropped.every((f) => /\.pdf$/i.test(f.name)))) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.insertPages(dropped, after);
+        return;
+      }
+      // a picture dropped on a page of a normal PDF is placed on that page
       const url = e.dataTransfer.getData(DUMP_MIME);
-      const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith('image/'));
-      if (!url && !files.length) return;
+      const pic = dropped.find((f) => !/\.pdf$/i.test(f.name));
+      if (!url && !pic) return;
       e.preventDefault();
       e.stopPropagation();
       const pt = this.pointOn(el, e);
-      const dataUrl = url ? await blobToDataURL(await (await fetch(url)).blob()) : await blobToDataURL(files[0]);
-      this.placeImage(dataUrl, { el, pt });
+      try {
+        const blob = url ? await (await fetch(url)).blob()
+          : pic.file || new Blob([(await api.read(pic.path)).bytes], { type: mimeFor(pic.name) });
+        this.placeImage(await blobToDataURL(blob), { el, pt });
+      } catch (err) { errorToast(err, 'Could not add the picture'); }
     });
   }
 
